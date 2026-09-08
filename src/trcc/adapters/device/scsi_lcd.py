@@ -118,7 +118,7 @@ class ScsiLcd(BaseDevice[ScsiTransport], wire=Wire.SCSI):
         # Geometry comes from the FBL byte via get_profile — a device that
         # reports e.g. FBL=102 surfaces its resolution from the profile,
         # not the registry's static native_resolution. SCSI uses PM=FBL.
-        self._profile = get_profile(fbl, fbl)
+        self._profile = get_profile(fbl, fbl, 0)
         return HandshakeResult(
             resolution=self._profile.resolution,
             model_id=fbl,

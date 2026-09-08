@@ -1769,7 +1769,7 @@ class Renderer(ABC):
         if plan.post_rotate:
             canvas = self.rotate(canvas, plan.post_rotate)
         else:
-            angle = wire_angle(profile, orientation, plan.is_portrait_content)
+            angle = wire_angle(profile, orientation, plan.is_portrait_content, profile.sub)
             if angle % 360:
                 canvas = self.rotate(canvas, angle)
         return self.encode_payload(canvas, profile)

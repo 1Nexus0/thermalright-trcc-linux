@@ -430,7 +430,7 @@ class DisplayService:
         #    fix); a base-90 panel gets 0°/180° (unchanged).  A landscape-only
         #    theme at 90/270 returned early via ``post_rotate`` above.
         #  * Squares + non-rotate panels: user orientation only.
-        angle = wire_angle(resolved_profile, s.orientation, portrait)
+        angle = wire_angle(resolved_profile, s.orientation, portrait, resolved_profile.sub)
         if angle % 360:
             frame_log.debug("build_frame %s: wire rotate %d°", info.key, angle)
             surface = self._r.rotate(composite, angle)
@@ -836,7 +836,7 @@ class DisplayService:
         #169/#203 -- and no shape gate can see it.  It does not belong in a
         shape fix, so it is not here.
         """
-        angle = wire_angle(resolved, s.orientation, False)
+        angle = wire_angle(resolved, s.orientation, False, resolved.sub)
         log.debug("_orient_for_wire %s: orientation=%d → wire %d°",
                   info.key, s.orientation, angle)
         if angle % 360:
@@ -1554,7 +1554,7 @@ class DisplayService:
         first = info.key not in self._profile_fallbacks
         self._profile_fallbacks.add(info.key)
         if info.fbl is not None:
-            profile = get_profile(info.fbl)
+            profile = get_profile(info.fbl, 0, 0)
             if first:
                 log.info("_resolve_profile: %s has no handshake profile — "
                          "falling back to registry FBL %s (%dx%d)",

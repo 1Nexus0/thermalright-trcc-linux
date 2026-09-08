@@ -178,7 +178,7 @@ class LyLcd(BaseBulkDevice, wire=Wire.LY):
         # The C# varies the base by SUB in six families (its ``mySubMode``
         # arms); 1920x462 — this wire's panel — takes base 0 at SUB 2/3/4 and
         # base 180 everywhere else.
-        base = get_profile(fbl, self._pm)
+        base = get_profile(fbl, self._pm, self._sub)
         rotation = resolve_encode_rotation(
             base.resolution, base.jpeg, self._sub)
         log.info(

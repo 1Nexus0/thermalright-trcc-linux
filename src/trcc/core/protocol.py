@@ -553,7 +553,7 @@ def get_profile(fbl: int, pm: int = 0, sub: int = 0) -> DeviceProfile:
 def fbl_to_resolution(fbl: int, pm: int = 0) -> tuple[int, int]:
     """Map FBL byte (with optional PM disambiguator) to (width, height)."""
     log.info("fbl_to_resolution: fbl=%d pm=%d", fbl, pm)
-    return get_profile(fbl, pm).resolution
+    return get_profile(fbl, pm, 0).resolution
 
 
 def resolve_encode_base(profile: DeviceProfile, pm_byte: int) -> int:
@@ -575,7 +575,7 @@ def resolve_encode_base(profile: DeviceProfile, pm_byte: int) -> int:
     return 0
 
 
-def resolve_encode_angle(profile: DeviceProfile, orientation: int) -> int:
+def resolve_encode_angle(profile: DeviceProfile, orientation: int, sub: int = 0) -> int:
     """Wire rotation for a panel = its encode base ± the user orientation.
 
     ``send = (encode_base + (orientation if not invert else -orientation)) % 360``
@@ -624,7 +624,7 @@ def is_portrait_mounted(resolution: tuple[int, int], sub: int) -> bool:
 
 
 def wire_angle(
-    profile: DeviceProfile, orientation: int, portrait_content: bool,
+    profile: DeviceProfile, orientation: int, portrait_content: bool, sub: int = 0,
 ) -> int:
     """The single wire-frame rotation a device gets at a user *orientation*.
 
@@ -652,7 +652,7 @@ def wire_angle(
     (where content is never portrait, so it is a no-op in practice).
     """
     if profile.rotate:
-        angle = resolve_encode_angle(profile, orientation)
+        angle = resolve_encode_angle(profile, orientation, profile.sub)
         frame_log.debug("wire_angle: rotate panel %dx%d @ %d° -> %d° "
                         "(per-resolution encode base)",
                         profile.width, profile.height, orientation, angle)

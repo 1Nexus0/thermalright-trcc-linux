@@ -142,7 +142,7 @@ def bulk_profile(pm: int, sub: int, key: str = "?") -> tuple[int, DeviceProfile]
             "defaulting to FBL %d (480x480)", key, pm, sub, _BULK_BASE_FBL,
         )
         fbl = _BULK_BASE_FBL
-    base = get_profile(fbl, pm)
+    base = get_profile(fbl, pm, 0)
     # Resolve the device-only encode baseline now that PM is known — e.g. the
     # FW360 Ultra (PM=6) mounts 180° rotated and needs its wire frame
     # pre-rotated so it reads upright on the glass. (#137)

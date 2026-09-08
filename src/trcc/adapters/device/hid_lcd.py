@@ -229,7 +229,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
         volunteered no handshake is still identified by its registry row)."""
         log.debug("_base_profile: fbl=%s pm=%s", fbl, pm)
         if fbl is not None:
-            return get_profile(fbl, pm)
+            return get_profile(fbl, pm, 0)
         return DeviceProfile(*self.info.native_resolution)
 
     def _portrait_native(self, base: DeviceProfile) -> DeviceProfile:
@@ -420,7 +420,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
         # Sized from the identity at handshake, as the vendor does — a panel
         # answering 0x36 takes a 320x240 canvas, not the 320x320 default.
         self._f5_payload = _f5.payload_size(resp[0])
-        self._profile = get_profile(fbl, fbl)
+        self._profile = get_profile(fbl, fbl, 0)
         return HandshakeResult(
             resolution=self._profile.resolution,
             model_id=fbl,
