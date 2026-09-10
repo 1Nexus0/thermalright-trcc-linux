@@ -118,6 +118,27 @@ class LoadTheme(Command[ThemeResult]):
     # of reverting to the theme's bundled layout/background.
     reset_overrides: bool = True
 
+    def _loaded(
+        self, theme: Theme, path: str, *, ok: bool, message: str,
+    ) -> ThemeResult:
+        """One exit shape for every arm that has resolved a theme.
+
+        ``LoadTheme.execute`` returns from eight places — device not connected,
+        no renderer, a screencast region, a bundled video, the ordinary render,
+        and so on — and seven of them repeated the same three identity fields
+        by hand.  Repeating them is how one arm ends up missing ``theme_path``
+        and a UI shows a blank where the theme's name should be.
+
+        The eighth arm does NOT come through here on purpose: it reports a
+        theme that could not be resolved at all, so it has no name or path to
+        report.
+        """
+        log.debug("LoadTheme %s: -> ok=%s %r", self.key, ok, message)
+        return ThemeResult(
+            ok=ok, key=self.key, theme_name=theme.name,
+            theme_path=path, message=message,
+        )
+
     def execute(self, app: App) -> ThemeResult:
         log.info("LoadTheme: key=%s path=%s reset_overrides=%s",
                  self.key, self.path, self.reset_overrides)
@@ -331,15 +352,15 @@ class LoadTheme(Command[ThemeResult]):
 
         device = app.devices.get(self.key)
         if device is None or not device.is_connected:
-            return ThemeResult(
-                ok=True, key=self.key, theme_name=theme.name,
-                theme_path=theme_path_str,
+            return self._loaded(
+                theme, theme_path_str,
+                ok=True,
                 message=f"Theme '{theme.name}' saved (device not connected)",
             )
         if app._renderer is None:  # pyright: ignore[reportPrivateUsage]
-            return ThemeResult(
-                ok=True, key=self.key, theme_name=theme.name,
-                theme_path=theme_path_str,
+            return self._loaded(
+                theme, theme_path_str,
+                ok=True,
                 message=f"Theme '{theme.name}' saved (no Renderer attached)",
             )
 
@@ -353,11 +374,11 @@ class LoadTheme(Command[ThemeResult]):
             sc = app.dispatch(StartScreencast(
                 key=self.key, x=x, y=y, w=w, h=h, audio=audio,
             ))
-            return ThemeResult(
-                ok=sc.ok, key=self.key, theme_name=theme.name,
-                theme_path=theme_path_str,
-                message=(f"Theme '{theme.name}' loaded — {sc.message}"
-                         if sc.ok else f"Theme '{theme.name}': {sc.message}"),
+            return self._loaded(
+                theme, theme_path_str,
+                ok=sc.ok,
+                message=f"Theme '{theme.name}' loaded — {sc.message}"
+                         if sc.ok else f"Theme '{theme.name}': {sc.message}",
             )
 
         # Media-player-backed theme: resume the saved source URI via the same
@@ -384,16 +405,16 @@ class LoadTheme(Command[ThemeResult]):
             )
             play = app.dispatch(PlayVideo(key=self.key, path=video_path))
             if not play.ok:
-                return ThemeResult(
-                    ok=False, key=self.key, theme_name=theme.name,
-                    theme_path=theme_path_str,
-                    message=f"Theme '{theme.name}': {play.message}",
-                )
-            return ThemeResult(
-                ok=True, key=self.key, theme_name=theme.name,
-                theme_path=theme_path_str,
-                message=(f"Theme '{theme.name}' loaded — playing "
-                         f"{video_path.name} ({play.frame_count} frame(s))"),
+                return self._loaded(
+                theme, theme_path_str,
+                ok=False,
+                message=f"Theme '{theme.name}': {play.message}",
+            )
+            return self._loaded(
+                theme, theme_path_str,
+                ok=True,
+                message=f"Theme '{theme.name}' loaded — playing "
+                         f"{video_path.name} ({play.frame_count} frame(s))",
             )
 
         # Read live sensors so the first frame the device sees after a
@@ -428,9 +449,9 @@ class LoadTheme(Command[ThemeResult]):
             app.events.publish(ErrorOccurred(message=str(e), kind="render",
                                              key=self.key))
             _publish_if_disconnect(app, self.key, e)
-            return ThemeResult(
-                ok=False, key=self.key, theme_name=theme.name,
-                theme_path=theme_path_str,
+            return self._loaded(
+                theme, theme_path_str,
+                ok=False,
                 message=f"Render/send failed: {e}",
             )
 
@@ -454,12 +475,12 @@ class LoadTheme(Command[ThemeResult]):
                 "LoadTheme: %s rendered + sent - wire %dx%d %s (%d bytes) from %s",
                 theme.name, wire_w, wire_h, encoding, len(frame), theme_path_str,
             )
-        return ThemeResult(
-            ok=sent, key=self.key, theme_name=theme.name,
-            theme_path=theme_path_str,
-            message=(f"Theme '{theme.name}' loaded and sent ({len(frame)} bytes)"
-                     if sent else f"Theme '{theme.name}' rendered but send failed"),
-        )
+        return self._loaded(
+                theme, theme_path_str,
+                ok=sent,
+                message=f"Theme '{theme.name}' loaded and sent ({len(frame)} bytes)"
+                     if sent else f"Theme '{theme.name}' rendered but send failed",
+            )
 
 @dataclass(frozen=True, slots=True)
 class SaveTheme(Command[ThemeResult]):

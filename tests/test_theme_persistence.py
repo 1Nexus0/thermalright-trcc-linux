@@ -2373,3 +2373,40 @@ def test_list_masks_reports_which_masks_are_the_user_s_own(
         "gui panel needs and used to reach the store for"
     )
     assert all(m.name for m in result.masks)
+
+
+# ── Every arm that has a theme reports the theme ───────────────────────────
+
+
+def test_loadtheme_reports_its_theme_identity_from_one_place() -> None:
+    """`LoadTheme.execute` returns from eight arms; seven have a theme.
+
+    Each of those seven repeated `key`, `theme_name` and `theme_path` by hand,
+    which is exactly how one arm ends up missing `theme_path` and a UI shows a
+    blank where the theme's name belongs.  They go through `_loaded` now, and
+    this keeps it that way: a new arm that constructs `ThemeResult` inline is
+    re-opening the hole.
+
+    The ONE permitted direct construction is the arm where the theme could not
+    be resolved at all — it has no name or path to report.
+    """
+    import ast
+    import inspect
+
+    from trcc.core.commands import theme as theme_mod
+
+    tree = ast.parse(inspect.getsource(theme_mod.LoadTheme))
+    execute = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == "execute")
+    inline = [n for n in ast.walk(execute)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+              and n.func.id == "ThemeResult"]
+
+    assert len(inline) == 1, (
+        f"{len(inline)} inline ThemeResult(...) in LoadTheme.execute — every "
+        "arm that has resolved a theme must return self._loaded(...), so the "
+        "identity fields cannot be forgotten.  Only the theme-not-resolved "
+        "arm builds one directly.")
+    assert {k.arg for k in inline[0].keywords} == {"ok", "key", "message"}, (
+        "the one permitted direct construction is the arm with no theme; if "
+        "it now carries theme_name/theme_path it should use _loaded instead")
