@@ -43,6 +43,7 @@ class DeviceProfile:
     jpeg: bool = False           # JPEG encoding (vs RGB565)
     big_endian: bool = False     # RGB565 byte order (> vs <)
     rotate: bool = False         # Pre-rotate 90° CW for non-square portrait panels
+    sub: int = 0                 # SUB byte from handshake (0..7)
     # Widescreen "bili" panels (C# isBiliPingmu — 854×480, 1280×480, 1600×720,
     # 1920×462).  Their user-orientation folds into the per-resolution encode
     # TABLE (a single wire angle), NOT the whole-composite rotation the simple
@@ -333,13 +334,13 @@ def resolve_encode_rotation(
     w, h = resolution
     rotation = ENCODE_ROTATIONS.get((w, h, jpeg))
     if rotation is None:
-        log.debug("resolve_encode_rotation: %dx%d jpeg=%s not in the C# "
-                  "switch → default base %d°", w, h, jpeg,
+        log.warning("resolve_encode_rotation: %dx%d jpeg=%s → no ENCODE_ROTATIONS entry, "
+                    "defaulting sub=%d → base=%d°", w, h, jpeg, sub,
                   _DEFAULT_ENCODE_ROTATION.base)
         return _DEFAULT_ENCODE_ROTATION
     resolved = rotation.for_sub(sub)
-    log.debug("resolve_encode_rotation: %dx%d jpeg=%s sub=%d → base=%d "
-              "invert=%s", w, h, jpeg, sub, resolved.base, resolved.invert)
+    frame_log.warning("resolve_encode_rotation: %dx%d jpeg=%s sub=%d → base=%d "
+                      "invert=%s", w, h, jpeg, sub, resolved.base, resolved.invert)
     return resolved
 
 
@@ -547,7 +548,7 @@ def get_profile(fbl: int, pm: int = 0, sub: int = 0) -> DeviceProfile:
         profile = dataclasses.replace(profile, width=w, height=h)
     rotation = resolve_encode_rotation(profile.resolution, profile.jpeg, sub)
     return dataclasses.replace(
-        profile, encode_base=rotation.base, encode_invert=rotation.invert)
+        profile, encode_base=rotation.base, encode_invert=rotation.invert, sub=sub)
 
 
 def fbl_to_resolution(fbl: int, pm: int = 0) -> tuple[int, int]:
@@ -575,7 +576,7 @@ def resolve_encode_base(profile: DeviceProfile, pm_byte: int) -> int:
     return 0
 
 
-def resolve_encode_angle(profile: DeviceProfile, orientation: int, sub: int = 0) -> int:
+def resolve_encode_angle(profile: DeviceProfile, orientation: int) -> int:
     """Wire rotation for a panel = its encode base ± the user orientation.
 
     ``send = (encode_base + (orientation if not invert else -orientation)) % 360``
@@ -591,10 +592,25 @@ def resolve_encode_angle(profile: DeviceProfile, orientation: int, sub: int = 0)
     (``invert=False``) and every other family counts down.  One formula, one
     table.
     """
-    signed = orientation if not profile.encode_invert else -orientation
-    angle = (profile.encode_base + signed) % 360
-    frame_log.debug("resolve_encode_angle: base=%d invert=%s orient=%d → %d°",
-              profile.encode_base, profile.encode_invert, orientation, angle)
+    # Pick the right base using the SUB byte
+    # ENCODE_ROTATIONS keys on (w, h, _JPEG=True) — prefer JPEG lookup,
+    # fall back to non-JPEG if no match.
+    from trcc.core.protocol import ENCODE_ROTATIONS, _JPEG, _565
+    key_jpg = (profile.width, profile.height, _JPEG)
+    key_565 = (profile.width, profile.height, _565)
+    rot = ENCODE_ROTATIONS.get(key_jpg) or ENCODE_ROTATIONS.get(key_565)
+    if rot is None:
+        base = profile.encode_base
+        invert = profile.encode_invert
+    else:
+        resolved = rot.for_sub(profile.sub)
+        base = resolved.base
+        invert = resolved.invert
+
+    signed = orientation if not invert else -orientation
+    angle = (base + signed) % 360
+    frame_log.warning("resolve_encode_angle: sub=%d base=%d invert=%s orient=%d → %d°",
+                      profile.sub, base, invert, orientation, angle)
     return angle
 
 
@@ -624,7 +640,7 @@ def is_portrait_mounted(resolution: tuple[int, int], sub: int) -> bool:
 
 
 def wire_angle(
-    profile: DeviceProfile, orientation: int, portrait_content: bool, sub: int = 0,
+    profile: DeviceProfile, orientation: int, portrait_content: bool,
 ) -> int:
     """The single wire-frame rotation a device gets at a user *orientation*.
 
@@ -651,9 +667,12 @@ def wire_angle(
     ``portrait_content`` now only distinguishes the square / non-rotate fallback
     (where content is never portrait, so it is a no-op in practice).
     """
+    frame_log.warning("wire_angle: profile.sub=%d %dx%d @ %d° portrait=%s → %s",
+                      profile.sub, profile.width, profile.height, orientation,
+                      portrait_content, "<angle>")
     if profile.rotate:
-        angle = resolve_encode_angle(profile, orientation, profile.sub)
-        frame_log.debug("wire_angle: rotate panel %dx%d @ %d° -> %d° "
+        angle = resolve_encode_angle(profile, orientation)
+        frame_log.warning("wire_angle: rotate panel %dx%d @ %d° -> %d° "
                         "(per-resolution encode base)",
                         profile.width, profile.height, orientation, angle)
         return angle

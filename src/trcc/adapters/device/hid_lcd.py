@@ -205,7 +205,11 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
                      "the fingerprint alone does not identify the panel",
                      self.info.key, len(resp))
             return None
+        log.info("HidLcd %s: streaming handshake reply %d bytes: %s",
+                 self.info.key, len(resp), resp.hex().upper())
         pm, sub = resp[5], resp[4]
+        frame_log.warning("HidLcd %s: handshake SUB byte = %d (from resp[4])",
+                          self.info.key, sub)
         if not pm:
             log.info("HidLcd %s: streaming reply carried PM=0 — no panel identity",
                      self.info.key)
@@ -214,6 +218,8 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
                  self.info.key, pm, sub)
 
         fbl = pm_to_fbl(pm, sub)
+        frame_log.warning("HidLcd %s: get_profile sub=%d (from resp[4])",
+                          self.info.key, sub)
         profile = self._portrait_native(self._base_profile(fbl, pm))
         self._profile = profile
         log.info("HidLcd %s: streaming connect OK, portrait-native %s",

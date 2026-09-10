@@ -219,6 +219,8 @@ class BulkLcd(BaseBulkDevice, wire=Wire.BULK):
 
         self._pm = resp[24]
         self._sub = resp[36]
+        frame_log.warning("BulkLcd %s: handshake SUB byte = %d (from resp[36])",
+                          self.info.key, self._sub)
 
         fbl, self._profile = bulk_profile(self._pm, self._sub, self.info.key)
 
