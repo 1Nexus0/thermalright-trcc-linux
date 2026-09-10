@@ -370,6 +370,54 @@ def _bsd_memory_info(
     return slots
 
 
+def _geom_size(raw: str) -> str:
+    """A ``Mediasize:`` value → a human string, or ``""`` if we cannot say.
+
+    ``geom`` prints ``500107862016 (466G)``; its own parenthesised form is
+    preferred because it is the vendor's rounding, not ours.  Falling back to
+    the byte count is for the trimmed output some versions emit.
+
+    Under 1 GB nothing is returned, so the caller leaves the field at ``""``.
+    That is the original behaviour, kept deliberately: changing it would be a
+    behaviour change on a platform nobody here can test, and every branch of
+    this function is pinned by ``test_bsd_disk_size_formats``.
+    """
+    if match := re.search(r"\(([^)]+)\)", raw):
+        log.debug("_geom_size: %r -> %r (geom's own)", raw, match.group(1))
+        return match.group(1)
+    try:
+        n = int(raw.split()[0])
+    except (IndexError, ValueError):
+        log.debug("_geom_size: %r is not a byte count — passed through", raw)
+        return raw
+    for limit, unit, places in ((1024 ** 4, "TB", 1), (1024 ** 3, "GB", 0)):
+        if n >= limit:
+            return f"{n / limit:.{places}f} {unit}"
+    return ""
+
+
+def _geom_spindle(raw: str) -> str:
+    """``rotationrate:`` → the disk kind.  0 means no spindle."""
+    kind = "HDD" if raw != "0" else "SSD"
+    log.debug("_geom_spindle: rotationrate=%r -> %s", raw, kind)
+    return kind
+
+
+#: ``geom`` field prefix → the key it fills and how to read it.  A table
+#: rather than an if/elif chain: the parse is DATA, and a new field is a row.
+#: This was five branches of nested control flow, and the arm that formatted
+#: sizes reached depth 9 -- the deepest in the tree -- with no test on it.
+_GEOM_FIELDS: dict[str, tuple[str, Callable[[str], str]]] = {
+    "descr:": ("model", str.strip),
+    "Mediasize:": ("size", _geom_size),
+    "rotationrate:": ("type", _geom_spindle),
+}
+
+#: Every disk carries these keys whether ``geom`` mentioned them or not, so a
+#: renderer never has to ask.
+_GEOM_DEFAULTS = {"type": "Unknown", "model": "", "size": "", "health": "Unknown"}
+
+
 def _bsd_disk_info(
     runner: GeomRunner = _run_geom_disk_list,
 ) -> list[dict[str, str]]:
@@ -380,46 +428,23 @@ def _bsd_disk_info(
     """
     log.debug("_bsd_disk_info: called")
     disks: list[dict[str, str]] = []
-    output = runner()
-    if not output:
-        return disks
-
     current: dict[str, str] = {}
-    for raw in output.splitlines():
+
+    for raw in runner().splitlines():
         line = raw.strip()
         if line.startswith("Geom name:"):
             if current.get("name"):
                 disks.append(current)
             current = {"name": line.split(":", 1)[1].strip()}
-        elif line.startswith("descr:"):
-            current["model"] = line.split(":", 1)[1].strip()
-        elif line.startswith("Mediasize:"):
-            raw_val = line.split(":", 1)[1].strip()
-            match = re.search(r"\(([^)]+)\)", raw_val)
-            if match:
-                current["size"] = match.group(1)
-            else:
-                parts = raw_val.split()
-                if parts:
-                    try:
-                        b = int(parts[0])
-                        if b >= 1024 ** 4:
-                            current["size"] = f"{b / (1024 ** 4):.1f} TB"
-                        elif b >= 1024 ** 3:
-                            current["size"] = f"{b / (1024 ** 3):.0f} GB"
-                    except (ValueError, TypeError):
-                        current["size"] = raw_val
-        elif line.startswith("rotationrate:"):
-            rate = line.split(":", 1)[1].strip()
-            current["type"] = "HDD" if rate != "0" else "SSD"
+            continue
+        prefix = next((p for p in _GEOM_FIELDS if line.startswith(p)), None)
+        if prefix is None:
+            continue
+        key, read = _GEOM_FIELDS[prefix]
+        if value := read(line.split(":", 1)[1].strip()):
+            current[key] = value
 
     if current.get("name"):
         disks.append(current)
-
-    for d in disks:
-        d.setdefault("type", "Unknown")
-        d.setdefault("model", "")
-        d.setdefault("size", "")
-        d.setdefault("health", "Unknown")
-
-    return disks
+    log.debug("_bsd_disk_info: %d disk(s)", len(disks))
+    return [_GEOM_DEFAULTS | disk for disk in disks]

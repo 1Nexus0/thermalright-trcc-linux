@@ -6,6 +6,8 @@ injecting canned profiler/sysctl/geom output through their DI seams.
 """
 from __future__ import annotations
 
+import pytest
+
 # ── macOS memory ──────────────────────────────────────────────────────
 
 
@@ -314,3 +316,32 @@ def test_enrich_with_spd_timings_noop_on_empty_slots(monkeypatch) -> None:
     linux._enrich_with_spd_timings(slots)   # returns early, no SPD read
 
     assert slots == []
+
+
+@pytest.mark.parametrize("mediasize,expected", [
+    # geom's own parenthesised form wins when present — the only case the
+    # suite covered before 2026-09-10.
+    ("500107862016 (466G)", "466G"),
+    # Everything below is the byte-count fallback, which had NO coverage at
+    # all.  These are CHARACTERISATION: measured against the implementation
+    # before it was reshaped, so the refactor has something to be judged by.
+    ("2000398934016", "1.8 TB"),
+    ("500107862016", "466 GB"),
+    ("500107862016 bytes", "466 GB"),      # trailing words ignored
+    # Under 1 GB the original set nothing at all, so the field defaults to "".
+    # Odd, and preserved deliberately: changing it is a behaviour change on a
+    # platform nobody here can test.
+    ("12345", ""),
+    ("garbage", "garbage"),                # unparseable -> passed through
+])
+def test_bsd_disk_size_formats(mediasize: str, expected: str) -> None:
+    """Every branch of the Mediasize parse, pinned.
+
+    This branch was nested five deep inside an if/elif chain (the whole
+    function measured depth 9, the worst in the tree) precisely because
+    nothing exercised it.
+    """
+    from trcc.adapters.system.bsd import _bsd_disk_info
+
+    out = _bsd_disk_info(runner=lambda: f"Geom name: ada0\n   Mediasize: {mediasize}\n")
+    assert out[0]["size"] == expected
