@@ -37,11 +37,20 @@ from trcc.core.ports import (
 
 
 class FakeBulkTransport(BulkTransport):
-    """In-memory BulkTransport — records writes, yields scripted reads."""
+    """In-memory BulkTransport — records both halves, yields scripted reads.
+
+    ``reads`` records the *request* side of a read — the endpoint and the
+    length asked for — which ``read_script`` alone cannot show.  Half of what
+    a handshake puts on the wire is the size it asks back (the C# gives LY 512
+    and LY1 511, from the same 16-byte command), and until this list existed
+    that number was unobservable, so nothing could gate it.  Recording only;
+    the reply still comes from ``read_script`` unconditioned on the request.
+    """
 
     def __init__(self) -> None:
         self._open = False
         self.writes: List[Tuple[int, bytes]] = []
+        self.reads: List[Tuple[int, int]] = []
         self.read_script: List[bytes] = []
 
     @property
@@ -61,6 +70,7 @@ class FakeBulkTransport(BulkTransport):
         return len(payload)
 
     def read(self, endpoint: int, length: int, timeout_ms: int = 100) -> bytes:
+        self.reads.append((endpoint, length))
         if not self.read_script:
             return b""
         buf = self.read_script.pop(0)
@@ -68,11 +78,21 @@ class FakeBulkTransport(BulkTransport):
 
 
 class FakeScsiTransport(ScsiTransport):
-    """In-memory ScsiTransport — records CDBs, yields scripted read data."""
+    """In-memory ScsiTransport — records both CDB paths, yields scripted data.
+
+    ``sent`` holds ``send_cdb`` (data-out); ``reads`` holds ``read_cdb``
+    (data-in).  They are separate lists because callers count ``sent`` to mean
+    "frames written", and a poll folded into it would move every one of those
+    numbers.  ``read_cdb`` recorded nothing at all until this existed, so
+    ``ScsiLcd``'s POLL command — the first thing it puts on the wire — was
+    invisible to every test; the one assertion that looked like it covered the
+    poll is reading ``sent[0]``, which is the INIT.
+    """
 
     def __init__(self) -> None:
         self._open = False
         self.sent: List[Tuple[bytes, bytes]] = []
+        self.reads: List[Tuple[bytes, int]] = []
         self.read_script: List[bytes] = []
         self.send_should_succeed = True
 
@@ -92,6 +112,7 @@ class FakeScsiTransport(ScsiTransport):
         return self.send_should_succeed
 
     def read_cdb(self, cdb: bytes, length: int, timeout_ms: int = 5000) -> bytes:
+        self.reads.append((bytes(cdb), length))
         if not self.read_script:
             return b""
         buf = self.read_script.pop(0)
