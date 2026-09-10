@@ -334,12 +334,12 @@ def resolve_encode_rotation(
     w, h = resolution
     rotation = ENCODE_ROTATIONS.get((w, h, jpeg))
     if rotation is None:
-        log.warning("resolve_encode_rotation: %dx%d jpeg=%s → no ENCODE_ROTATIONS entry, "
+        log.debug("resolve_encode_rotation: %dx%d jpeg=%s → no ENCODE_ROTATIONS entry, "
                     "defaulting sub=%d → base=%d°", w, h, jpeg, sub,
                   _DEFAULT_ENCODE_ROTATION.base)
         return _DEFAULT_ENCODE_ROTATION
     resolved = rotation.for_sub(sub)
-    frame_log.warning("resolve_encode_rotation: %dx%d jpeg=%s sub=%d → base=%d "
+    frame_log.debug("resolve_encode_rotation: %dx%d jpeg=%s sub=%d → base=%d "
                       "invert=%s", w, h, jpeg, sub, resolved.base, resolved.invert)
     return resolved
 
@@ -609,7 +609,7 @@ def resolve_encode_angle(profile: DeviceProfile, orientation: int) -> int:
 
     signed = orientation if not invert else -orientation
     angle = (base + signed) % 360
-    frame_log.warning("resolve_encode_angle: sub=%d base=%d invert=%s orient=%d → %d°",
+    frame_log.debug("resolve_encode_angle: sub=%d base=%d invert=%s orient=%d → %d°",
                       profile.sub, base, invert, orientation, angle)
     return angle
 
@@ -667,14 +667,14 @@ def wire_angle(
     ``portrait_content`` now only distinguishes the square / non-rotate fallback
     (where content is never portrait, so it is a no-op in practice).
     """
-    frame_log.warning("wire_angle: profile.sub=%d %dx%d @ %d° portrait=%s → %s",
+    frame_log.debug("wire_angle: profile.sub=%d %dx%d @ %d° portrait=%s → %s",
                       profile.sub, profile.width, profile.height, orientation,
-                      portrait_content, "<angle>")
+                      portrait_content, angle)
     if profile.rotate:
         angle = resolve_encode_angle(profile, orientation)
-        frame_log.warning("wire_angle: rotate panel %dx%d @ %d° -> %d° "
-                        "(per-resolution encode base)",
-                        profile.width, profile.height, orientation, angle)
+        frame_log.debug("wire_angle: rotate panel %dx%d @ %d° -> %d° "
+                          "(per-resolution encode base)",
+                          profile.width, profile.height, orientation, angle)
         return angle
     if orientation and not portrait_content:
         angle = (360 - orientation) % 360

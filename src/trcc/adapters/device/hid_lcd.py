@@ -218,7 +218,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
                  self.info.key, pm, sub)
 
         fbl = pm_to_fbl(pm, sub)
-        frame_log.warning("HidLcd %s: get_profile sub=%d (from resp[4])",
+        frame_log.debug("HidLcd %s: get_profile sub=%d (from resp[4])",
                           self.info.key, sub)
         profile = self._portrait_native(self._base_profile(fbl, pm))
         self._profile = profile
