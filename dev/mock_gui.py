@@ -234,7 +234,9 @@ def main() -> None:
                          all_devices=all_devices, hardware=hardware,
                          specs=[device_spec] if device_spec else None)
 
-    print(f"\nConfig:  {DEV_TRCC / 'config.json'}")
+    from trcc.services.settings import CONFIG_FILE
+
+    print(f"\nConfig:  {DEV_TRCC / CONFIG_FILE}")
     print(f"Data:    {DEV_DATA}")
     print(f"Devices: {DEVICES_JSON}")
     print("Close window or Ctrl+C to quit.\n")

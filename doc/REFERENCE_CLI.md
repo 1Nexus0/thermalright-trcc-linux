@@ -1973,7 +1973,7 @@ trcc theme save KEY NAME
 
 | Path | Contents |
 |---|---|
-| `~/.trcc/` | Program + cloud data and config (`config.json`, logs) |
+| `~/.trcc/` | Program + cloud data and config (`trcc.json`, logs) |
 | `~/.trcc-user/` | User-authored themes, backgrounds, and masks |
 
 Report bugs at <https://github.com/Lexonight1/thermalright-trcc-linux/issues> — include the output of `trcc report`.

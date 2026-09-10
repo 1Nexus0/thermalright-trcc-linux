@@ -46,7 +46,7 @@ class LedZoneSettings:
 
 
 # =========================================================================
-# Per-device LED settings — persisted to config.json under "led_devices"
+# Per-device LED settings — persisted to trcc.json under "led_devices"
 # =========================================================================
 
 

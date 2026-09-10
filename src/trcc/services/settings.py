@@ -88,7 +88,11 @@ class AppSettings:
 # =========================================================================
 
 
-_CONFIG_FILE = "trcc.json"
+#: The settings file's name.  PUBLIC because things outside this module have
+#: to name it — ``trcc report``, the CLI reference, the man pages' FILES
+#: section — and while it was private every one of them spelled a literal
+#: instead.  All three spelled the LEGACY one (``config.json``).
+CONFIG_FILE = "trcc.json"
 # Pre-cutover next/ persisted to ``trcc-next.json``; ``_load`` reads
 # it as a fallback so users who started before the rename keep their
 # state.  Next ``_save`` writes the new filename.
@@ -266,7 +270,7 @@ class Settings:
         FIRST BOOT ONLY, and that is the whole safety argument.  The C# gates
         this on ``themeDirection == -1``, its "no saved angle" sentinel; ours
         is "this key has no persisted DeviceSettings".  A device the user has
-        already used has an entry loaded from ``config.json``, so it is never
+        already used has an entry loaded from ``trcc.json``, so it is never
         re-seeded and nobody's working-around-it 270 gets overwritten.
 
         Returns the orientation in force for *key* afterwards, so the caller
@@ -775,27 +779,22 @@ class Settings:
     # ── Persistence ───────────────────────────────────────────────────
 
     def _config_path(self) -> Path:
-        return self._paths.config_dir() / _CONFIG_FILE
+        return config_path(self._paths)
 
     def _load(self) -> None:
         """Load config from disk.  Missing/corrupt → defaults, warn only.
 
-        Falls back to the pre-cutover ``trcc-next.json`` filename so
-        users who started on next/ before the rename keep their state;
-        the next ``_save`` writes the new ``trcc.json`` automatically.
+        The file is chosen by :func:`resolve_config_path`, which also answers
+        the same question for anything OUTSIDE this class — ``trcc report``
+        most of all.  It used to be decided here, inline, and the report
+        answered it with a literal of its own.
         """
-        path = self._config_path()
-        if not path.exists():
-            old_path = self._paths.config_dir() / _PRE_CUTOVER_CONFIG_FILE
-            if old_path.exists():
-                log.info(
-                    "Reading pre-cutover config %s; next save will write %s",
-                    old_path, path,
-                )
-                path = old_path
-            else:
-                log.debug("No config file at %s, using defaults", path)
-                return
+        path = resolve_config_path(self._paths)
+        # No exists() check: the resolver has already stat-ed both candidates
+        # and said which it found, and ``load_json_or_default`` returns the
+        # default for a missing file.  A third stat here would re-ask a
+        # question already answered twice — which is what the filesystem-I/O
+        # ratchet in test_architecture_boundaries caught when this landed.
         raw = load_json_or_default(path, None)
         if not isinstance(raw, dict):
             return
@@ -837,6 +836,54 @@ class Settings:
             tmp.replace(path)
         except OSError as e:
             raise ConfigError(f"Failed to persist config to {path}: {e}") from e
+
+
+# =========================================================================
+# Where the state lives — the one answer, for readers outside this class too
+# =========================================================================
+
+
+def config_path(paths: Paths) -> Path:
+    """Where Settings WRITES its state.  Always ``trcc.json``.
+
+    Distinct from :func:`resolve_config_path` on purpose: a migration means
+    the file we READ may not be the file we WRITE, and folding the two
+    together would make ``_save`` write back to the superseded filename,
+    stranding the user on it forever.
+    """
+    path = paths.config_dir() / CONFIG_FILE
+    log.debug("config_path: %s", path)
+    return path
+
+
+def resolve_config_path(paths: Paths) -> Path:
+    """The file Settings actually READS — ``trcc.json``, or the pre-cutover
+    ``trcc-next.json`` when only that exists.
+
+    Public, and that is the point.  ``trcc report`` has to name the file the
+    app really loaded, and when it had to work that out for itself it got it
+    wrong: it read ``config.json``, which is **legacy's** settings filename
+    (``legacy/conf.py:46``).  On a clean install that printed "No settings
+    file" and looked harmless; on an upgraded one the legacy file is still
+    there, so every report from an upgraded user showed their PRE-CUTOVER
+    settings under "## Settings" as though they were current.  Nothing caught
+    it: the test that lists the sections a reporter scans for names seven of
+    the eleven ``render_text`` emits, and Settings is not among them.
+
+    Returns the primary path when neither file exists — the caller wants
+    somewhere to name in "no settings at X", and defaults are what load.
+    """
+    path = config_path(paths)
+    if path.exists():
+        log.debug("resolve_config_path: %s", path)
+        return path
+    legacy = paths.config_dir() / _PRE_CUTOVER_CONFIG_FILE
+    if legacy.exists():
+        log.info("resolve_config_path: reading pre-cutover config %s; "
+                 "the next save writes %s", legacy, path)
+        return legacy
+    log.debug("resolve_config_path: neither %s nor %s exists", path, legacy)
+    return path
 
 
 # =========================================================================

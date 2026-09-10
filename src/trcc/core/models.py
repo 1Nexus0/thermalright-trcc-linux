@@ -606,7 +606,7 @@ class SensorReading:
 
 @dataclass
 class DeviceSettings:
-    """User prefs for one device.  Persisted to config.json."""
+    """User prefs for one device.  Persisted to trcc.json."""
     orientation: int = 0
     brightness: int = 100
     current_theme: str | None = None

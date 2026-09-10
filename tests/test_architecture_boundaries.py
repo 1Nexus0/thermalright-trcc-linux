@@ -1355,14 +1355,23 @@ _THEME_DIR_MEMBERS = frozenset({
 # 48 → 2.  ``ThemeDir`` was adopted across all 12 files that re-spelled the
 # layout, and the 7 constants duplicating one of its properties are gone.
 #
-# The two survivors are NOT breaches and never will be: both name a file in
-# ``config_dir`` that merely SHARES a string with a theme member — the app's
-# own ``trcc.json`` settings file, and the legacy app ``config.json`` the
-# debug report reads.  Different files, same name; ``ThemeDir`` would be the
-# wrong owner for either.  They are listed at their real count rather than
-# exempted, so if one grows a third the gate still notices.
+# The ONE survivor is not a breach: ``trcc.json`` in ``services/settings.py``
+# names a file in ``config_dir`` that merely SHARES a string with a theme
+# member.  Different files, same name; ``ThemeDir`` would be the wrong owner.
+# It is listed at its real count rather than exempted, so if it grows a second
+# the gate still notices.
+#
+# The other survivor is gone, and how it went is worth keeping.  This comment
+# used to say there were two and that both were "NOT breaches and never will
+# be", naming the second outright: "the legacy app ``config.json`` the debug
+# report reads".  That description was exactly right and the conclusion was
+# wrong -- ``trcc report`` had no business reading LEGACY's settings file, and
+# was printing it to reporters under "## Settings" while the app ran on
+# ``trcc.json``.  The gate asked "is this string owned by the right constant?",
+# answered "different file, fine", and never asked whether the file was the
+# right one to open.  A check inspected the defect, named it in prose, and
+# blessed it.  See ``test_diagnostics.py`` for what now gates it.
 KNOWN_LAYOUT_LITERALS: dict[str, int] = {
-    "trcc/adapters/diagnostics/debug_report.py": 1,
     "trcc/services/settings.py": 1,
 }
 

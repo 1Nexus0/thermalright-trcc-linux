@@ -26,6 +26,7 @@ import typer.main
 
 from _cli_tree import is_group as _is_group
 from trcc.__version__ import __version__
+from trcc.services.settings import CONFIG_FILE
 from trcc.ui.cli.main import app
 
 # Groups get their own page; these top-level entries are the root page's list.
@@ -266,7 +267,7 @@ def render_root_page(cli: click.Group, groups: list[str]) -> str:
     lines.append(".SH FILES")
     lines.append(".TP")
     lines.append("\\fB~/.trcc/\\fR")
-    lines.append("Program + cloud data and config (config.json, logs).")
+    lines.append(f"Program + cloud data and config ({CONFIG_FILE}, logs).")
     lines.append(".TP")
     lines.append("\\fB~/.trcc\\-user/\\fR")
     lines.append("User-authored themes, backgrounds, and masks.")

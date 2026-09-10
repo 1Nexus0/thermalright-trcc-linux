@@ -1301,13 +1301,166 @@ def test_build_debug_report_returns_filled_struct(fake_platform) -> None:
     assert isinstance(report.devices, list)
 
 
+#: Every section ``render_text`` emits unconditionally.  Handshake is the one
+#: conditional section (only when the log scrape found lines) and is covered by
+#: ``test_debug_report_captures_live_handshake``.
+_REPORT_SECTIONS = frozenset({
+    "Install", "Platform", "Paths", "Devices", "Sensors", "CPU power",
+    "Settings", "Health", "Actions", "Log tail",
+})
+
+
+def _section_headers(text: str) -> set[str]:
+    """The ``## `` headers actually present, minus any ``(count)`` suffix."""
+    return {line[3:].split(" (")[0].strip()
+            for line in text.splitlines() if line.startswith("## ")}
+
+
 def test_debug_report_renders_paste_ready_text(fake_platform) -> None:
-    report = build_debug_report(fake_platform)
-    text = report.render_text()
-    # Markers a reporter / triager visually scans for.
-    for header in ("Platform", "Paths", "Devices", "Sensors", "Health",
-                   "Actions", "Log tail"):
-        assert f"## {header}" in text
+    """Every section a reporter scans for is present — and no OTHER section is.
+
+    Equality, not ``in``.  This test used to list seven of the ten sections
+    ``render_text`` emits and assert each was present, which passes whether the
+    other three are correct, broken, or missing: a check whose denominator is
+    its own expectation reports 100% of whatever it happens to name.  Settings
+    was one of the three it did not name, and the Settings section spent the
+    whole post-cutover period pointed at LEGACY's filename without one test
+    going red.
+
+    So the universe is MEASURED from the rendered text and compared as a set.
+    Adding a section now fails here until it is declared above — which is the
+    moment to ask what asserts its CONTENT.
+    """
+    text = build_debug_report(fake_platform).render_text()
+    assert _section_headers(text) == set(_REPORT_SECTIONS)
+
+
+# ── The Settings section: gate the ROUND TRIP, not the path ─────────────
+#
+# The bug this replaces was not "the path is wrong" but "the report shows a
+# different file from the one the app runs on", so a test that asserts a path
+# would have been satisfied by the broken code pointed at a path that existed.
+# These write real settings through the real service and then look for the
+# reporter's own values in the rendered text.
+
+
+def _report_settings_section(platform) -> str:
+    """The ``## Settings`` section of a freshly built report."""
+    text = build_debug_report(platform).render_text()
+    body = text.split("## Settings", 1)[1]
+    return body.split("\n## ", 1)[0]
+
+
+def test_debug_report_carries_the_settings_the_app_actually_saved(
+    tmp_path: Path,
+) -> None:
+    """A value set through ``Settings`` reaches the report a reporter pastes.
+
+    MEASURED on the shipping build before the fix: this section read
+    ``config_dir()/config.json`` — LEGACY's filename (``legacy/conf.py:46``) —
+    while ``Settings`` persists ``trcc.json``, so it said "No settings file"
+    on a clean install and printed the user's PRE-CUTOVER config on an upgraded
+    one.  Either way the configuration we were diagnosing was not the one
+    running.
+    """
+    from tests.mock_platform import MockPlatform
+    from trcc.services.settings import Settings
+
+    platform = MockPlatform([], tmp_path)
+    settings = Settings(platform.paths())
+    settings.set_language("de")
+    settings.set_global_time_format("24h")
+
+    section = _report_settings_section(platform)
+
+    assert '"language": "de"' in section
+    assert '"time_format": "24h"' in section
+
+
+def test_debug_report_reads_the_pre_cutover_config_when_it_is_the_live_one(
+    tmp_path: Path,
+) -> None:
+    """``trcc-next.json`` is what the app loads when it is all there is.
+
+    The second half of the same defect, one layer down: fixing the filename
+    alone would still have reported "no settings" for a user whose state is in
+    the pre-cutover file, because ``_load``'s fallback was inline and private.
+    One resolver answers for both, so the report cannot name a file the app did
+    not read.
+    """
+    from tests.mock_platform import MockPlatform
+    from trcc.services.settings import Settings
+
+    platform = MockPlatform([], tmp_path)
+    settings = Settings(platform.paths())
+    settings.set_language("fr")
+    # Rename to the pre-cutover filename and drop the current one, i.e. exactly
+    # the on-disk state of someone who stopped using trcc before the rename.
+    (tmp_path / "trcc.json").rename(tmp_path / "trcc-next.json")
+
+    section = _report_settings_section(platform)
+
+    assert '"language": "fr"' in section
+    assert "No settings file" not in section
+
+
+def test_debug_report_ignores_a_legacy_config_json(tmp_path: Path) -> None:
+    """The legacy file is never what gets reported, even sitting right there.
+
+    An upgraded install HAS ``~/.trcc/config.json`` — it is where legacy kept
+    its state — so this is the common case, not a contrived one.  It must lose
+    to the live file, and it must not be reported when the live file is absent
+    either: legacy's config is not this app's config.
+    """
+    from tests.mock_platform import MockPlatform
+    from trcc.services.settings import Settings
+
+    platform = MockPlatform([], tmp_path)
+    (tmp_path / "config.json").write_text(
+        '{"schema": 1, "app": {"language": "LEGACY"}}', encoding="utf-8")
+
+    # 1. With live settings present, the legacy file loses.
+    Settings(platform.paths()).set_language("en")
+    section = _report_settings_section(platform)
+    assert "LEGACY" not in section
+    assert '"language": "en"' in section
+
+    # 2. With no live settings, it is still not reported.
+    (tmp_path / "trcc.json").unlink()
+    section = _report_settings_section(platform)
+    assert "LEGACY" not in section
+    assert "No settings file" in section
+
+
+def test_settings_write_path_never_follows_the_read_path(tmp_path: Path) -> None:
+    """``_save`` writes ``trcc.json`` even when the app READ the older file.
+
+    The trap in unifying the two: fold the read fallback into the write path
+    and a pre-cutover user is written back to ``trcc-next.json`` forever,
+    never migrating.  ``config_path`` (write) and ``resolve_config_path``
+    (read) are separate for exactly this reason, so it is asserted.
+    """
+    from tests.mock_platform import MockPlatform
+    from trcc.services.settings import (
+        Settings,
+        config_path,
+        resolve_config_path,
+    )
+
+    platform = MockPlatform([], tmp_path)
+    Settings(platform.paths()).set_language("it")
+    (tmp_path / "trcc.json").rename(tmp_path / "trcc-next.json")
+    paths = platform.paths()
+
+    assert resolve_config_path(paths) == tmp_path / "trcc-next.json"
+    assert config_path(paths) == tmp_path / "trcc.json"
+
+    # A save made after loading the old file must land on the NEW name.
+    reloaded = Settings(paths)
+    assert reloaded.app.language == "it"
+    reloaded.set_language("pt")
+    assert (tmp_path / "trcc.json").is_file(), "save must migrate the filename"
+    assert '"pt"' in (tmp_path / "trcc.json").read_text(encoding="utf-8")
 
 
 def test_debug_report_writes_to_disk(fake_platform, tmp_path: Path) -> None:

@@ -30,6 +30,7 @@ import click
 import typer.main
 
 from _cli_tree import is_group as _is_group
+from trcc.services.settings import CONFIG_FILE
 from trcc.ui.cli.main import app
 
 _DOC = Path(__file__).resolve().parents[1] / "doc" / "REFERENCE_CLI.md"
@@ -202,7 +203,8 @@ def generate() -> str:
         "",
         "| Path | Contents |",
         "|---|---|",
-        "| `~/.trcc/` | Program + cloud data and config (`config.json`, logs) |",
+        f"| `~/.trcc/` | Program + cloud data and config "
+        f"(`{CONFIG_FILE}`, logs) |",
         "| `~/.trcc-user/` | User-authored themes, backgrounds, and masks |",
         "",
         "Report bugs at "

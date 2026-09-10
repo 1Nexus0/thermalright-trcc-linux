@@ -7,7 +7,7 @@ focused, copy-paste-friendly format:
 * path table (config / data / log / user content)
 * detected USB devices (vid:pid + product names from registry)
 * sensor enumeration snapshot (sensor_id + label + current value)
-* persisted Settings (config.json contents)
+* persisted Settings (trcc.json contents)
 * health check report
 * action history (INFO and above, scanned from the WHOLE log)
 * log tail (last 1000 lines, every level)
@@ -39,6 +39,7 @@ from ...core.errors import HandshakeError, TransportError
 from ...core.models import Kind, ProductInfo
 from ...core.ports import Platform
 from ...core.registry import find_product
+from ...services.settings import resolve_config_path
 from ..device import DEVICES
 from ..infra.logging import log_chain, tail_log, tail_log_actions
 from .health import HealthReport, run_health_checks
@@ -128,7 +129,7 @@ def build_debug_report(
     sensors, sensors_err = _collect_sensors(platform)
     powercap = _collect_powercap()
     settings_text, settings_err = _read_settings_file(
-        settings_path or platform.paths().config_dir() / "config.json",
+        settings_path or resolve_config_path(platform.paths()),
     )
     health = run_health_checks(platform)
     log_path = platform.paths().log_file()
