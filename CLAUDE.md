@@ -854,8 +854,13 @@ Zero tolerance for security issues. Fix within hexagonal architecture — never 
   SCSI/Bulk/LED handshakes so `dev/mock_gui.py` simulates any fleet with zero
   hardware; `dev/_mock_bootstrap` selects it when `dev/devices.json` (local,
   gitignored) yields specs, else the real `DevPlatform`. `dev/smoke_portrait_854480.py`
-  is the self-contained verifier. **Still NOT scripted**: HID + LY wires
-  (warn-and-skip); add their handshake byte formats before simulating those panels.
+  is the self-contained verifier. **ALL FIVE wires are scripted** (measured
+  2026-09-10): `mock_handshake` has explicit branches for SCSI, LED, HID
+  type-2/type-3, LY/LY1 and BULK/ALI, and `BaseOS._transport_openers` routes
+  every non-SCSI wire through `_open_bulk` — which the dev mock overrides — so
+  overriding the two openers covers the lot. This line read "Still NOT
+  scripted: HID + LY (warn-and-skip)" until then; it was stale, and it was the
+  reason those panels were believed unsimulable.
 - **Non-square (`rotate=True`) panels — geometry/portrait now mock-verified.** The
   cutover fragmented legacy's geometry pipeline (#136); restored + verified:
   data-download-on-handshake, content-matched portrait composition (portrait
@@ -872,11 +877,21 @@ Zero tolerance for security issues. Fix within hexagonal architecture — never 
   steps; `DisplayService._apply_post_processing` gained `device_rotate=False` for
   `build_preview_surface`. Wire untouched (the 150 geometry tests assert WIRE bytes
   and stayed green). **Still pending — Tier-1 WIRE-output gap (separate, hardware-gated)**:
-  whether our wire rotation matches the C# `isFanZhuan`/`get_encode_rotation` model —
-  the device encode-rotation table (`encode_base`/`encode_invert`/`encode_sub_bases`)
-  is recorded-but-UNWIRED, a blanket `rotate→90°` replaced legacy's `get_encode_rotation`
-  on the 4 widescreen JPEG panels (FBL 114/128/192/224). The mock can't confirm wire
-  output; needs a real device. See `memory/project_geometry_subsystem_and_mock.md`.
+  whether our wire rotation matches the C# `isFanZhuan`/`get_encode_rotation` model
+  on real glass. **The table itself IS wired** (measured 2026-09-10): the arms
+  live on `ENCODE_ROTATIONS` (`core/protocol.py`) as `alt_base` + `alt_subs`,
+  are applied by `EncodeRotation.for_sub()`, and reach the wire through
+  `resolve_encode_rotation(resolution, jpeg, sub)` at `bulk_lcd.py` and
+  `ly_lcd.py` — both passing the live SUB byte. (`encode_sub_bases` no longer
+  exists; it was the empty per-FBL rule those arms replaced.) This line read
+  "recorded-but-UNWIRED, a blanket `rotate→90°`" until then, which was stale.
+  **The genuine remainder**: `get_profile` resolves rotation with `sub`
+  defaulted to 0 — latent, not live, since every arm that fires in the catalog
+  is on the bulk wire, which passes the real sub — and no mock can confirm WIRE
+  OUTPUT, which still needs a real device.
+  See `memory/project_geometry_subsystem_and_mock.md` and
+  `memory/project_mysubmode_is_the_per_sku_mount.md` (the SUB byte's origin is
+  `UCDevice.cs:1114`, `receive[5]`).
 
 ## GitHub Issues
 - Never use "Fixes #N" in commit messages — GitHub auto-closes on push to default branch
