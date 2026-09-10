@@ -217,6 +217,28 @@ def resolve_handshake_geometry(product: ProductInfo) -> tuple[int, int, int]:
 # ── Device spec ──────────────────────────────────────────────────────────────
 
 
+def _parse_reply_hex(raw: object, name: str) -> bytes | None:
+    """A ``devices.json`` ``reply`` hex string → bytes, or ``None`` if absent.
+
+    Spaces and colons are stripped so a capture can be pasted in whatever shape
+    the tool that produced it emits.  A malformed string is a WARNING and falls
+    back to the normal scripted reply rather than raising: a typo in one fixture
+    row must not take the whole mock fleet down.
+    """
+    if raw is None:
+        return None
+    text = str(raw).replace(":", "").replace(" ", "").replace("\n", "")
+    try:
+        reply = bytes.fromhex(text)
+    except ValueError:
+        log.warning("mock spec %s: reply=%r is not valid hex — ignoring it and "
+                    "falling back to the model-derived handshake", name, raw)
+        return None
+    log.info("mock spec %s: verbatim %d-byte reply supplied", name, len(reply))
+    return reply
+
+
+
 @dataclass(frozen=True, slots=True)
 class DeviceSpec:
     """One simulated device, parsed from a ``dev/devices.json`` entry.
@@ -231,6 +253,24 @@ class DeviceSpec:
     init, short handshake, portrait-native, keepalive) were unreachable in the
     mock, which is how a quirk that broke four reporters' panels shipped
     unnoticed (#244).  Give a spec ``"bcd": "0407"`` to simulate that firmware.
+
+    ``reply`` is a REPORTER'S ACTUAL HANDSHAKE BYTES, used verbatim.
+
+    Every other field is a *value* we then pack per our own understanding of the
+    wire, and the default geometry is brute-forced through the app's own
+    ``pm_to_fbl`` / ``get_profile`` until it reproduces the registry's declared
+    resolution.  That is faithful for "show me every SKU we believe in" — and
+    structurally unable to reproduce "this cooler does not behave the way we
+    believe", which is the shape of every reporter bug.  A device whose real
+    reply disagrees with our tables cannot be expressed as (pm, sub, fbl) at
+    all, because the disagreement may be the byte OFFSETS, the length, or a
+    field we do not model.
+
+    So this field takes bytes and asks no questions: paste what the device
+    actually said, and the real adapters parse it locally.  Hex string in
+    ``devices.json``, spaces and colons ignored::
+
+        {"vid": "0416", "pid": "5302", "reply": "03 ff 00 ... 01"}
     """
     vid: int
     pid: int
@@ -240,6 +280,7 @@ class DeviceSpec:
     fbl: int | None = None
     bcd: int = 0
     resolution: str | None = None
+    reply: bytes | None = None
 
     @classmethod
     def parse(cls, raw: dict) -> DeviceSpec:
@@ -249,6 +290,7 @@ class DeviceSpec:
         name = str(raw.get("name", f"{vid:04x}:{pid:04x}"))
         fbl = raw.get("fbl")
         bcd = raw.get("bcd")
+        reply = raw.get("reply")
         return cls(
             vid=vid, pid=pid, name=name,
             pm=int(raw.get("pm", 0)),
@@ -256,6 +298,7 @@ class DeviceSpec:
             fbl=int(fbl) if fbl is not None else None,
             bcd=int(str(bcd), 16) if bcd is not None else 0,
             resolution=raw.get("resolution"),
+            reply=_parse_reply_hex(reply, name),
         )
 
     @property
@@ -271,7 +314,26 @@ class DeviceSpec:
 
 
 def scan_device_infos(specs: list[DeviceSpec]) -> list[DeviceInfo]:
-    """One ``DeviceInfo`` per spec that resolves in the registry."""
+    """One ``DeviceInfo`` per spec that resolves in the registry.
+
+    A fleet is keyed by ``(vid, pid)``, so two rows sharing one USB identity
+    cannot both exist: the second is shadowed in ``by_key`` and only the first
+    ever answers a handshake.  That is easy to hit by accident — the widescreen
+    families all live behind ``87ad:70db`` — and silently gives you a fleet
+    that is not the one you wrote, so say so.  (To exercise several variants of
+    one vid:pid, click them in the dev console's variant panel, which pins each
+    reply as you go, rather than listing them here.)
+    """
+    seen: dict[tuple[int, int], str] = {}
+    for spec in specs:
+        first = seen.get(spec.key)
+        if first is not None:
+            log.warning(
+                "mock scan: %04x:%04x listed twice (%r shadows %r) — a fleet "
+                "holds ONE spec per vid:pid; use the variant panel to switch "
+                "between them", spec.vid, spec.pid, first, spec.name)
+        else:
+            seen[spec.key] = spec.name
     out: list[DeviceInfo] = []
     for spec in specs:
         product = find_product(spec.vid, spec.pid)
@@ -300,21 +362,33 @@ def scripted_handshake_bytes(
 ) -> bytes:
     """Model-driven handshake reply for one device — every wire, one source.
 
-    Resolution order: a dev-console ``override`` (exact ``pm``/``sub``/``fbl``,
-    used verbatim) wins; else geometry resolves FAITHFULLY from the registry
-    ``ProductInfo`` via :func:`resolve_handshake_geometry`, with a
-    ``devices.json`` spec optionally overriding ``pm`` / ``sub`` / ``fbl`` for a
-    panel the model under-specifies.
+    Resolution order, most specific first:
+
+    1. a dev-console ``override`` (exact ``pm``/``sub``/``fbl``, used verbatim)
+       — the live variant click, so it must beat anything on disk;
+    2. a spec ``reply`` — a reporter's ACTUAL bytes, returned untouched.  This
+       is the only path that does not go through our own packing, so it is the
+       only one that can express a device disagreeing with our model;
+    3. geometry resolved FAITHFULLY from the registry ``ProductInfo`` via
+       :func:`resolve_handshake_geometry`, with a ``devices.json`` spec
+       optionally overriding ``pm`` / ``sub`` / ``fbl``.
     """
     product = find_product(vid, pid)
     if product is None:
         log.warning("mock handshake: %04x:%04x not in registry — empty reply",
                     vid, pid)
         return b""
-    if override and (vid, pid) in override:
-        pm, sub, fbl = override[(vid, pid)]
+    spec = by_key.get((vid, pid))
+    pinned = override.get((vid, pid)) if override else None
+
+    if pinned is None and spec is not None and spec.reply is not None:
+        log.info("mock handshake: %04x:%04x verbatim %d-byte reply from spec "
+                 "(model NOT consulted)", vid, pid, len(spec.reply))
+        return spec.reply
+
+    if pinned is not None:
+        pm, sub, fbl = pinned
     else:
-        spec = by_key.get((vid, pid))
         pm, sub, fbl = resolve_handshake_geometry(product)
         if spec is not None:
             if spec.fbl is not None:

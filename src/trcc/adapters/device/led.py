@@ -207,6 +207,7 @@ class Led(BaseBulkDevice, wire=Wire.LED):
 
     def _parse_reply(self, resp: bytes) -> HandshakeResult:
         """Resolve style + model from the reply, or reject it as retryable."""
+        self._trace_reply(resp)
         if len(resp) < 7:
             raise HandshakeError(f"Response too short ({len(resp)} bytes)")
 

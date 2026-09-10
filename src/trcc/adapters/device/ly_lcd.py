@@ -100,6 +100,7 @@ class LyLcd(BaseBulkDevice, wire=Wire.LY):
     def _do_handshake(self) -> HandshakeResult:
         resp = self._exchange(_HANDSHAKE_PAYLOAD, _HANDSHAKE_READ_SIZE,
                               _HANDSHAKE_TIMEOUT_MS)
+        self._trace_reply(resp)
 
         if (len(resp) < 37 or resp[0] != 3 or resp[1] != 0xFF or resp[8] != 1):
             log.error("LyLcd %s: handshake validation failed (len=%d)",

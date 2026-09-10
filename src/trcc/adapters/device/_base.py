@@ -29,7 +29,7 @@ from typing import Any, ClassVar
 
 from ...core.errors import DeviceNotFoundError, HandshakeError, TransportError
 from ...core.factory import Registry, Reject
-from ...core.logs import per_frame
+from ...core.logs import per_frame, trace
 from ...core.models import HandshakeResult, ProductInfo, Wire
 from ...core.ports import BulkTransport, Device, T
 from ...core.protocol import DeviceProfile
@@ -37,6 +37,12 @@ from ...core.protocol import DeviceProfile
 log = logging.getLogger(__name__)
 #: ``profile`` is read once per frame by the render path.
 frame_log = per_frame(__name__)
+
+#: How much of a handshake reply :meth:`BaseDevice._trace_reply` records.
+#: 64 clears every parser's deepest offset — LY reads [36], bulk [24] and [36],
+#: HID Type-2's serial is [20:36], LED [12], SCSI [0] — so a pasted capture can
+#: drive any wire.  The full SCSI poll is 0xE100 bytes and is nearly all zeros.
+_TRACE_REPLY_BYTES = 64
 
 # The wire table.  A miss RAISES — unlike the OS table, an unregistered wire is
 # a defect (the product registry named a wire nothing implements), not something
@@ -121,6 +127,31 @@ class BaseDevice(Device[T]):
                  type(self).__name__, result.pm_byte, result.sub_byte,
                  result.resolution, self._handshake_detail(result))
         return result
+
+    def _trace_reply(self, resp: bytes) -> None:
+        """Record the RAW handshake reply — the one thing we cannot re-derive.
+
+        Every parsed value on the ``handshake OK`` line above is our
+        *interpretation* of these bytes.  When a panel resolves to the wrong
+        geometry the question is always "what did the device actually say?",
+        and the answer was reachable for HID only — every other wire discarded
+        it, so finding out cost another round-trip with the reporter.
+        ``trcc report`` is the entire diagnosis for hardware we do not own, so
+        the bytes belong in it.
+
+        They are also the mock's input: pasted into a ``dev/devices.json``
+        ``reply`` they make the real adapters parse that device locally, which
+        is the difference between reproducing a reporter's panel and guessing
+        at it.  Without this line there is nothing to paste.
+
+        TRACE (``-vvv``) because the ladder puts raw payloads and wire bytes
+        there, and the logger is the SUBCLASS's module so a report still says
+        which wire spoke.
+        """
+        trace(logging.getLogger(type(self).__module__),
+              "%s raw handshake reply (%d bytes, first %d): %s",
+              self.info.key, len(resp), min(len(resp), _TRACE_REPLY_BYTES),
+              resp[:_TRACE_REPLY_BYTES].hex())
 
     @abstractmethod
     def _do_handshake(self) -> HandshakeResult:

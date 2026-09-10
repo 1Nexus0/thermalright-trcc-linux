@@ -153,6 +153,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
 
     def _validate_and_parse(self, resp: bytes) -> HandshakeResult:
         """Accept the reply or reject it as a retryable attempt."""
+        self._trace_reply(resp)
         if not self._validate_response(resp):
             log.warning("HidLcd handshake: invalid response (len=%d, first 16: %s)",
                         len(resp), resp[:16].hex() if resp else "empty")

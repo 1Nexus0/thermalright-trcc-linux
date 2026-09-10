@@ -103,6 +103,7 @@ class ScsiLcd(BaseDevice[ScsiTransport], wire=Wire.SCSI):
             else:
                 break
 
+        self._trace_reply(response)
         fbl = response[0] if response else (self.info.fbl or 100)
         log.debug("SCSI poll byte[0] = %d (FBL)", fbl)
 

@@ -203,6 +203,7 @@ class BulkLcd(BaseBulkDevice, wire=Wire.BULK):
     def _do_handshake(self) -> HandshakeResult:
         resp = self._exchange(_HANDSHAKE_PAYLOAD, _HANDSHAKE_READ_SIZE,
                               _HANDSHAKE_TIMEOUT_MS)
+        self._trace_reply(resp)
 
         if len(resp) < 41 or resp[24] == 0:
             log.error(

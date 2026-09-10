@@ -96,3 +96,109 @@ def test_inject_reply_reresolves_profile_through_real_connect(tmp_path) -> None:
         assert res_a != res_b      # same vid:pid, different presentation
     finally:
         app.close()
+
+
+# ── Verbatim reply — a reporter's actual bytes, our model NOT consulted ──────
+#
+# Everything above varies a VALUE we then pack ourselves, and the default
+# geometry is brute-forced through the app's own ``pm_to_fbl`` / ``get_profile``
+# until it reproduces the registry's declared resolution.  That is faithful for
+# "show me every SKU we believe in" and structurally unable to reproduce "this
+# cooler does not behave the way we believe" — the shape of every reporter bug.
+# ``spec.reply`` is the one path that skips our packing entirely.
+
+
+def test_spec_reply_is_returned_untouched(tmp_path) -> None:
+    """The bytes on disk are the bytes on the wire — no re-packing."""
+    raw = bytes(range(64))
+    plat = MockPlatform(
+        [{"vid": "87ad", "pid": "70db", "name": "captured",
+          "reply": raw.hex()}], tmp_path)
+
+    assert plat.open_transport(Wire.BULK, _VID, _PID).read_script[0] == raw
+
+
+def test_spec_reply_can_contradict_the_registry(tmp_path) -> None:
+    """The whole point: a reply our model would never have produced.
+
+    The registry says this vid:pid is 480x480 (FBL 72).  Feed it a reply whose
+    PM says 320x320 and the device must resolve **320x320** — the bytes win.
+    If this ever asserts the registry's answer instead, the mock has gone back
+    to confirming itself and can no longer reproduce a reporter's device.
+    """
+    from tests.mock_platform import bulk_handshake_reply
+
+    contradicting_pm = 32                      # RGB565 320x320, not 480x480
+    plat = MockPlatform(
+        [{"vid": "87ad", "pid": "70db", "name": "contradicts",
+          "reply": bulk_handshake_reply(contradicting_pm).hex()}], tmp_path)
+    app = App(plat, send_scheduler=SyncSendScheduler())
+    try:
+        assert app.dispatch(ConnectDevice(key=f"{_VID:04x}:{_PID:04x}")).ok
+        registry_says = get_profile(pm_to_fbl(72), 72).resolution
+        device_says = app.devices[f"{_VID:04x}:{_PID:04x}"].profile.resolution
+        assert registry_says == (480, 480)
+        assert device_says == (320, 320), (
+            "the verbatim reply was ignored — the mock is confirming our own "
+            f"registry ({registry_says}) instead of parsing the bytes given")
+    finally:
+        app.close()
+
+
+def test_malformed_reply_hex_falls_back_instead_of_exploding(tmp_path) -> None:
+    """One typo in one fixture row must not take the whole fleet down."""
+    plat = MockPlatform(
+        [{"vid": "87ad", "pid": "70db", "name": "typo", "reply": "not-hex!"}],
+        tmp_path)
+
+    assert plat.open_transport(Wire.BULK, _VID, _PID).read_script[0]
+
+
+def test_live_override_beats_a_spec_reply(tmp_path) -> None:
+    """A variant click is the user acting now; the fixture is only a default."""
+    raw = bytes(range(64))
+    plat = MockPlatform(
+        [{"vid": "87ad", "pid": "70db", "name": "captured",
+          "reply": raw.hex()}], tmp_path)
+
+    plat.set_active_reply(_VID, _PID, pm=20, sub=1, fbl=58)
+    assert plat.open_transport(Wire.BULK, _VID, _PID).read_script[0] != raw
+
+
+def test_traced_bytes_round_trip_into_a_spec_reply(tmp_path, caplog) -> None:
+    """The reporter loop, end to end — the reason both halves exist.
+
+    ``BaseDevice._trace_reply`` puts the raw reply in ``trcc report`` at
+    ``-vvv``; ``DeviceSpec.reply`` takes it back.  If the hex a reporter sends
+    does not reproduce their device here, the loop is decorative — so assert
+    the actual bytes the trace emitted, parsed back, land on the same geometry.
+    """
+
+    from trcc.core.logs import TRACE
+
+    key = f"{_VID:04x}:{_PID:04x}"
+    specs = [{"vid": "87ad", "pid": "70db", "pm": 72, "name": "origin"}]
+
+    with caplog.at_level(TRACE, logger="trcc.adapters.device.bulk_lcd"):
+        app = App(MockPlatform(specs, tmp_path / "a"),
+                  send_scheduler=SyncSendScheduler())
+        try:
+            assert app.dispatch(ConnectDevice(key=key)).ok
+            origin = app.devices[key].profile.resolution
+        finally:
+            app.close()
+
+    traced = [r.getMessage() for r in caplog.records
+              if r.levelno == TRACE and "raw handshake reply" in r.getMessage()]
+    assert traced, "no raw reply was traced — a reporter would have nothing to send"
+    hex_from_log = traced[0].rsplit(": ", 1)[1]
+
+    replayed = App(
+        MockPlatform([{"vid": "87ad", "pid": "70db", "name": "replay",
+                       "reply": hex_from_log}], tmp_path / "b"),
+        send_scheduler=SyncSendScheduler())
+    try:
+        assert replayed.dispatch(ConnectDevice(key=key)).ok
+        assert replayed.devices[key].profile.resolution == origin
+    finally:
+        replayed.close()
