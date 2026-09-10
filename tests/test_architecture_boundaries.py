@@ -1568,3 +1568,127 @@ def test_a_str_enum_result_field_keys_dicts_but_loses_its_attributes() -> None:
     assert LedStyle(over_the_wire).name == "AX120", (
         "rebuilding from the value is what restores them"
     )
+
+
+# ── dev/ must not do the app's job ──────────────────────────────────────────
+#
+# A dev tool exists to fake a device and read back what the app did with it.
+# Handler lifecycle — building one, dropping one, choosing which device is on
+# screen — is the app's own job, and three tools had taken it over by poking
+# ``TRCCApp``'s private bookkeeping directly.  When ``_add_handler`` changed
+# shape to take a ``DeviceState`` Result instead of a live ``Device``
+# (``0c3df980``, 2026-08-31) all three broke at once, for EVERY wire, and
+# stayed broken for 84 commits: the mock GUI's variant panel presented nothing,
+# and ``audit_present`` reported 132 of 132 variants as PRODUCT failures when
+# the failure was its own.  4793 tests saw none of it, because none of them
+# drive ``dev/``.
+#
+# So the gate is not "does dev/ still work" — it is the invariant that made it
+# rot: a dev tool may INSPECT the window (reading ``_handlers`` to assert what
+# the app built is the whole point of an audit), but it may not DRIVE handler
+# lifecycle.  Swapping the faked device is Commands on the real bus; putting a
+# device on screen is ``uc_device.device_selected``, the same public signal a
+# sidebar click emits.  Both survive any refactor of the bookkeeping below.
+_APP_JOB_CALLS = frozenset({"_add_handler", "_remove_handler", "_activate_device"})
+_APP_JOB_ASSIGNS = frozenset({"_active_key"})
+
+_DEV = Path(__file__).resolve().parents[1] / "dev"
+
+#: dev-file → count of app-job reaches.  Burned to empty on 2026-09-10; a new
+#: entry here means a tool took the app's job back.
+KNOWN_DEV_APP_JOB_REACHES: dict[str, int] = {}
+
+
+class _AppJobVisitor(ast.NodeVisitor):
+    """Collect every site where a ``dev/`` file drives handler lifecycle."""
+
+    def __init__(self) -> None:
+        self.hits: list[tuple[int, str]] = []
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in _APP_JOB_CALLS:
+            self.hits.append((node.lineno, f"{func.attr}()"))
+        self.generic_visit(node)
+
+    def _visit_assign(self, node: ast.Assign | ast.AugAssign) -> None:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        for target in targets:
+            if isinstance(target, ast.Attribute) and target.attr in _APP_JOB_ASSIGNS:
+                self.hits.append((node.lineno, f"{target.attr} ="))
+        self.generic_visit(node)
+
+    visit_Assign = _visit_assign
+    visit_AugAssign = _visit_assign
+
+
+def _dev_app_job_reaches() -> dict[str, list[tuple[int, str]]]:
+    """Every app-job reach under ``dev/``, by file, as ``(lineno, text)``."""
+    found: dict[str, list[tuple[int, str]]] = {}
+    for path in _DEV.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        visitor = _AppJobVisitor()
+        visitor.visit(ast.parse(path.read_text(encoding="utf-8")))
+        if visitor.hits:
+            found[path.relative_to(_DEV).as_posix()] = visitor.hits
+    return found
+
+
+def test_no_dev_tool_does_the_apps_job() -> None:
+    """A dev tool fakes a device and reads back — it must not drive lifecycle."""
+    counts = {f: len(h) for f, h in _dev_app_job_reaches().items()}
+    risen = {f: (KNOWN_DEV_APP_JOB_REACHES.get(f, 0), n) for f, n in counts.items()
+             if n > KNOWN_DEV_APP_JOB_REACHES.get(f, 0)}
+    assert not risen, (
+        "A dev tool is doing the app's job again — this is what broke three "
+        "tools silently for 84 commits and made audit_present report its own "
+        "breakage as 132 product bugs.  Swap the device with Commands "
+        "(summon_variant) and select it with uc_device.device_selected "
+        "(select_device) instead:\n"
+        + "\n".join(f"  {f}: {was} → {now}" for f, (was, now) in risen.items())
+    )
+
+
+def test_dev_app_job_baseline_has_no_slack() -> None:
+    """A tool that gives the job back must lower the baseline, so it stays given."""
+    counts = {f: len(h) for f, h in _dev_app_job_reaches().items()}
+    stale = {f: (want, counts.get(f, 0))
+             for f, want in KNOWN_DEV_APP_JOB_REACHES.items()
+             if counts.get(f, 0) < want}
+    assert not stale, (
+        "dev/ app-job reaches went DOWN — lower KNOWN_DEV_APP_JOB_REACHES to "
+        "lock the win in:\n"
+        + "\n".join(f"  {f}: {want} → {now}" for f, (want, now) in stale.items())
+    )
+
+
+def test_selftest_dev_app_job_collector_has_teeth() -> None:
+    """Break the rule four ways on purpose; the collector must see all four.
+
+    Without this the gate could be green because it detects nothing — which is
+    exactly how the original breakage survived a 4793-test suite.
+    """
+    banned = (
+        "window._add_handler(state)",
+        "window._remove_handler(key)",
+        "window._activate_device(key)",
+        "window._active_key = ''",
+    )
+    for src in banned:
+        visitor = _AppJobVisitor()
+        visitor.visit(ast.parse(src))
+        assert visitor.hits, f"collector is blind to: {src}"
+
+    # Inspection and the sanctioned path must NOT be flagged, or the gate would
+    # push tools away from the very shape it is steering them toward.
+    allowed = (
+        "handler = window._handlers.get(key)",
+        "was = window._active_key",
+        "result = summon_variant(app, vid, pid, pm=pm, sub=sub, fbl=fbl)",
+        "window.uc_device.device_selected.emit({'path': key})",
+    )
+    for src in allowed:
+        visitor = _AppJobVisitor()
+        visitor.visit(ast.parse(src))
+        assert not visitor.hits, f"collector wrongly flags inspection: {src}"

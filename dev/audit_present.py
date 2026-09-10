@@ -7,9 +7,10 @@ metrics → render) is the real app on the real hexagonal path.  So any variant
 that's summoned but doesn't show what the user wants is a **real app bug**,
 never a mock limitation.
 
-This drives the EXACT path a ``VariantPanel`` click runs
-(``set_active_reply`` → real ``ConnectDevice`` → ``_add_handler`` →
-``_activate_device``) for every variant in ``device_catalog()``, then checks:
+This drives the EXACT path a ``VariantPanel`` click runs — the mock answers
+the handshake as that cooler (``summon_variant``) and the user then selects it
+(``select_device``), with every step between owned by the app itself — for
+every variant in ``device_catalog()``, then checks:
 
   1. connect  — ``ConnectDevice`` returns ok (the wire parsed this pm/sub/fbl)
   2. handler  — the right type for the wire (LED→LEDHandler, else LCDHandler)
@@ -62,7 +63,9 @@ class Finding:
 
 def _summon_and_check(window: Any, d: dict, snapshot: Any) -> Finding:
     """Run the real VariantPanel summon for one variant + assert it shows properly."""
-    from trcc.core.commands import ConnectDevice
+    from _mock_bootstrap import select_device, summon_variant
+
+    from trcc.core.commands import DeviceState
     from trcc.core.models import Wire
     from trcc.ui.gui.lcd_handler import LCDHandler
     from trcc.ui.gui.led_handler import LEDHandler
@@ -74,23 +77,26 @@ def _summon_and_check(window: Any, d: dict, snapshot: Any) -> Finding:
     f = Finding(model=d["model"], key=key, pm=pm, sub=sub, fbl=fbl, wire=wire)
 
     try:
-        # Exact VariantPanel._on_click path.
-        app.platform.set_active_reply(vid, pid, pm=pm, sub=sub, fbl=fbl)
-        window._remove_handler(key)
-        result = app.dispatch(ConnectDevice(key=key))
+        # Exactly what a VariantPanel click does: the mock answers the
+        # handshake as this cooler, then the user selects it.  Everything
+        # between the two — dropping the stale handler, building the one this
+        # wire calls for, choosing the view — is the app reacting on its own
+        # bus, which is what makes a failure below a real app bug.
+        result = summon_variant(app, vid, pid, pm=pm, sub=sub, fbl=fbl)
 
         # 1. connect
         if not getattr(result, "ok", False):
             f.failures.append(f"connect: {getattr(result, 'message', 'not ok')}")
             return f
-        device = app.devices.get(key)
-        if device is None or not device.is_connected:
+        # Ask the bus what the device IS rather than reaching for the live
+        # Device: app.devices is absent on the AppProxy a daemon-mode client
+        # holds, and this audit should exercise the shape a UI really has.
+        state = app.dispatch(DeviceState(key=key))
+        if not state.ok or not state.connected:
             f.failures.append("connect: not connected after handshake")
             return f
 
-        window._add_handler(device)
-        window._active_key = ""
-        window._activate_device(key)
+        select_device(window, key)
 
         # 2. handler type matches the wire
         handler = window._handlers.get(key)
@@ -103,8 +109,7 @@ def _summon_and_check(window: Any, d: dict, snapshot: Any) -> Finding:
 
         # 3. canvas (LCD wires only — LED is segment displays, no canvas)
         if not is_led:
-            prof = getattr(device, "profile", None)
-            res = getattr(prof, "resolution", None) if prof else None
+            res = state.resolution
             if not (res and res[0] > 0 and res[1] > 0):
                 f.failures.append(f"canvas: invalid resolution {res}")
 

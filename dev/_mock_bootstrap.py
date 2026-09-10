@@ -587,3 +587,90 @@ def bootstrap(report_path: str | None = None,
         print(f"Mock fleet: {len(specs)} device spec(s) from {source} — "
               "scripted on a real host platform (no hardware needed).")
     return platform
+
+
+# ─── Summoning a variant (the mock's whole job) ──────────────────────────────
+
+def summon_variant(app: Any, vid: int, pid: int, *,
+                   pm: int, sub: int, fbl: int) -> Any:
+    """Answer the handshake as this cooler, then swap it in on the bus.
+
+    The mock fakes the device and the bytes it replies to a handshake with.
+    That is the entire contract.  Everything downstream — which handler the
+    wire calls for, what the sidebar lists, what renders — is the real app
+    reacting to a real connect, which is what makes a defect seen through here
+    a genuine app defect and never a mock limitation.
+
+    So this is what physically happens when you swap coolers, as two ordinary
+    Commands on the real bus: the old identity is unplugged, the new one is
+    plugged in and handshakes.  Returns the ``ConnectDevice`` result, whose
+    ``.ok`` is the handshake verdict.
+
+    Takes the ``App``, not a window, so it serves every UI the same way.  It is
+    the mock UI's helper, not the mock GUI's.
+
+    **Presentation is deliberately not here.**  The app does not present a
+    hotplugged device: ``_on_bus_device_connected`` adds the handler, refreshes
+    the sidebar and configures it inactive, leaving the view alone so a cooler
+    plugged in mid-session cannot steal your screen.  Choosing what is on
+    screen is a separate user action, so it belongs to whoever drives the UI.
+
+    Three dev tools used to open-code this while also poking ``_add_handler`` /
+    ``_remove_handler`` / ``_active_key`` / ``_activate_device`` on the window.
+    That is the app's own job, and when ``_add_handler`` changed shape to take
+    a ``DeviceState`` Result instead of a live ``Device`` (``0c3df980``) all
+    three broke at once and stayed broken for 84 commits — the variant panel
+    presented nothing and ``audit_present`` reported 132/132 variants as
+    product failures.  Nothing here touches a private member of any UI, so a
+    refactor of handler bookkeeping cannot break it again.
+    """
+    from trcc.core.commands import ConnectDevice, DisconnectDevice
+
+    key = f"{vid:04x}:{pid:04x}"
+    log.info("summon_variant: %s pm=%d sub=%d fbl=%d", key, pm, sub, fbl)
+    app.platform.set_active_reply(vid, pid, pm=pm, sub=sub, fbl=fbl)
+    app.dispatch(DisconnectDevice(key=key))
+    result = app.dispatch(ConnectDevice(key=key))
+    if not getattr(result, "ok", False):
+        log.warning("summon_variant: %s handshake failed — %s",
+                    key, getattr(result, "message", "not ok"))
+    return result
+
+
+def select_device(window: Any, key: str) -> None:
+    """Put *key* on screen the way a sidebar click does — for BATCH dev tools.
+
+    ``device_selected`` is ``UCDevice``'s public signal and the only input the
+    window's own click handler takes, so this is the user's own path rather
+    than a reach into the window's panel stack.
+
+    The pump in front of it is what lets a caller read the settled window back
+    synchronously.  A batch tool runs inside ``on_ready``, which the
+    composition root calls BEFORE ``qapp.exec()``: nothing is delivering the
+    queued bus signals, so the handler the app just built does not exist yet
+    and selecting straight away would find nothing to show.  With no loop
+    running, pumping is the only thing that can land it.
+
+    **Never call this from inside a slot of a running loop.**  Pumping there
+    re-enters the loop and runs whatever else is pending NESTED inside the
+    caller.  Measured 2026-09-10 with two variant buttons: enter A, enter B,
+    leave B, leave A — so the FIRST click wins and the user's last click is
+    silently discarded, and N pending events give N nested invocations.  That
+    is why this refuses rather than warns.  An interactive UI defers with
+    ``QTimer.singleShot(0, ...)`` instead; see
+    ``dev_console.VariantPanel._on_click``.
+    """
+    from PySide6.QtCore import QThread
+    from PySide6.QtWidgets import QApplication
+
+    if QThread.currentThread().loopLevel():
+        raise RuntimeError(
+            "select_device: an event loop is running, so pumping here would "
+            "run pending work nested inside this call and the last selection "
+            "would lose to the first.  Defer with QTimer.singleShot(0, ...).")
+    qapp = QApplication.instance()
+    if qapp is None:
+        raise RuntimeError("select_device: no QApplication — nothing to drive")
+    log.info("select_device: %s", key)
+    qapp.processEvents()
+    window.uc_device.device_selected.emit({"path": key})

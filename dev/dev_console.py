@@ -19,7 +19,7 @@ from __future__ import annotations
 import functools
 import logging
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFrame,
@@ -197,31 +197,23 @@ class VariantPanel(QWidget):
         self._buttons.append(btn)
         return btn
 
-    # ── click → inject reply + reconnect + present ──────────────────────
+    # ── click → swap the faked cooler, then select it ───────────────────
 
     def _on_click(self, d: dict, btn: QPushButton,
                   _checked: bool = False) -> None:
-        from trcc.core.commands import ConnectDevice
+        from _mock_bootstrap import summon_variant
 
         w = self._window
-        app = w._app
         vid, pid, pm, sub, fbl = d["vid"], d["pid"], d["pm"], d["sub"], d["fbl"]
         key = f"{vid:04x}:{pid:04x}"
         log.info("VariantPanel: select %s → %s pm=%d sub=%d fbl=%d",
                  d["model"], key, pm, sub, fbl)
 
-        app.platform.set_active_reply(vid, pid, pm=pm, sub=sub, fbl=fbl)
-
-        # Fresh handler so apply_device_config / show re-runs (both gate on
-        # is_configured); ConnectDevice re-attaches + re-handshakes the reply.
-        w._remove_handler(key)
-        result = app.dispatch(ConnectDevice(key=key))
+        # The click's whole job: this cooler is now the one plugged in.
+        result = summon_variant(w._app, vid, pid, pm=pm, sub=sub, fbl=fbl)
         if not getattr(result, "ok", False):
             w.uc_preview.set_status(f"variant {d['model']}: handshake failed")
             log.warning("VariantPanel: ConnectDevice failed for %s", key)
-            return
-        device = app.devices.get(key)
-        if device is None:
             return
         # Mark the selection only NOW.  A failed handshake returns above, and a
         # button left looking current while the status line reads "handshake
@@ -235,12 +227,21 @@ class VariantPanel(QWidget):
         btn.setChecked(True)
         self._current = btn
 
-        w._add_handler(device)
-        w._active_key = ""
-        w._activate_device(key)
         self.raise_()                    # stay above the (refreshed) sidebar
         w.uc_preview.set_status(
             f"{d['model']}   ({key}  pm={pm} sub={sub} fbl={fbl})")
+
+        # Ask for it on screen the way a user does — the sidebar's own public
+        # signal — but one loop turn later.  The app learns about the connect
+        # over a QueuedConnection, so the handler it builds does not exist yet;
+        # selecting now would find nothing to show.  It has to be a deferral
+        # and not a ``processEvents()`` drain: that re-enters the loop we are
+        # already inside and runs whatever else is pending NESTED within this
+        # click.  Measured with two variant buttons: enter A, enter B, leave B,
+        # leave A — so the FIRST click wins and the user's last click is
+        # silently discarded, and N pending events give N nested invocations.
+        QTimer.singleShot(0, functools.partial(
+            w.uc_device.device_selected.emit, {"path": key}))
 
 
 def inner_text(d: dict) -> str:

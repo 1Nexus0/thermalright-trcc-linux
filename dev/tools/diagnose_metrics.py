@@ -35,21 +35,17 @@ def _say(msg: str) -> None:
 
 
 def _summon(window, vid: int, pid: int, pm: int, sub: int) -> str:
-    from trcc.core.commands import ConnectDevice
+    from _mock_bootstrap import select_device, summon_variant
+
     from trcc.core.protocol import pm_to_fbl
 
-    app = window._app
     key = f"{vid:04x}:{pid:04x}"
     fbl = pm_to_fbl(pm, sub)
     _say(f"\n— summon {key} pm={pm} sub={sub} fbl={fbl} —")
-    app.platform.set_active_reply(vid, pid, pm=pm, sub=sub, fbl=fbl)
-    window._remove_handler(key)
-    r = app.dispatch(ConnectDevice(key=key))
+    # The mock answers the handshake as this cooler; the app does the rest.
+    r = summon_variant(window._app, vid, pid, pm=pm, sub=sub, fbl=fbl)
     _say(f"connect ok={getattr(r, 'ok', None)}")
-    device = app.devices.get(key)
-    window._add_handler(device)
-    window._active_key = ""
-    window._activate_device(key)
+    select_device(window, key)
     h = window._handlers.get(key)
     _say(f"handler={type(h).__name__} active={getattr(h, 'active', '?')}")
     _say(f"letting the real loop run {_SETTLE_MS} ms…")
