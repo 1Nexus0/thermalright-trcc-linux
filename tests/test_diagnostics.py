@@ -2270,3 +2270,56 @@ def test_a_per_frame_info_line_is_silenced_too(tmp_path: Path) -> None:
         "a genuine per-frame warning must still reach the file — silencing "
         "those would hide the one line that says something is wrong"
     )
+
+
+# ── The handshake scraper depends on the chain's ORDER ─────────────────────
+
+
+def test_handshake_scrape_returns_the_most_recent_across_a_rotation(
+    tmp_path: Path,
+) -> None:
+    """`_scrape_handshake_lines` keeps the LAST matches it appends, so it is
+    correct only because `log_chain` yields OLDEST first.
+
+    Nothing linked those two facts.  `log_chain` returning "most recent first"
+    — which is the more natural-sounding order, and a plausible future
+    "cleanup" — would silently invert this: `deque(maxlen=)` would end up
+    holding the OLDEST handshakes, and every reporter whose log had rotated
+    would send us stale device geometry with nothing to indicate it.
+
+    Reaching past a rotation is the function's whole purpose: the handshake is
+    the oldest line in a session, so it is the FIRST thing a rollover moves out
+    of the live file.
+    """
+    from trcc.adapters.diagnostics.debug_report import _scrape_handshake_lines
+
+    live = tmp_path / "trcc.log"
+    # Higher suffix == older, and the live file closes the chain.
+    (tmp_path / "trcc.log.2").write_text(
+        "noise\nBulkLcd handshake OK: PM=1 oldest\n", encoding="utf-8")
+    (tmp_path / "trcc.log.1").write_text(
+        "BulkLcd handshake OK: PM=2 middle\nnoise\n", encoding="utf-8")
+    live.write_text(
+        "BulkLcd handshake OK: PM=3 newest\nnoise\n", encoding="utf-8")
+    # A sidecar sharing the prefix must not be read as a segment.
+    (tmp_path / "trcc.log.lock").write_text("", encoding="utf-8")
+
+    every = _scrape_handshake_lines(live, keep=10)
+    assert [ln.split("PM=")[1] for ln in every] == ["1 oldest", "2 middle",
+                                                    "3 newest"], (
+        "the chain must be read oldest-first so the newest handshake lands last")
+
+    assert "3 newest" in _scrape_handshake_lines(live, keep=1)[0], (
+        "keep=1 must retain the MOST RECENT handshake, not the oldest")
+
+
+def test_handshake_scrape_survives_an_unreadable_segment(tmp_path: Path) -> None:
+    """One bad segment must not lose the rest — a report from a broken install
+    is exactly when this runs."""
+    from trcc.adapters.diagnostics.debug_report import _scrape_handshake_lines
+
+    live = tmp_path / "trcc.log"
+    (tmp_path / "trcc.log.1").mkdir()          # a directory where a file belongs
+    live.write_text("HidLcd handshake OK: PM=9\n", encoding="utf-8")
+
+    assert len(_scrape_handshake_lines(live)) == 1
