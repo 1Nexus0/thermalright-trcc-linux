@@ -586,12 +586,12 @@ class SleepDevice(Command[SendResult]):
         try:
             if device.is_led:
                 from .led import SetLedColors
-                result = SetLedColors(
+                result = app.dispatch(SetLedColors(
                     key=self.key, colors=[(0, 0, 0)], global_on=False,
-                ).execute(app)
+                ))
                 return SendResult(ok=result.ok, key=self.key, bytes_sent=0,
                                   message=result.message)
-            return SendColor(key=self.key, r=0, g=0, b=0).execute(app)
+            return app.dispatch(SendColor(key=self.key, r=0, g=0, b=0))
         except RuntimeError as e:
             # An App with no Renderer: ``App.display`` raises rather than
             # returning, and blanking needs a rendered frame.  Legitimate
@@ -832,7 +832,7 @@ class TickDisplay(Command[RenderResult]):
             # No video on this device — a plain re-render.  Video fields stay
             # None so a UI can tell "not a video" from "frame 0 of a video".
             log.debug("TickDisplay %s: no playback — plain render", self.key)
-            return RenderAndSend(key=self.key).execute(app)
+            return app.dispatch(RenderAndSend(key=self.key))
 
         # ``Playback.advance`` self-guards on ``paused`` (returns the current
         # frame without moving the cursor), so pause needs no check here — and
@@ -846,7 +846,7 @@ class TickDisplay(Command[RenderResult]):
             self.key, playback.cursor, playback.frame_count,
             playback.interval_ms, playback.paused,
         )
-        result = RenderAndSend(key=self.key).execute(app)
+        result = app.dispatch(RenderAndSend(key=self.key))
         return replace(
             result,
             cursor=playback.cursor,
@@ -1328,7 +1328,7 @@ class StartScreencast(Command[ScreencastResult]):
         # the same wire — stop it first so the handler owns the surface
         # cleanly.  StopVideo is idempotent so it's safe even if no
         # playback was loaded.
-        StopVideo(key=self.key).execute(app)
+        app.dispatch(StopVideo(key=self.key))
 
         # Persist the region as the active display source (clears any
         # background/video override — the toggles are mutually exclusive) so
@@ -1546,7 +1546,7 @@ class CaptureScreencastFrame(Command[ScreencastResult]):
             )
 
         # Encode + send live in the sibling, so there is one copy of them.
-        result = SendScreencastFrame(key=self.key, frame=raw).execute(app)
+        result = app.dispatch(SendScreencastFrame(key=self.key, frame=raw))
         if not result.ok:
             return result
         return ScreencastResult(
@@ -1628,7 +1628,7 @@ class SetMediaPlayer(Command[MediaPlayerResult]):
                 message=f"media-player source does not exist: {uri}",
             )
         app.settings.set_media_player_uri(self.key, uri)
-        play = PlayVideo(key=self.key, path=local).execute(app)
+        play = app.dispatch(PlayVideo(key=self.key, path=local))
         return MediaPlayerResult(
             ok=play.ok, key=self.key, uri=uri, playing=play.ok,
             message=(f"media-player playing {local.name}"
@@ -1687,7 +1687,7 @@ class SetBackground(Command[BackgroundResult]):
                 "PlayVideo", self.path.name,
             )
             app.settings.set_background_path(self.key, str(self.path))
-            play = PlayVideo(key=self.key, path=self.path).execute(app)
+            play = app.dispatch(PlayVideo(key=self.key, path=self.path))
             return BackgroundResult(
                 ok=play.ok, key=self.key, path=str(self.path), kind="video",
                 message=play.message,
@@ -2707,7 +2707,7 @@ class ToggleVideo(Command[PauseVideoResult]):
                 message=f"No active video playback for {self.key}",
             )
         new_state = not playback.paused
-        return PauseVideo(key=self.key, paused=new_state).execute(app)
+        return app.dispatch(PauseVideo(key=self.key, paused=new_state))
 
 @dataclass(frozen=True, slots=True)
 class SeekVideo(Command[SeekVideoResult]):

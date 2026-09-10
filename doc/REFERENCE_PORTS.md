@@ -666,7 +666,7 @@ distro_name() -> str
 memory_info() -> list[dict[str, str]]
 no_devices_hint() -> str
 permission_denied_hint() -> str
-setup(interactive: 'bool' = True) -> int
+setup(dry_run: 'bool' = False) -> int
 ```
 
 **You inherit (17):** `autostart` · `configure_stdout` · `disk_partitions` · `hotplug` · `install_method` · `minimize_on_close` · `open_transport` · `package_manager` · `packages` · `paths` · `scan_devices` · `screen_capture` · `sensors` · `software_install_hint` · `upgrade_command` · `usb_power_state` · `worker_thread_context`
@@ -739,7 +739,7 @@ permission_denied_hint() -> str
 scan_devices() -> list[DeviceInfo]
 screen_capture() -> ScreenCapture
 sensors() -> SensorEnumerator
-setup(interactive: 'bool' = True) -> int
+setup(dry_run: 'bool' = False) -> int
 software_install_hint(tool: 'str') -> str
 upgrade_command() -> tuple[str, ...]
 usb_power_state(vid: 'int', pid: 'int') -> UsbPowerState | None

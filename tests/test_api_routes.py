@@ -1307,12 +1307,23 @@ def test_display_tick_restores_then_ticks(api_client: TestClient) -> None:
     from trcc.core.commands import RestoreDeviceState, TickDisplay
 
     trcc = api_client.app.state.trcc          # type: ignore[attr-defined]
-    seen: list[str] = []
+    # Depth-tracked: a Command may dispatch others, and this pins what the
+    # ROUTE chooses, not how TickDisplay composes itself.
+    route_dispatched: list[str] = []
+    every_dispatch: list[str] = []
+    depth = 0
     real_dispatch = trcc.dispatch
 
     def _recording_dispatch(cmd):             # type: ignore[no-untyped-def]
-        seen.append(type(cmd).__name__)
-        return real_dispatch(cmd)
+        nonlocal depth
+        every_dispatch.append(type(cmd).__name__)
+        if depth == 0:
+            route_dispatched.append(type(cmd).__name__)
+        depth += 1
+        try:
+            return real_dispatch(cmd)
+        finally:
+            depth -= 1
 
     trcc.dispatch = _recording_dispatch       # type: ignore[method-assign]
     try:
@@ -1322,9 +1333,14 @@ def test_display_tick_restores_then_ticks(api_client: TestClient) -> None:
     finally:
         trcc.dispatch = real_dispatch         # type: ignore[method-assign]
 
-    assert seen == [RestoreDeviceState.__name__, TickDisplay.__name__], (
-        f"expected restore-then-animation-tick, got {seen}"
-    )
+    assert route_dispatched == [
+        RestoreDeviceState.__name__, TickDisplay.__name__,
+    ], f"expected restore-then-animation-tick, got {route_dispatched}"
+    # #239: RenderAndSend may be TickDisplay's child, but the route must not
+    # choose it — with it the cursor never advances and a video sits on frame 0.
+    assert "RenderAndSend" not in route_dispatched
+    assert every_dispatch.index("TickDisplay") < every_dispatch.index(
+        "RenderAndSend"), "RenderAndSend must be nested under TickDisplay"
 
 
 # =========================================================================

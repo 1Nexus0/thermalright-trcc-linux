@@ -127,13 +127,13 @@ class InitializeLed(Command[LedColorsResult]):
 
     def execute(self, app: App) -> LedColorsResult:
         log.info("InitializeLed: key=%s", self.key)
-        connect_result = ConnectDevice(key=self.key).execute(app)
+        connect_result = app.dispatch(ConnectDevice(key=self.key))
         if not connect_result.ok:
             return LedColorsResult(
                 ok=False, key=self.key, colors=[],
                 message=f"connect failed: {connect_result.message}",
             )
-        return RenderLed(key=self.key).execute(app)
+        return app.dispatch(RenderLed(key=self.key))
 
 @dataclass(frozen=True, slots=True)
 class RenderLed(Command[LedColorsResult]):

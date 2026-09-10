@@ -1777,3 +1777,63 @@ def test_path_home_baseline_has_no_slack() -> None:
         "Path.home() calls went DOWN — lower KNOWN_HOME_CALLS to lock it in:\n"
         + "\n".join(f"  {f}: {want} → {now}" for f, (want, now) in stale.items())
     )
+
+
+# ── One way to run a Command: the bus ───────────────────────────────────────
+#
+# `App.dispatch` is the single logging chokepoint -- entry with the command's
+# full repr, outcome, and a WARNING when a Result is not ok.  A Command that
+# calls `Other(...).execute(app)` directly skips all three, so an inner command
+# that fails leaves NOTHING in the log.  22 sites did that; they now dispatch.
+#
+# The 13 survivors are the ones whose caller already logs the inner outcome
+# itself (`SleepDevice` failing is a benign "blank skipped" at DEBUG, and
+# routing it through the bus would turn that into a WARNING in every report).
+# Listed at their real count so a fourteenth fails.
+KNOWN_DIRECT_EXECUTE: dict[str, int] = {
+    "trcc/core/commands/device.py": 6,
+    "trcc/core/commands/theme.py": 7,
+}
+
+
+def _direct_execute_counts() -> dict[str, int]:
+    """Per-file `X(...).execute(app)` calls -- i.e. around the bus."""
+    counts: dict[str, int] = {}
+    for path in sorted((_SRC / "trcc").rglob("*.py")):
+        rel = str(path.relative_to(_SRC))
+        if rel == "trcc/app.py":          # dispatch itself calls cmd.execute
+            continue
+        n = sum(1 for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "execute"
+                and len(node.args) == 1
+                and isinstance(node.args[0], ast.Name)
+                and node.args[0].id == "app")
+        if n:
+            counts[rel] = n
+    return counts
+
+
+def test_no_new_command_runs_around_the_bus() -> None:
+    """A new Command-calls-Command must go through `app.dispatch`."""
+    counts = _direct_execute_counts()
+    risen = {f: (KNOWN_DIRECT_EXECUTE.get(f, 0), n) for f, n in counts.items()
+             if n > KNOWN_DIRECT_EXECUTE.get(f, 0)}
+    assert not risen, (
+        "New `X(...).execute(app)` — use `app.dispatch(X(...))` so the run is "
+        "logged; skip the bus only when the caller logs the outcome itself:\n"
+        + "\n".join(f"  {f}: {was} → {now}" for f, (was, now) in risen.items())
+    )
+
+
+def test_direct_execute_baseline_has_no_slack() -> None:
+    """Moving one onto the bus must lower the baseline."""
+    counts = _direct_execute_counts()
+    stale = {f: (want, counts.get(f, 0))
+             for f, want in KNOWN_DIRECT_EXECUTE.items()
+             if counts.get(f, 0) < want}
+    assert not stale, (
+        "Direct execute calls went DOWN — lower KNOWN_DIRECT_EXECUTE:\n"
+        + "\n".join(f"  {f}: {want} → {now}" for f, (want, now) in stale.items())
+    )

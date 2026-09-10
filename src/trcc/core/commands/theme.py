@@ -350,9 +350,9 @@ class LoadTheme(Command[ThemeResult]):
             x, y, w, h, audio = region
             log.info("LoadTheme: %s carries a screencast region %s — "
                      "dispatching StartScreencast", theme.name, region)
-            sc = StartScreencast(
+            sc = app.dispatch(StartScreencast(
                 key=self.key, x=x, y=y, w=w, h=h, audio=audio,
-            ).execute(app)
+            ))
             return ThemeResult(
                 ok=sc.ok, key=self.key, theme_name=theme.name,
                 theme_path=theme_path_str,
@@ -368,7 +368,7 @@ class LoadTheme(Command[ThemeResult]):
         if media_uri is not None:
             log.info("LoadTheme: %s carries a media-player source %r — "
                      "dispatching SetMediaPlayer", theme.name, media_uri)
-            SetMediaPlayer(key=self.key, uri=media_uri).execute(app)
+            app.dispatch(SetMediaPlayer(key=self.key, uri=media_uri))
 
         # Video-backed themes (Theme.{mp4,mov,webm,zt}) go through the
         # PlayVideo pipeline so the same VideoStarted event fires for
@@ -382,7 +382,7 @@ class LoadTheme(Command[ThemeResult]):
                 "LoadTheme: %s has bundled video %s — dispatching PlayVideo",
                 theme.name, video_path.name,
             )
-            play = PlayVideo(key=self.key, path=video_path).execute(app)
+            play = app.dispatch(PlayVideo(key=self.key, path=video_path))
             if not play.ok:
                 return ThemeResult(
                     ok=False, key=self.key, theme_name=theme.name,
@@ -1520,7 +1520,7 @@ class UploadCustomMask(Command[MaskUploadResult]):
         log.info("UploadCustomMask: %s → %s (ref=%s, dc=%s)",
                  self.source.name, mask_dir.name, ref,
                  "yes" if dc_bytes is not None else "no")
-        apply_result = ApplyMask(key=self.key, path=mask_file).execute(app)
+        apply_result = app.dispatch(ApplyMask(key=self.key, path=mask_file))
         if not apply_result.ok:
             return MaskUploadResult(
                 ok=False, key=self.key, path=str(mask_file),
@@ -1633,9 +1633,9 @@ class RestoreLastTheme(Command[ThemeResult]):
             # the same name, so restore must NOT re-resolve a shipped pointer to
             # the user one — it loads whatever the user last selected.
             candidate = oriented_theme_path(app, self.key, candidate)
-            return LoadTheme(
+            return app.dispatch(LoadTheme(
                 key=self.key, path=candidate, reset_overrides=False,
-            ).execute(app)
+            ))
 
         # Legacy bare-name value — search the known theme roots.
         resolved = _search_theme_by_name(app, self.key, stored)
@@ -1645,9 +1645,9 @@ class RestoreLastTheme(Command[ThemeResult]):
                 message=(f"Persisted theme {stored!r} not found in any "
                          "known theme root for this device"),
             )
-        return LoadTheme(
+        return app.dispatch(LoadTheme(
             key=self.key, path=resolved, reset_overrides=False,
-        ).execute(app)
+        ))
 
 @dataclass(frozen=True, slots=True)
 class RestoreDeviceState(Command[ThemeResult]):
@@ -1686,7 +1686,7 @@ class RestoreDeviceState(Command[ThemeResult]):
                                message="Display state already active")
 
         # 2. Persisted theme (reset_overrides=False preserves overlay/mask edits).
-        RestoreLastTheme(key=self.key).execute(app)
+        app.dispatch(RestoreLastTheme(key=self.key))
 
         # 3. Nothing persisted → first available theme (GUI first-install parity).
         #    Resolve via the shared oriented resolver (device profile → native →
@@ -1720,7 +1720,7 @@ class RestoreDeviceState(Command[ThemeResult]):
         if bg:
             log.info("RestoreDeviceState: %s replaying persisted background %s",
                      self.key, bg)
-            PlayVideo(key=self.key, path=Path(bg)).execute(app)
+            app.dispatch(PlayVideo(key=self.key, path=Path(bg)))
 
         return ThemeResult(
             ok=True, key=self.key, theme_name=theme.name,
@@ -1952,7 +1952,7 @@ class LoadCloudTheme(Command[CloudThemeLoadResult]):
         # ``_resolve_background`` short-circuits to ``playback.current``
         # when a playback exists, so this is the entire "play this video
         # as the bg" wire (overlay + mask stay untouched).
-        play_result = PlayVideo(key=self.key, path=mp4_path).execute(app)
+        play_result = app.dispatch(PlayVideo(key=self.key, path=mp4_path))
         return CloudThemeLoadResult(
             ok=play_result.ok,
             key=self.key,
@@ -2010,7 +2010,7 @@ class LoadImage(Command[ThemeResult]):
                 ok=False, key=self.key,
                 message=f"Failed to stage image as theme: {e}",
             )
-        return LoadTheme(key=self.key, path=theme_dir).execute(app)
+        return app.dispatch(LoadTheme(key=self.key, path=theme_dir))
 
 @dataclass(frozen=True, slots=True)
 class ProbeVideoDuration(Query[VideoDurationResult]):
@@ -2312,5 +2312,5 @@ class LoadVideo(Command[ThemeResult]):
                 ok=False, key=self.key,
                 message=f"Failed to stage video as theme: {e}",
             )
-        return LoadTheme(key=self.key, path=theme_dir).execute(app)
+        return app.dispatch(LoadTheme(key=self.key, path=theme_dir))
 

@@ -1427,7 +1427,7 @@ OS-specific one-time setup (udev, WinUSB guide, etc.).
 
 | Field | Type | Required |
 |---|---|---|
-| `interactive` | `bool` | no |
+| `dry_run` | `bool` | no |
 
 ### `RunUpgrade`
 
