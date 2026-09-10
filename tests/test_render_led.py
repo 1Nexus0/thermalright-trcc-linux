@@ -670,3 +670,74 @@ def test_render_led_forwards_week_sunday_to_the_renderer(
         "week_sunday never reached compute_mask — the LC2 clock ignores the "
         f"user's week-start preference.  kwargs seen: {sorted(seen)}"
     )
+
+
+# ── The page selector, now callable on its own ─────────────────────────────
+
+
+class _FakeDisplay:
+    def __init__(self, phase_count: int) -> None:
+        self.phase_count = phase_count
+
+
+class _FakeEffects:
+    """`next_sync_zone` just steps, so the test reads as arithmetic."""
+
+    @staticmethod
+    def next_sync_zone(zones, current):
+        del zones
+        return current + 1
+
+
+class _FakeApp:
+    led_effects = _FakeEffects()
+
+
+def _page(*, phase_count, zone_sync, advance, ticks, interval, current,
+          selected=7, style=LedStyle.AX120, phase=3):
+    from trcc.core.commands.led import RenderLed
+    from trcc.core.led_models import LedDeviceSettings, LedRuntimeState
+
+    runtime = LedRuntimeState()
+    runtime.zone_sync_ticks = ticks
+    runtime.zone_sync_current = current
+    settings = LedDeviceSettings()
+    settings.zone_sync = zone_sync
+    settings.zone_sync_interval_ticks = interval
+    settings.selected_zone = selected
+    got = RenderLed(key="0416:8001", phase=phase, advance=advance)._metric_page(
+        _FakeApp(), _FakeDisplay(phase_count), style, settings, runtime)
+    return got, runtime
+
+
+def test_single_page_display_keeps_the_commands_own_phase() -> None:
+    """One page means nothing to choose — the carousel must not engage."""
+    page, runtime = _page(phase_count=1, zone_sync=True, advance=True,
+                          ticks=0, interval=1, current=5)
+    assert page == 3
+    assert runtime.zone_sync_ticks == 0, "a single-page display must not tick"
+
+
+def test_carousel_off_uses_the_button_the_user_pressed() -> None:
+    """`selected_zone` is what the selector buttons persist."""
+    page, _ = _page(phase_count=4, zone_sync=False, advance=True,
+                    ticks=0, interval=1, current=5, selected=2)
+    assert page == 2
+
+
+def test_only_a_loop_tick_advances_the_carousel() -> None:
+    """A reactive re-render holds the page; a slider drag fires many of them."""
+    held, runtime = _page(phase_count=4, zone_sync=True, advance=False,
+                          ticks=0, interval=1, current=5)
+    assert (held, runtime.zone_sync_ticks) == (5, 0)
+
+    stepped, runtime = _page(phase_count=4, zone_sync=True, advance=True,
+                             ticks=0, interval=1, current=5)
+    assert stepped == 6, "one loop tick at interval 1 advances one page"
+
+
+def test_the_carousel_waits_for_its_interval() -> None:
+    """Below the interval the page holds and only the tick counter moves."""
+    page, runtime = _page(phase_count=4, zone_sync=True, advance=True,
+                          ticks=0, interval=3, current=5)
+    assert (page, runtime.zone_sync_ticks) == (5, 1)

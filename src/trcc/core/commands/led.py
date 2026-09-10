@@ -47,6 +47,9 @@ from .device import (
 
 if TYPE_CHECKING:
     from ...app import App
+    from ...core.led_models import LedDeviceSettings, LedStyle
+    from ...core.models import HardwareMetrics
+    from ...services.led_segment import SegmentDisplay
 
 log = logging.getLogger(__name__)
 
@@ -168,6 +171,74 @@ class RenderLed(Command[LedColorsResult]):
     # False so dragging a slider doesn't race the metric-page carousel.
     advance: bool = True
 
+    def _frame_metrics(
+        self, app: App,
+    ) -> tuple[dict[str, float], HardwareMetrics]:
+        """The one metrics sample this frame renders from.
+
+        The RAW sample ``MetricsLoop`` cached on its last broadcast — the same
+        steady values the GUI gauges observe, not a second divergent view.
+        ``RenderLed`` is dispatched ~7x/s by the 150 ms animation loop, and
+        re-polling the sensors every tick resampled instantaneous readings and
+        made the displayed metric flicker ("sporadic metrics").
+
+        Falls back to one direct read when nothing has broadcast yet: a first
+        render before the loop ticked, or a one-off CLI/test dispatch with no
+        loop running at all.
+        """
+        current, metrics = app.last_raw_readings, app.last_raw_snapshot
+        if current is None or metrics is None:
+            enum = app.platform.sensors()
+            current, metrics = enum.read_all(), enum.snapshot()
+            log.debug("RenderLed %s: no broadcast yet — read sensors directly",
+                      self.key)
+        log.debug(
+            "RenderLed %s: snapshot cpu_temp=%.0f cpu_pct=%.0f "
+            "gpu_temp=%.0f gpu_usage=%.0f", self.key,
+            metrics.cpu_temp, metrics.cpu_percent,
+            metrics.gpu_temp, metrics.gpu_usage,
+        )
+        return current, metrics
+
+    def _metric_page(
+        self, app: App, display: SegmentDisplay, style: LedStyle,
+        settings: LedDeviceSettings, runtime: LedRuntimeState,
+    ) -> int:
+        """Which metric PAGE a multi-page segment display shows (C# LunBo).
+
+        CPU temp / CPU % / GPU temp / GPU %, and so on.  The selector buttons
+        persist the choice as ``selected_zone``; with the page carousel on (and
+        not a select-all style) it rotates the enabled pages instead.
+
+        Gated on the display actually having more than one page, NOT on
+        ``zones`` being populated — which it never is for page-style devices.
+        That was the bug: selecting a metric set ``selected_zone`` and the
+        render ignored it and stayed on page 0.
+
+        **Advances ``runtime``** when the carousel is live and this is a loop
+        tick.  Only the animation loop (``advance=True``) may: reactive
+        re-renders hold the page, so a slider drag — which fires many
+        ``LedSettingsChanged`` — cannot race it forward.
+        """
+        if display.phase_count <= 1:
+            log.debug("RenderLed %s: single-page display — phase=%d",
+                      self.key, self.phase)
+            return self.phase
+        if not settings.zone_sync or style.value in LED_SELECT_ALL_STYLES:
+            log.debug("RenderLed %s: selected-zone phase=%d",
+                      self.key, settings.selected_zone)
+            return settings.selected_zone
+        if self.advance:
+            runtime.zone_sync_ticks += 1
+            if runtime.zone_sync_ticks >= settings.zone_sync_interval_ticks:
+                runtime.zone_sync_ticks = 0
+                runtime.zone_sync_current = app.led_effects.next_sync_zone(
+                    settings.zone_sync_zones, runtime.zone_sync_current,
+                )
+        log.debug("RenderLed %s: zone-sync carousel phase=%d (advance=%s)",
+                  self.key, runtime.zone_sync_current, self.advance)
+        return runtime.zone_sync_current
+
     def execute(self, app: App) -> LedColorsResult:
         from ...services.led_effects import apply_brightness
         from ...services.led_segment import compute_mask, get_display
@@ -221,20 +292,7 @@ class RenderLed(Command[LedColorsResult]):
         # refresh interval and animation still advances on runtime counters.
         # compute_mask reads metrics attributes (metrics.cpu_temp, …); the
         # effects engine reads the flat dict for per-zone color sources.
-        current = app.last_raw_readings
-        metrics = app.last_raw_snapshot
-        if current is None or metrics is None:
-            # No broadcast yet (e.g. first render before MetricsLoop ticked, or
-            # a one-off CLI/test dispatch with no loop running) — read once.
-            enum = app.platform.sensors()
-            current = enum.read_all()
-            metrics = enum.snapshot()
-        log.debug(
-            "RenderLed %s: snapshot cpu_temp=%.0f cpu_pct=%.0f "
-            "gpu_temp=%.0f gpu_usage=%.0f", self.key,
-            metrics.cpu_temp, metrics.cpu_percent,
-            metrics.gpu_temp, metrics.gpu_usage,
-        )
+        current, metrics = self._frame_metrics(app)
 
         # If the caller passed an explicit color, treat it as a STATIC
         # diagnostic at full brightness (same shape RenderLed has always
@@ -285,32 +343,8 @@ class RenderLed(Command[LedColorsResult]):
             # was the bug: selecting a metric set ``selected_zone`` but the
             # render ignored it and stayed stuck on page 0).  Single-page
             # displays keep ``self.phase``.
-            phase = self.phase
-            if display.phase_count > 1:
-                if (effective_settings.zone_sync
-                        and style.value not in LED_SELECT_ALL_STYLES):
-                    # Only the animation-loop tick advances the carousel;
-                    # reactive re-renders (advance=False) hold the current page
-                    # so a slider drag — which fires many LedSettingsChanged —
-                    # doesn't race it.
-                    if self.advance:
-                        runtime.zone_sync_ticks += 1
-                        if (runtime.zone_sync_ticks
-                                >= effective_settings.zone_sync_interval_ticks):
-                            runtime.zone_sync_ticks = 0
-                            runtime.zone_sync_current = (
-                                app.led_effects.next_sync_zone(
-                                    effective_settings.zone_sync_zones,
-                                    runtime.zone_sync_current,
-                                )
-                            )
-                    phase = runtime.zone_sync_current
-                    log.debug("RenderLed %s: zone-sync carousel phase=%d "
-                              "(advance=%s)", self.key, phase, self.advance)
-                else:
-                    phase = effective_settings.selected_zone
-                    log.debug("RenderLed %s: selected-zone phase=%d",
-                              self.key, phase)
+            phase = self._metric_page(
+                app, display, style, effective_settings, runtime)
 
             # Personalize the RAW snapshot through the single conversion relay,
             # using THIS device's unit — the device owns its °C/°F, so a future
