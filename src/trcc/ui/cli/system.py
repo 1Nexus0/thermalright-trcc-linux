@@ -49,11 +49,27 @@ app = typer.Typer(help="System-level operations (setup, sensors, info).",
 @app.command("setup")
 def setup(
     yes: bool = typer.Option(False, "--yes", "-y",
-                             help="Non-interactive (assume yes to prompts)"),
+                             help="Apply the changes without confirming"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Show what would be done, change nothing"),
 ) -> None:
-    """Run the OS-specific setup (udev rules on Linux, WinUSB guide on Windows)."""
-    log.info("cli system setup: yes=%s", yes)
-    result = get_app().dispatch(RunSetup(interactive=not yes))
+    """Run the OS-specific setup (udev rules on Linux, WinUSB guide on Windows).
+
+    Applies by default — this is the documented first-run step, so making it
+    refuse without a flag would put a wall in front of onboarding.
+    ``--dry-run`` is the only way to not apply.
+
+    ``--yes`` used to mean the opposite of what it said.  It was wired to the
+    platform's ``interactive`` flag, where ``False`` meant "change nothing", so
+    ``trcc system setup --yes`` PREVIEWED the udev rules instead of writing
+    them and then reported success — and the user hit permission errors on a
+    device the setup had told them was configured (#285).  It is kept and now
+    simply means "apply", which is what anyone passing it intended; there is
+    no confirmation of our own to skip, and the sudo password prompt is not
+    something a flag here can or should suppress.
+    """
+    log.info("cli system setup: yes=%s dry_run=%s", yes, dry_run)
+    result = get_app().dispatch(RunSetup(dry_run=dry_run))
     typer.echo(result.message)
     for warning in result.warnings:
         typer.echo(f"  warning: {warning}", err=True)

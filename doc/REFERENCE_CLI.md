@@ -190,7 +190,7 @@ trcc serve [OPTIONS]
 
 ### `trcc setup`
 
-Alias for `trcc system setup` — OS-specific setup (udev rules on Linux, WinUSB guide on Windows). New users reach for the short form. (#194)
+Alias for `trcc system setup` — OS-specific setup (udev rules on Linux, WinUSB guide on Windows). New users reach for the short form. (#194) Takes the same flags as the command it aliases: an alias that accepts a smaller set is a second, quietly different command.
 
 ```bash
 trcc setup [OPTIONS]
@@ -198,7 +198,8 @@ trcc setup [OPTIONS]
 
 | Option | Description |
 |---|---|
-| `--yes`, `-y` | Non-interactive (assume yes to prompts) |
+| `--yes`, `-y` | Apply the changes (the default) |
+| `--dry-run` | Show what would be done, change nothing |
 
 ### `trcc shell`
 
@@ -1731,7 +1732,7 @@ trcc system sensors
 
 ### `trcc system setup`
 
-Run the OS-specific setup (udev rules on Linux, WinUSB guide on Windows).
+Run the OS-specific setup (udev rules on Linux, WinUSB guide on Windows). Applies by default — this is the documented first-run step, so making it refuse without a flag would put a wall in front of onboarding. `--dry-run` is the only way to not apply. `--yes` used to mean the opposite of what it said. It was wired to the platform's `interactive` flag, where `False` meant "change nothing", so `trcc system setup --yes` PREVIEWED the udev rules instead of writing them and then reported success — and the user hit permission errors on a device the setup had told them was configured (#285). It is kept and now simply means "apply", which is what anyone passing it intended; there is no confirmation of our own to skip, and the sudo password prompt is not something a flag here can or should suppress.
 
 ```bash
 trcc system setup [OPTIONS]
@@ -1739,7 +1740,8 @@ trcc system setup [OPTIONS]
 
 | Option | Description |
 |---|---|
-| `--yes`, `-y` | Non-interactive (assume yes to prompts) |
+| `--yes`, `-y` | Apply the changes without confirming |
+| `--dry-run` | Show what would be done, change nothing |
 
 ### `trcc system snapshot`
 

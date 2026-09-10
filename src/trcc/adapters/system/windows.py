@@ -381,17 +381,17 @@ class WindowsPlatform(BaseOS, key="win32"):
         log.debug("worker_thread_context: COM apartment")
         return _ComApartment()
 
-    def setup(self, interactive: bool = True) -> int:
+    def setup(self, dry_run: bool = False) -> int:
         """Diagnose WinUSB driver state and print Zadig instructions.
 
         Read-only: Windows driver installation needs UAC + a signed
-        driver package, which this script can't fake.  ``interactive``
+        driver package, which this script can't fake.  ``dry_run``
         is accepted for parity with other platforms but ignored —
         diagnostic is the same either way.
         """
-        log.info("setup: interactive=%s", interactive)
+        log.info("setup: dry_run=%s", dry_run)
         from ._winusb import install
-        return install(dry_run=not interactive)
+        return install(dry_run=dry_run)
 
     def check_permissions(self) -> list[str]:
         log.info("check_permissions: called")

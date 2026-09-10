@@ -84,7 +84,12 @@ router = APIRouter(prefix="/system", tags=["system"])
 @router.post("/setup")
 def setup(request: Request) -> SetupResult:
     log.info("api POST /system/setup")
-    result = request.app.state.trcc.dispatch(RunSetup(interactive=False))
+    # PREVIEW ONLY, deliberately.  This passed ``interactive=False`` — which
+    # read as "no prompts" and MEANT "change nothing", so this route has never
+    # applied anything.  Behaviour is unchanged, but it now says so: letting an
+    # HTTP call write /etc/udev/rules.d and re-exec as root is a security
+    # decision for the maintainer, not a bug to quietly fix.
+    result = request.app.state.trcc.dispatch(RunSetup(dry_run=True))
     return result
 
 

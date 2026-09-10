@@ -109,13 +109,18 @@ def quickstart(
 @app.command("setup")
 def setup(
     yes: bool = typer.Option(False, "--yes", "-y",
-                             help="Non-interactive (assume yes to prompts)"),
+                             help="Apply the changes (the default)"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Show what would be done, change nothing"),
 ) -> None:
     """Alias for ``trcc system setup`` — OS-specific setup (udev rules on
     Linux, WinUSB guide on Windows).  New users reach for the short form. (#194)
+
+    Takes the same flags as the command it aliases: an alias that accepts a
+    smaller set is a second, quietly different command.
     """
-    log.info("cli setup (alias → system setup): yes=%s", yes)
-    system.setup(yes=yes)
+    log.info("cli setup (alias → system setup): yes=%s dry_run=%s", yes, dry_run)
+    system.setup(yes=yes, dry_run=dry_run)
 
 
 def _ensure_logging() -> None:

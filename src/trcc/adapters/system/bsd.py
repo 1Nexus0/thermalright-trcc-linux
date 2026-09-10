@@ -130,7 +130,7 @@ class BsdOS(BaseOS, key="bsd"):
         bulk = PyUsbBulkTransport(vid, pid, serial)
         return UsbBotScsiTransport(bulk)
 
-    def setup(self, interactive: bool = True) -> int:
+    def setup(self, dry_run: bool = False) -> int:
         """Install FreeBSD devd rules so non-root users can talk to the cooler.
 
         Mirrors the Linux setup(): writes a config file under
@@ -138,7 +138,7 @@ class BsdOS(BaseOS, key="bsd"):
         on attach for every device in :data:`ALL_DEVICES`.  Re-execs via
         sudo/doas when called as a normal user.
 
-        ``interactive=False`` is a dry run — prints what would be
+        ``dry_run=True`` prints what would be
         written, no system changes.
 
         OpenBSD has no devd; the installer logs a pointer to the right
@@ -148,11 +148,11 @@ class BsdOS(BaseOS, key="bsd"):
         the BSD desktops are the same XDG desktops, and a pip install
         leaves the same gap there (#231).
         """
-        log.info("setup: interactive=%s", interactive)
+        log.info("setup: dry_run=%s", dry_run)
         from ._desktop_entry import XdgDesktopEntry
         from ._devd import install
-        rc = install(dry_run=not interactive)
-        if interactive:
+        rc = install(dry_run=dry_run)
+        if not dry_run:
             # Convenience, never a reason to fail setup.
             XdgDesktopEntry().install()
         else:

@@ -595,7 +595,7 @@ class LinuxOS(BaseOS, key="linux"):
 
     # ── Setup / permissions ──────────────────────────────────────────
 
-    def setup(self, interactive: bool = True) -> int:
+    def setup(self, dry_run: bool = False) -> int:
         """Run one-time Linux setup.
 
         Four things happen here and none can silently no-op:
@@ -613,12 +613,12 @@ class LinuxOS(BaseOS, key="linux"):
              the menu (#231).  Per-user, no root, skipped when a package
              already provides it.
 
-        Non-interactive mode prints what would be done and returns 0
+        ``dry_run=True`` prints what would be done and returns 0
         without touching the system.
         """
-        log.info("LinuxOS.setup: interactive=%s", interactive)
-        if not interactive:
-            log.info("=== dry run (pass interactive=True to apply) ===")
+        log.info("LinuxOS.setup: dry_run=%s", dry_run)
+        if dry_run:
+            log.info("=== dry run (pass dry_run=False to apply) ===")
             install_udev_rules(dry_run=True)
             vendors = detect_gpu_vendors()
             log.info("Detected GPU vendors: %s", sorted(vendors) or "none")

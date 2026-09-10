@@ -330,7 +330,7 @@ class FakePlatform(Platform):
             self._hotplug_monitor = NoopHotplugMonitor(reason="test fake")
         return self._hotplug_monitor
 
-    def setup(self, interactive: bool = True) -> int:
+    def setup(self, dry_run: bool = False) -> int:
         return 0
 
     def check_permissions(self) -> List[str]:

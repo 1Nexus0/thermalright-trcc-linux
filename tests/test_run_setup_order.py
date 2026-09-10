@@ -17,7 +17,7 @@ class _OrderTrackingPlatform:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def setup(self, interactive: bool = True) -> int:
+    def setup(self, dry_run: bool = False) -> int:
         self.calls.append("setup")
         return 0
 
@@ -41,3 +41,33 @@ def test_run_setup_checks_permissions_after_setup() -> None:
     assert result.warnings == []
     assert result.ok
     assert result.exit_code == 0
+
+
+def test_setup_applies_by_default_and_only_dry_run_previews() -> None:
+    """#285: `--yes` previewed instead of writing the udev rules.
+
+    The platform flag was `interactive` and inverted -- `interactive=False`
+    reads as "no prompts" and MEANT "change nothing" -- so the CLI mapped
+    `--yes` (a confirmation flag) onto it and a first-run user got permission
+    errors from a setup that had just reported success.
+
+    Asserted at the seam that decides it, per platform-facing value: what the
+    Command hands `Platform.setup`.
+    """
+    seen: list[bool] = []
+
+    class _Platform:
+        def setup(self, dry_run: bool = False) -> int:
+            seen.append(dry_run)
+            return 0
+
+        def check_permissions(self) -> list[str]:
+            return []
+
+    app = _App(_Platform())          # type: ignore[arg-type]
+    RunSetup().execute(app)          # type: ignore[arg-type]
+    RunSetup(dry_run=True).execute(app)   # type: ignore[arg-type]
+
+    assert seen == [False, True], (
+        "default must APPLY and only dry_run=True may preview; got "
+        f"dry_run values {seen}")

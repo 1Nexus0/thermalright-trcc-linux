@@ -1980,8 +1980,21 @@ class Platform(ABC):
 
     # ── One-time setup (udev rules / WinUSB guide / etc.) ─────────────
     @abstractmethod
-    def setup(self, interactive: bool = True) -> int:
-        """Run OS-specific setup.  Returns a shell-style exit code."""
+    def setup(self, dry_run: bool = False) -> int:
+        """Run OS-specific setup.  Returns a shell-style exit code.
+
+        ``dry_run=True`` prints what would be done and changes nothing.
+
+        The parameter was called ``interactive`` (inverted) until 2026-09-10,
+        and the name was the bug: ``interactive=False`` reads as "don't ask
+        me" and meant "don't act".  So ``trcc system setup --yes`` mapped a
+        confirmation flag onto an apply flag and previewed instead of writing
+        the udev rules (#285), and the API's setup route passed
+        ``interactive=False`` and could never apply anything at all.  Two
+        axes -- apply-or-preview, and confirm-or-not -- collapsed into one
+        boolean.  Only the first belongs to a Platform; confirming is the
+        UI's business.
+        """
 
     @abstractmethod
     def check_permissions(self) -> list[str]:

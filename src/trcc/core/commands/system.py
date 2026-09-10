@@ -714,8 +714,12 @@ class StopDaemon(Command[DaemonResult]):
 
 @dataclass(frozen=True, slots=True)
 class RunSetup(Command[SetupResult]):
-    """OS-specific one-time setup (udev, WinUSB guide, etc.)."""
-    interactive: bool = True
+    """OS-specific one-time setup (udev, WinUSB guide, etc.).
+
+    ``dry_run`` prints what would be done and changes nothing.  It was
+    ``interactive`` (inverted) until 2026-09-10 — see ``Platform.setup``.
+    """
+    dry_run: bool = False
 
     def execute(self, app: App) -> SetupResult:
         # Check permissions AFTER setup so the warnings reflect what setup just
@@ -723,7 +727,7 @@ class RunSetup(Command[SetupResult]):
         # made a first run report "udev rules not installed" right next to
         # "exit code 0" (legacy's run_setup checks-then-installs, never reports
         # a pre-install warning as a result).
-        code = app.platform.setup(interactive=self.interactive)
+        code = app.platform.setup(dry_run=self.dry_run)
         warnings = app.platform.check_permissions()
         log.info("RunSetup.execute: exit=%d, %d permission warning(s): %s",
                  code, len(warnings), warnings)

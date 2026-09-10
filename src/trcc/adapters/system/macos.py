@@ -111,7 +111,7 @@ class MacOSPlatform(BaseOS, key="darwin"):
         log.debug("_scan_vid_pid_set: called")
         return {(d.vid, d.pid) for d in self.scan_devices()}
 
-    def setup(self, interactive: bool = True) -> int:
+    def setup(self, dry_run: bool = False) -> int:
         """Diagnose codesign / quarantine / privileges, print fix steps.
 
         Read-only: macOS USB access requires either a signed bundle
@@ -119,9 +119,9 @@ class MacOSPlatform(BaseOS, key="darwin"):
         ``sudo``, neither of which a setup wizard can install for the
         user.
         """
-        log.info("setup: interactive=%s", interactive)
+        log.info("setup: dry_run=%s", dry_run)
         from ._macos_setup import install
-        return install(dry_run=not interactive)
+        return install(dry_run=dry_run)
 
     def check_permissions(self) -> list[str]:
         log.info("check_permissions: called")

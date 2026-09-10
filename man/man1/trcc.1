@@ -59,7 +59,7 @@ Alias for trcc system sensors  \-  print sensor readings.
 Alias for trcc api  \-  launches the REST API + uvicorn. The serve name matches legacy CLI ergonomics; api still works for backwards\-compat with existing scripts.
 .TP
 \fBsetup\fR
-Alias for trcc system setup  \-  OS\-specific setup (udev rules on Linux, WinUSB guide on Windows). New users reach for the short form. (#194)
+Alias for trcc system setup  \-  OS\-specific setup (udev rules on Linux, WinUSB guide on Windows). New users reach for the short form. (#194) Takes the same flags as the command it aliases: an alias that accepts a smaller set is a second, quietly different command.
 .TP
 \fBshell\fR
 Open an interactive prompt sharing one App across commands. Each line is parsed as if it were a fresh trcc invocation, but the App is built once and reused  \-  no per\-command handshake. In daemon mode the App is an AppProxy that round\-trips each line to the running daemon. Ctrl\-D or exit quits.
