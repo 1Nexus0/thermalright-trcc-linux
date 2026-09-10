@@ -281,3 +281,39 @@ def test_encode_payload_shrinks_an_oversized_frame() -> None:
 
     assert len(capped) < len(uncapped), "cap had no effect"
     assert len(capped) <= cap, "capped frame still exceeds the firmware limit"
+
+
+# ── #248: the PM the reporter actually has ─────────────────────────────────
+
+
+def test_pm65_is_catalogued_not_guessed(caplog) -> None:
+    """#248: a Trofeo Vision 9.16 owner reporting PM=65 was told to file a bug.
+
+    Asserting the RESOLUTION here proves nothing, and my first version of this
+    test did exactly that: FBL 192's fallback is already (1920, 462), so
+    deleting the PM=65 row leaves the resolution identical and the assertion
+    green.  MEASURED — the row was removed and 22 tests passed.
+
+    The catalogue row buys the difference between "catalogued" and "guessed",
+    and the only place that difference is visible is the WARNING telling an
+    owner of a fully supported cooler that their device is unknown.  So that
+    is what is asserted, with an uncatalogued PM alongside to prove the
+    warning still fires when it should.
+    """
+    import logging
+
+    from trcc.core.protocol import get_profile
+
+    with caplog.at_level(logging.WARNING, logger="trcc.core.protocol"):
+        prof = get_profile(192, 65)
+    assert prof.resolution == (1920, 462)
+    assert not [r for r in caplog.records if "UNKNOWN PM" in r.getMessage()], (
+        "PM=65 is catalogued; warning its owner to file a bug about a "
+        "supported cooler is the whole of #248")
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="trcc.core.protocol"):
+        get_profile(192, 99)
+    assert [r for r in caplog.records if "UNKNOWN PM" in r.getMessage()], (
+        "an uncatalogued PM must still warn — otherwise the test above passes "
+        "because nothing warns at all")

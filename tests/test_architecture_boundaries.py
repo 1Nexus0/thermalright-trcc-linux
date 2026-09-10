@@ -1837,3 +1837,33 @@ def test_direct_execute_baseline_has_no_slack() -> None:
         "Direct execute calls went DOWN — lower KNOWN_DIRECT_EXECUTE:\n"
         + "\n".join(f"  {f}: {want} → {now}" for f, (want, now) in stale.items())
     )
+
+
+# ── #166: linux.py must IMPORT on Windows ──────────────────────────────────
+
+
+def test_linux_platform_module_has_no_linux_only_toplevel_imports() -> None:
+    """`trcc.adapters.system.linux` is imported on every OS, so its
+    Linux-only stdlib must stay inside functions (#166).
+
+    v9.7.0 crashed on Windows because this module imported `fcntl` at module
+    scope: `PLATFORMS` populates by side-effect import, so loading the registry
+    loaded every OS module, and one `import fcntl` took the whole app down on
+    a machine that has no such module.  The fix (two lazy imports) has been in
+    the tree UNGATED — `#166` appears in `src/` and in no test.
+    """
+    import ast
+
+    linux_only = {"fcntl", "termios", "pwd", "grp"}
+    src = (_SRC / "trcc" / "adapters" / "system" / "linux.py").read_text()
+    tree = ast.parse(src)
+    offenders: list[str] = []
+    for node in tree.body:                     # TOP LEVEL only — nested is fine
+        if isinstance(node, ast.Import):
+            offenders += [a.name for a in node.names if a.name in linux_only]
+        elif isinstance(node, ast.ImportFrom) and node.module in linux_only:
+            offenders.append(node.module)
+    assert not offenders, (
+        f"linux.py imports {offenders} at module scope; the registry imports "
+        "this module on Windows too, so it must import there (#166).  Move it "
+        "inside the function that needs it.")
