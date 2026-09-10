@@ -1056,6 +1056,53 @@ def _enrich_with_live_imc_timings(slots: list[dict[str, str]]) -> None:
             slot[key] = str(val)
 
 
+#: What ``dmidecode`` reports for a socket with no stick in it.
+_DMI_EMPTY_SLOT = 'No Module Installed'
+
+
+def _is_populated(slot: dict[str, str]) -> bool:
+    """Does this ``Memory Device`` block describe an actual stick?
+
+    ``dmidecode`` emits one block per SOCKET, and an empty socket still gets a
+    full block reporting ``Size: No Module Installed``.  Counting those tells a
+    user with two sticks in four slots that they have four.
+    """
+    populated = bool(slot.get('size')) and slot['size'] != _DMI_EMPTY_SLOT
+    if slot:
+        log.debug("_is_populated: %s size=%r -> %s",
+                  slot.get('locator', '?'), slot.get('size'), populated)
+    return populated
+
+
+def _parse_dmi_memory(output: str) -> list[dict[str, str]]:
+    """``dmidecode -t memory`` → one dict per POPULATED slot.
+
+    A ``Memory Device`` line opens a record and the next one closes it; only
+    the keys in ``_DMI_MEMORY_FIELDS`` are kept, so ``Array Handle`` and the
+    rest of the block are dropped.  Pure text in, records out — no subprocess,
+    which is what makes it testable without a root shell.
+    """
+    slots: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if line.startswith('Memory Device'):
+            if _is_populated(current):
+                slots.append(current)
+            current = {}
+            continue
+        key, sep, val = line.partition(':')
+        if not sep:
+            continue
+        key = key.strip().lower().replace(' ', '_')
+        if key in _DMI_MEMORY_FIELDS:
+            current[key] = val.strip()
+    if _is_populated(current):
+        slots.append(current)
+    log.debug("_parse_dmi_memory: %d populated slot(s)", len(slots))
+    return slots
+
+
 def _linux_memory_info() -> list[dict[str, str]]:
     """Get DRAM slot info via dmidecode; falls back to psutil for totals."""
     log.debug("_linux_memory_info: called")
@@ -1067,21 +1114,10 @@ def _linux_memory_info() -> list[dict[str, str]]:
             capture_output=True, text=True, timeout=5, check=False,
         )
         if result.returncode == 0:
-            current: dict[str, str] = {}
-            for raw_line in result.stdout.splitlines():
-                line = raw_line.strip()
-                if line.startswith('Memory Device'):
-                    if current.get('size') and current['size'] != 'No Module Installed':
-                        slots.append(current)
-                    current = {}
-                elif ':' in line:
-                    key, _, val = line.partition(':')
-                    val = val.strip()
-                    key = key.strip().lower().replace(' ', '_')
-                    if key in _DMI_MEMORY_FIELDS:
-                        current[key] = val
-            if current.get('size') and current['size'] != 'No Module Installed':
-                slots.append(current)
+            slots = _parse_dmi_memory(result.stdout)
+        else:
+            log.debug("dmidecode -t memory exited %d — falling back",
+                      result.returncode)
     except (OSError, subprocess.SubprocessError) as e:
         log.debug("dmidecode -t memory failed: %s", type(e).__name__)
 

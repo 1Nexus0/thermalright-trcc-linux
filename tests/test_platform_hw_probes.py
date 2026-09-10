@@ -345,3 +345,89 @@ def test_bsd_disk_size_formats(mediasize: str, expected: str) -> None:
 
     out = _bsd_disk_info(runner=lambda: f"Geom name: ada0\n   Mediasize: {mediasize}\n")
     assert out[0]["size"] == expected
+
+
+# ── Linux DRAM slots from dmidecode ────────────────────────────────────────
+
+_DMIDECODE_MEMORY = """\
+# dmidecode 3.5
+Handle 0x0030, DMI type 17, 92 bytes
+Memory Device
+\tArray Handle: 0x002F
+\tSize: 16 GB
+\tForm Factor: DIMM
+\tLocator: DIMM 0
+\tType: DDR5
+\tSpeed: 6000 MT/s
+\tManufacturer: G.Skill
+\tPart Number: F5-6000J3038F16G
+\tRank: 1
+\tConfigured Memory Speed: 4800 MT/s
+
+Handle 0x0031, DMI type 17, 92 bytes
+Memory Device
+\tArray Handle: 0x002F
+\tSize: No Module Installed
+\tForm Factor: Unknown
+\tLocator: DIMM 1
+\tType: Unknown
+
+Handle 0x0032, DMI type 17, 92 bytes
+Memory Device
+\tArray Handle: 0x002F
+\tSize: 16 GB
+\tLocator: DIMM 2
+\tType: DDR5
+\tSpeed: 6000 MT/s
+\tManufacturer: G.Skill
+"""
+
+
+def _memory_info(output: str, returncode: int = 0, monkeypatch=None):
+    """Run the real prober against scripted `dmidecode` output."""
+    import subprocess
+    import types
+    from unittest.mock import patch
+
+    from trcc.adapters.system import linux
+
+    fake = types.SimpleNamespace(returncode=returncode, stdout=output, stderr="")
+    with patch.object(subprocess, "run", return_value=fake), \
+         patch.object(linux, "_enrich_with_spd_timings", lambda s: None), \
+         patch.object(linux, "_enrich_with_live_imc_timings", lambda s: None):
+        return linux._linux_memory_info()
+
+
+def test_linux_memory_reports_only_populated_slots() -> None:
+    """A board with an empty slot must report the sticks, not the sockets.
+
+    dmidecode emits a `Memory Device` block per SOCKET; an empty one says
+    `Size: No Module Installed`.  Counting those would tell a user with two
+    sticks in four slots that they have four.
+    """
+    slots = _memory_info(_DMIDECODE_MEMORY)
+
+    assert [s["locator"] for s in slots] == ["DIMM 0", "DIMM 2"]
+    first = slots[0]
+    assert first["type"] == "DDR5"
+    assert first["speed"] == "6000 MT/s"
+    assert first["configured_memory_speed"] == "4800 MT/s"
+    assert first["part_number"] == "F5-6000J3038F16G"
+    # `Array Handle` is not in _DMI_MEMORY_FIELDS and must be dropped.
+    assert "array_handle" not in first
+
+
+@pytest.mark.parametrize("output,returncode", [
+    ("", 0),                       # dmidecode present, said nothing
+    (_DMIDECODE_MEMORY, 1),        # dmidecode refused (not root)
+], ids=["no-output", "nonzero-exit"])
+def test_linux_memory_falls_back_to_psutil(output: str, returncode: int) -> None:
+    """Without dmidecode there is still a total to show — one synthetic slot.
+
+    The size is this machine's real total, so only the SHAPE is asserted.
+    """
+    slots = _memory_info(output, returncode)
+
+    assert len(slots) == 1
+    assert slots[0]["type"] == slots[0]["manufacturer"] == "Unknown"
+    assert slots[0]["size"].endswith(" GB")
