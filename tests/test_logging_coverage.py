@@ -69,6 +69,8 @@ import logging_coverage  # noqa: E402  # pyright: ignore[reportMissingImports]
 #: asks for, in the pass that gave the console script the startup-crash
 #: buffering ``python -m trcc`` already had.  It was the one dispatch every
 #: packaged install goes through, and it said nothing.
+_SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "trcc"
+
 MAX_SILENT = 1324
 
 
@@ -205,3 +207,141 @@ def test_formatter_bases_are_matched_exactly_not_by_suffix() -> None:
     assert "BaseHandler" not in logging_coverage._FORMATTER_BASES
     assert "Handler" in logging_coverage._FORMATTER_BASES
     assert "RenderOnceRotatingFileHandler" in logging_coverage._FORMATTER_BASES
+
+
+# =========================================================================
+# Bare-name emitters — a log line the Attribute test cannot see
+# =========================================================================
+
+
+def test_bare_name_trace_counts_as_logging() -> None:
+    """``core.logs.trace`` is a log line, even though it is not ``log.trace``.
+
+    TRACE is level 5 and not in stdlib, so there is no ``logger.trace`` method;
+    the helper takes the logger as its first argument and short-circuits on
+    ``isEnabledFor``.  It is therefore called by BARE NAME, which the
+    ``ast.Attribute`` test is blind to — so a function whose only log line was a
+    TRACE line counted as silent, and the ratchet demanded a log line from a
+    function that already had one.  The only ways to satisfy it were to stop
+    using the helper or to add a second, redundant log call.
+
+    Caught for real on 2026-09-10 by ``BaseDevice._trace_reply``, the first
+    ``trace()`` call site in ``src/``.
+    """
+    import ast
+
+    fn = ast.parse(
+        "def f(self, resp):\n"
+        "    trace(logging.getLogger(__name__), 'raw %s', resp.hex())\n"
+    ).body[0]
+    assert logging_coverage._emits_log(fn), (
+        "a bare-name trace() call is a log line — the ratchet must see it")
+
+
+def test_an_arbitrary_bare_call_is_not_mistaken_for_logging() -> None:
+    """The bare-name allowance must stay a short, deliberate list.
+
+    If ``_emits_log`` accepted any bare call it would report near-total
+    coverage while seeing nothing — the failure mode a ratchet exists to
+    prevent, and the one that would be hardest to notice, because the number
+    would only ever look better.
+    """
+    import ast
+
+    for call in ("compute(x)", "print(x)", "traceback.format_exc()", "str(x)"):
+        fn = ast.parse(f"def f(x):\n    {call}\n").body[0]
+        assert not logging_coverage._emits_log(fn), (
+            f"{call} is not a log line — counting it would inflate coverage")
+
+
+def test_log_functions_stays_a_deliberate_allowlist() -> None:
+    """Pinned so nobody widens it without meaning to."""
+    assert set(logging_coverage._LOG_FUNCTIONS) == {"trace"}, (
+        "adding a name here lowers the silent count without adding a log line "
+        "anywhere — say why in the commit, and lower MAX_SILENT to match")
+
+
+# =========================================================================
+# The receiver matters — a method name alone is not a log line
+# =========================================================================
+
+
+def _emits(src: str) -> bool:
+    """Does the ratchet consider this one-function snippet to have logged?"""
+    import ast
+    return logging_coverage._emits_log(ast.parse(src).body[0])
+
+
+def test_a_non_logger_with_a_logger_method_name_is_not_a_log_line() -> None:
+    """``QMessageBox.warning(...)`` opens a dialog.  It is not a log record.
+
+    This is the dangerous direction.  The ratchet only ever moves DOWN, so a
+    false positive permanently lowers the bar and is never noticed again —
+    the number only looks better.  A silent function that happens to pop a
+    dialog, exit via ``parser.error``, or call ``.info()`` on a parsed
+    response would have counted as covered.
+
+    ``src/`` really does contain a ``QMessageBox.warning`` (``trcc_app.py``,
+    ``notify_device_failures``); it survived a name-only test purely because
+    that function also calls ``log.warning``.
+    """
+    assert not _emits(
+        "def f(self):\n    QMessageBox.warning(self, 'Device connection', body)\n")
+    assert not _emits("def f(p):\n    p.error('bad flag')\n")
+    assert not _emits("def f(r):\n    r.info('field')\n")
+    assert not _emits("def f(x):\n    x.debug('not a logger')\n")
+
+
+def test_every_real_logger_shape_in_the_tree_still_counts() -> None:
+    """Each way ``src/`` actually holds a logger must keep counting."""
+    for snippet in (
+        "def f():\n    log.info('x')\n",                       # module logger
+        "def f():\n    frame_log.debug('x')\n",                # per-frame logger
+        "def f():\n    logger.warning('x')\n",
+        "def f(self):\n    self.log.debug('x')\n",             # per-device logger
+        "def f(self):\n    sink.log(level, 'x')\n",            # dispatch alias
+        "def f():\n    logging.getLogger(__name__).info('x')\n",
+        "def f(self, r):\n    trace(logging.getLogger(__name__), 'raw %s', r)\n",
+    ):
+        assert _emits(snippet), f"a real log line stopped counting: {snippet!r}"
+
+
+def test_logger_receivers_matches_what_the_tree_actually_uses() -> None:
+    """Self-audit: no unrecognised receiver may carry a logging method name.
+
+    Keeps the allowlist honest in BOTH directions.  A new logger alias would
+    otherwise be silently invisible (its functions counted silent, demanding
+    redundant log lines), and a new non-logger — the next ``QMessageBox`` —
+    would be silently counted as logging.  Either way the failure is quiet,
+    which is exactly what a ratchet must not permit.
+    """
+    import ast
+    import collections
+
+    #: Receivers that carry a logging METHOD NAME but are not loggers.  Each is
+    #: a deliberate acknowledgement, not an allowance — none of them count.
+    not_loggers = {"QMessageBox"}
+
+    found: collections.Counter[str] = collections.Counter()
+    for path in (_SRC_ROOT).rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in logging_coverage._LOG_CALLS):
+                continue
+            value = node.func.value
+            if isinstance(value, ast.Name):
+                found[value.id] += 1
+            elif isinstance(value, ast.Attribute):
+                found[value.attr] += 1
+
+    known = set(logging_coverage._LOGGER_RECEIVERS) | not_loggers
+    unknown = {r: n for r, n in found.items() if r not in known}
+    assert not unknown, (
+        "a receiver with a logging method name is neither a known logger nor "
+        "an acknowledged non-logger — decide which, then add it to "
+        "_LOGGER_RECEIVERS (it logs) or to not_loggers here (it does not):\n"
+        + "\n".join(f"  {r}: {n} call(s)" for r, n in sorted(unknown.items()))
+    )

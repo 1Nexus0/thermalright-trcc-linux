@@ -34,6 +34,31 @@ _LOG_CALLS = frozenset({
     "info", "debug", "warning", "error", "exception", "critical", "log",
 })
 
+#: Logging emitters that are module-level FUNCTIONS, not logger methods, and so
+#: are called by bare name — invisible to the ``ast.Attribute`` test below.
+#:
+#: ``core.logs.trace`` is the project's TRACE emitter.  TRACE (level 5) is not in
+#: stdlib, so there is no ``logger.trace``; it takes the logger as its first
+#: argument and short-circuits on ``isEnabledFor``, which is the whole reason it
+#: exists.  Without this set a function whose only log line is a TRACE line
+#: counted as SILENT — the ratchet demanding a log line from a function that
+#: already had one, and the only fix being to stop using the helper.
+_LOG_FUNCTIONS = frozenset({"trace"})
+
+#: Expressions that actually hold a ``logging.Logger``.  The METHOD NAME ALONE
+#: is not evidence — ``QMessageBox.warning(...)`` opens a modal dialog and
+#: argparse's ``parser.error(...)`` exits the process, yet a name-only test
+#: counts both as a log line.  That direction is the dangerous one: the ratchet
+#: only ever moves DOWN, so a false positive permanently lowers the bar and is
+#: never noticed again, because the number only looks better.
+#:
+#: Measured across ``src/`` on 2026-09-10 — these are the only receivers used
+#: with a logging method name, plus exactly one ``QMessageBox.warning`` that a
+#: name-only test would have accepted.  ``sink`` is ``app.dispatch``'s
+#: ``frame_log if ... else log`` alias; ``log`` on an attribute covers
+#: ``self.log = logging.getLogger(f"{__name__}.{key}")``.
+_LOGGER_RECEIVERS = frozenset({"log", "frame_log", "logger", "_log", "sink"})
+
 #: Invoked by the logging machinery itself while formatting a record — a log
 #: call inside one of these recurses until the stack ends.
 _RECURSION_RISK = frozenset({
@@ -142,14 +167,41 @@ def _countable(tree: ast.AST):
         yield fn
 
 
+def _receiver_is_logger(value: ast.expr) -> bool:
+    """True if *value* is an expression that holds a ``logging.Logger``.
+
+    ``log`` / ``frame_log`` / ``sink`` (a bare name), ``self.log`` (an
+    attribute, from ``self.log = logging.getLogger(...)``), or a direct
+    ``logging.getLogger(...)`` call.  Anything else is some other object that
+    merely has a method named ``warning`` or ``error``.
+    """
+    if isinstance(value, ast.Name):
+        return value.id in _LOGGER_RECEIVERS
+    if isinstance(value, ast.Attribute):        # self.log, cls._log
+        return value.attr in _LOGGER_RECEIVERS
+    if isinstance(value, ast.Call):             # logging.getLogger(__name__)
+        func = value.func
+        return ((isinstance(func, ast.Attribute) and func.attr == "getLogger")
+                or (isinstance(func, ast.Name) and func.id == "getLogger"))
+    return False
+
+
 def _emits_log(fn: ast.AST) -> bool:
-    """True if *fn* calls anything that looks like a logger method."""
-    return any(
-        isinstance(n, ast.Call)
-        and isinstance(n.func, ast.Attribute)
-        and n.func.attr in _LOG_CALLS
-        for n in ast.walk(fn)
-    )
+    """True if *fn* really emits a log record.
+
+    Both halves are checked — the method name AND what it is called on — so an
+    object that merely shares a logger's method names cannot pass.
+    """
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in _LOG_FUNCTIONS:
+            return True
+        if (isinstance(func, ast.Attribute) and func.attr in _LOG_CALLS
+                and _receiver_is_logger(func.value)):
+            return True
+    return False
 
 
 def _is_stub(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
