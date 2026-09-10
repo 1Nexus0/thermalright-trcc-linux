@@ -25,9 +25,24 @@ directly — the same protocol commands, different transport library.
 
 ## Supported Devices
 
+<!-- 87AD:70DB, not 87CD.  The decimal in the row (34733) is 0x87AD, and the
+     two are DIFFERENT devices in core/registry.py: 87cd:70db is the SCSI
+     panel, 87ad:70db the bulk one ThreadSendDeviceData serves.  Every hex
+     spelling here was wrong while its own decimal was right; six were
+     corrected 2026-09-10 against the C# device finder.
+
+     ONE was deliberately left as 87CD: the "87CD:70DB via SCSI" row in the
+     implementation-mapping table near the end, which is about the SCSI
+     path and reads consistently as the SCSI device.
+
+     That table is ALSO pre-cutover: it names device_scsi.py / device_hid.py,
+     which do not exist in the shipping tree.  Not rewritten here — the byte
+     tables above are what this document is read for, and they are now
+     verified against the 2.1.6 USBLCDNEW decompile. -->
+
 | VID:PID | Decimal | Handler | Protocol | Write EP | Read EP |
 |---|---|---|---|---|---|
-| `87CD:70DB` | 34733:28891 | `ThreadSendDeviceData` | Magic `0x12345678` | EP01 OUT | EP01 IN |
+| `87AD:70DB` | 34733:28891 | `ThreadSendDeviceData` | Magic `0x12345678` | EP01 OUT | EP01 IN |
 | `0416:5302` | 1046:21250 | `ThreadSendDeviceDataH` | DA/DB/DC/DD handshake | EP02 OUT | EP01 IN |
 | `0416:5406` | 1046:21510 | `ThreadSendDeviceDataALi` | 0xF5 SCSI-like | EP02 OUT | EP01 IN |
 | `0416:5408` | 1046:21512 | `ThreadSendDeviceDataLY` | LY chunked bulk | EP09 OUT | EP01 IN |
@@ -76,7 +91,7 @@ After processing a send trigger, USBLCDNEW clears byte[2] to 0.
 
 ---
 
-## Protocol 1: Thermalright LCD (`87CD:70DB`)
+## Protocol 1: Thermalright LCD (`87AD:70DB`)
 
 ### USB Configuration
 
@@ -145,7 +160,7 @@ The 64-byte offset suggests the frame data has a 64-byte internal header (prepar
 ### USB Configuration
 
 ```text
-Endpoint Write: EP02 OUT    ← NOTE: different endpoint than 87CD
+Endpoint Write: EP02 OUT    ← NOTE: different endpoint than 87AD
 Endpoint Read:  EP01 IN
 ```
 
@@ -349,7 +364,7 @@ Note: `response[20]` is clamped — if `≤ 3`, it is set to 1 before the calcul
 ### Frame Send
 
 Frame length read from slot `n*2+1` bytes[60:63] (LE uint32).
-Data begins at offset 64 within the slot (same as 87CD:70DB).
+Data begins at offset 64 within the slot (same as 87AD:70DB).
 
 Frame is split into 512-byte chunks with 496 bytes of payload each:
 
@@ -431,7 +446,7 @@ Same chunked 512-byte packet format as LY (Protocol 4). Same 4096-byte burst sen
 
 ### Device Detection
 
-| Binary | 87CD:70DB | 0416:5302 | 0416:5406 | 0402:3922 | 0416:5408 | 0416:5409 |
+| Binary | 87AD:70DB | 0416:5302 | 0416:5406 | 0402:3922 | 0416:5408 | 0416:5409 |
 |---|---|---|---|---|---|---|
 | USBLCD.exe | ✗ | ✗ | ✓ (SCSI) | ✓ (SCSI) | ✗ | ✗ |
 | USBLCDNEW.exe | ✓ (USB) | ✓ (USB) | ✓ (USB) | ✗ | ✓ (USB) | ✓ (USB) |
@@ -442,7 +457,7 @@ Note: `0416:5406` is handled by BOTH binaries — USBLCDNEW.exe via raw USB, USB
 
 | Device | Magic | Send Size | Read Size | Key Response Bytes |
 |---|---|---|---|---|
-| 87CD:70DB | `12 34 56 78` | 64 | 1024 | [24]=present, [32]=PM, [56]=name branch |
+| 87AD:70DB | `12 34 56 78` | 64 | 1024 | [24]=present, [32]=PM, [56]=name branch |
 | 0416:5302 | `DA DB DC DD` | 512 | 512 | [4]=PM, [5]=SUB, [12]=OK, [16]=0x10 |
 | 0416:5406 | `F5 00 01 00` | 1040 | 1024 | [0]='6'/'e'/'f' (resolution) |
 | 0416:5408 | `02 FF ...` | 2048 | 512 | [0]=0x03, [1]=0xFF, [8]=0x01 |
@@ -452,7 +467,7 @@ Note: `0416:5406` is handled by BOTH binaries — USBLCDNEW.exe via raw USB, USB
 
 | Device | Length Source | Header | Chunked? | Burst Size | ACK? |
 |---|---|---|---|---|---|
-| 87CD:70DB | bytes[60:63] + 64 | none (inline) | No (single async) | — | No |
+| 87AD:70DB | bytes[60:63] + 64 | none (inline) | No (single async) | — | No |
 | 0416:5302 | bytes[16:19] + 20 | DA/DB/DC/DD (20B) | No (512-aligned) | — | No |
 | 0416:5406 | fixed (153600 or 204800) | F5 header (16B) | No (single sync) | — | Yes (16B) |
 | 0416:5408 | bytes[60:63] | 16B per chunk | Yes (496B payload/chunk) | 4096B | Yes (512B) |

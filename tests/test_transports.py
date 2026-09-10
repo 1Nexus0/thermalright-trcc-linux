@@ -34,12 +34,18 @@ def test_scsi_lcd_connect_issues_poll_then_init(fake_scsi) -> None:
     assert fake_scsi.is_open is True
     assert handshake.model_id == 100
     assert handshake.resolution == (320, 320)
-    # First CDB must be the poll command (0xF5)
+
+    # The poll is a READ (``read_cdb``) and the init a WRITE (``send_cdb``), so
+    # they land in different lists.  This block used to say "First CDB must be
+    # the poll command (0xF5)" while reading ``sent[0]`` — which is the INIT.
+    # It passed either way, because the two CDBs differ only in the command
+    # word's second byte (0xF5 vs 0x1F5), and the poll was unassertable at all
+    # until ``FakeScsiTransport.reads`` existed.  Both halves are checked now;
+    # the exact bytes are pinned in ``test_handshake_requests.py``.
+    assert len(fake_scsi.reads) == 1, "one poll"
+    assert fake_scsi.reads[0][0][:2] == b"\xf5\x00", "poll CDB is cmd 0x00F5"
     assert len(fake_scsi.sent) == 1, "init CDB was sent"
-    poll_and_init_cdb_first_byte = fake_scsi.sent[0][0][0]
-    assert poll_and_init_cdb_first_byte == 0xF5, (
-        f"expected 0x1F5 init CDB after poll, got CDB[0]={poll_and_init_cdb_first_byte:#x}"
-    )
+    assert fake_scsi.sent[0][0][:2] == b"\xf5\x01", "init CDB is cmd 0x01F5"
 
 
 def test_scsi_lcd_send_chunks_full_frame(fake_scsi) -> None:
@@ -259,3 +265,104 @@ def test_transport_open_wraps_absent_device_in_permission_error(monkeypatch) -> 
 
     with pytest.raises(PermissionError_, match="trcc system setup"):
         transport.open()
+
+
+# ── Endpoint discovery decides what reaches the wire ────────────────────────
+#
+# ``PyUsbBulkTransport.write``/``read`` prefer whatever ``_detect_endpoints``
+# finds over the endpoint the device class passes, so on real hardware a
+# class's ``_EP_WRITE`` is a FALLBACK, not what is used.  That matters twice:
+# it is why the C# hardcoding EP09 for the LY wire where we pass 0x01 is not a
+# divergence, and it means this function -- not the wire adapters -- picks the
+# endpoint for every non-SCSI device we ship.
+#
+# It had NO test.  Measured 2026-09-10: the only mention of
+# ``PyUsbBulkTransport`` anywhere in tests/ was a docstring.
+
+
+class _FakeEndpoint:
+    def __init__(self, address: int) -> None:
+        self.bEndpointAddress = address
+
+
+class _FakeInterface:
+    def __init__(self, addresses: list[int]) -> None:
+        self._eps = [_FakeEndpoint(a) for a in addresses]
+
+    def __iter__(self):
+        return iter(self._eps)
+
+
+class _FakeConfiguration:
+    def __init__(self, addresses: list[int]) -> None:
+        self._intf = _FakeInterface(addresses)
+
+    def __getitem__(self, key):
+        return self._intf
+
+
+class _FakeUsbDevice:
+    """The two calls ``_detect_endpoints`` makes on a pyusb device."""
+
+    def __init__(self, addresses: list[int]) -> None:
+        self._cfg = _FakeConfiguration(addresses)
+
+    def get_active_configuration(self):
+        return self._cfg
+
+
+def _transport_with(addresses: list[int]):
+    from trcc.adapters.device.transport import PyUsbBulkTransport
+
+    transport = PyUsbBulkTransport(0x0416, 0x5302)
+    transport._device = _FakeUsbDevice(addresses)   # pyright: ignore[reportAttributeAccessIssue]
+    transport._detect_endpoints()
+    return transport
+
+
+def test_endpoint_detection_picks_the_one_out_and_one_in() -> None:
+    """The ordinary panel: exactly one pair, taken as-is (OUT low bit clear)."""
+    transport = _transport_with([0x01, 0x81])
+    assert transport.ep_out == 0x01
+    assert transport.ep_in == 0x81
+
+
+def test_endpoint_detection_is_not_positional() -> None:
+    """Direction comes from the address's high bit, never from descriptor order."""
+    transport = _transport_with([0x81, 0x02])
+    assert transport.ep_out == 0x02
+    assert transport.ep_in == 0x81
+
+
+def test_a_second_out_endpoint_is_a_warning_not_a_silent_guess(caplog) -> None:
+    """Several OUT endpoints means "first" is a GUESS — say so out loud.
+
+    We own no such device, so this is deliberately not a policy change: the
+    first is still chosen, exactly as before.  What it must not be is silent.
+    The class constant that knows which endpoint this protocol speaks
+    (``_EP_WRITE``) is discarded here, so if such a panel ever misbehaves the
+    reporter's log has to name the choice that was made — otherwise the symptom
+    is a device that does nothing for no visible reason.
+    """
+    import logging as _logging
+
+    with caplog.at_level(_logging.WARNING, logger="trcc.adapters.device.transport"):
+        transport = _transport_with([0x01, 0x03, 0x81])
+
+    assert transport.ep_out == 0x01, "still the first — behaviour unchanged"
+    warning = "\n".join(r.message for r in caplog.records
+                        if r.levelno >= _logging.WARNING)
+    assert "0x01" in warning and "0x03" in warning, (
+        "the warning must name every candidate, not just the winner")
+
+
+def test_endpoint_detection_survives_a_device_that_cannot_answer() -> None:
+    """A probe failure must not take the transport down — it degrades to the
+    caller-supplied endpoint, which is what the fallback in write/read is for."""
+    from trcc.adapters.device.transport import PyUsbBulkTransport
+
+    transport = PyUsbBulkTransport(0x0416, 0x5302)
+    transport._device = object()   # pyright: ignore[reportAttributeAccessIssue]
+    transport._detect_endpoints()
+
+    assert transport.ep_out is None and transport.ep_in is None

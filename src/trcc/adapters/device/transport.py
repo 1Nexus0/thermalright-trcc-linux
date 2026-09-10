@@ -250,15 +250,48 @@ class PyUsbBulkTransport(BulkTransport):
         return self._is_open
 
     def _detect_endpoints(self) -> None:
+        """Take interface 0's FIRST OUT and FIRST IN endpoint.
+
+        ``write``/``read`` prefer whatever this finds over the endpoint the
+        device class passes, so on real hardware a class's ``_EP_WRITE`` is a
+        fallback rather than what reaches the wire.  That is right for every
+        panel we know — each exposes exactly one pair — and it is why the C#
+        hardcoding **EP09** for the LY wire where we pass ``0x01`` is not a
+        divergence.
+
+        It stops being right the moment a device exposes SEVERAL OUT
+        endpoints: "first" is then a guess, and the class constant — the one
+        thing that actually knows which endpoint this protocol speaks — is
+        discarded.  We do not have such a device, so this is not the place to
+        invent a policy for one.  What it must not do is happen INVISIBLY, so
+        an extra endpoint is a WARNING naming both, and a ``trcc report`` from
+        the first person to own one will say so outright instead of showing an
+        inexplicable silent failure.
+        """
         try:
             cfg = self._device.get_active_configuration()
             intf = cfg[(USB_INTERFACE, 0)]
+            outs: list[int] = []
+            ins: list[int] = []
             for ep in intf:
                 direction = usb.util.endpoint_direction(ep.bEndpointAddress)
-                if direction == usb.util.ENDPOINT_OUT and self._ep_out is None:
-                    self._ep_out = ep.bEndpointAddress
-                elif direction == usb.util.ENDPOINT_IN and self._ep_in is None:
-                    self._ep_in = ep.bEndpointAddress
+                if direction == usb.util.ENDPOINT_OUT:
+                    outs.append(ep.bEndpointAddress)
+                else:
+                    ins.append(ep.bEndpointAddress)
+            self._ep_out = outs[0] if outs else None
+            self._ep_in = ins[0] if ins else None
+            if len(outs) > 1 or len(ins) > 1:
+                log.warning(
+                    "PyUsbBulkTransport %04x:%04x: interface 0 exposes %d OUT "
+                    "(%s) and %d IN (%s) endpoint(s) — using the FIRST of each "
+                    "(OUT=0x%02x IN=0x%02x) and ignoring this device class's "
+                    "own endpoint constants.  If this panel misbehaves, that "
+                    "choice is the first thing to check.",
+                    self._vid, self._pid, len(outs),
+                    ", ".join(f"0x{e:02x}" for e in outs), len(ins),
+                    ", ".join(f"0x{e:02x}" for e in ins),
+                    self._ep_out or 0, self._ep_in or 0)
             log.debug("Endpoints detected: OUT=0x%02x IN=0x%02x",
                       self._ep_out or 0, self._ep_in or 0)
         except Exception as e:

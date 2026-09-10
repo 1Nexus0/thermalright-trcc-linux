@@ -7,7 +7,6 @@ knows the SCSI CDB vocabulary the device expects.
 """
 from __future__ import annotations
 
-import binascii
 import logging
 import struct
 import time
@@ -254,11 +253,22 @@ class ScsiLcd(BaseDevice[ScsiTransport], wire=Wire.SCSI):
 
     @staticmethod
     def _build_cdb(cmd: int, size: int) -> bytes:
-        """Build the 16-byte SCSI CDB: cmd(4) + zeros(8) + size(4) + crc32(4)."""
-        header_16 = struct.pack("<I", cmd) + b"\x00" * 8 + struct.pack("<I", size)
-        crc = binascii.crc32(header_16) & 0xFFFFFFFF
-        full = header_16 + struct.pack("<I", crc)
-        return full[:16]
+        """Build the 16-byte SCSI CDB: cmd(4) + zeros(8) + size(4), all LE.
+
+        There is no CRC.  This docstring said "cmd(4) + zeros(8) + size(4) +
+        crc32(4)" and the body computed one — then returned ``full[:16]``,
+        which is exactly the 16 bytes BEFORE it, so the checksum has never
+        reached the wire in any release.  MEASURED before removing: the
+        returned bytes are byte-identical with the crc32 gone, and the four
+        bytes it produced appear nowhere in them.
+
+        Kept as a note rather than deleted quietly because the docstring was
+        the only description of this CDB anywhere, and "it has a CRC" is the
+        kind of claim a future reader would build on.  If a real device ever
+        turns out to want one, it is a 17th-through-20th byte that does not
+        exist today, not a line to un-comment.
+        """
+        return struct.pack("<I", cmd) + b"\x00" * 8 + struct.pack("<I", size)
 
     @staticmethod
     def _frame_chunks(width: int, height: int) -> list[tuple[int, int]]:
