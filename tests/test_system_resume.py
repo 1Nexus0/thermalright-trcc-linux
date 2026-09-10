@@ -65,3 +65,35 @@ def test_resume_keeps_led_runtime_not_a_blank_detach(
     # Still the same attached key (rebuilt), connected and renderable.
     assert _LED_KEY in app.devices
     assert app.get(_LED_KEY).is_connected
+
+
+def test_resume_actually_REBUILDS_the_device(fake_platform: FakePlatform) -> None:
+    """Resume must replace the stale device, not merely leave a live one alone.
+
+    Every test above publishes the real event and then asserts the device
+    ``is_connected`` — which was ALREADY true when the event was published, and
+    stays true if nothing happens at all.  MEASURED 2026-09-10 by deleting
+    ``self.events.subscribe(SystemResumed, self._on_system_resumed)`` from
+    ``App.__init__`` and running the whole suite: **4830 passed.**  The entire
+    wake-from-suspend recovery could be unsubscribed and this file would not
+    notice, because it asserts a STATE that holds on both sides of the event
+    rather than the TRANSITION the handler exists to perform.
+
+    The transition is observable without simulating a dead USB node:
+    ``_on_system_resumed`` disconnects the stale instance and dispatches
+    ``ConnectDevice``, which attaches a NEW one.  So identity changes, and the
+    old object is left disconnected — neither is true if the handler never ran.
+    """
+    app = _app(fake_platform, pm=1)
+    before = app.get(_LED_KEY)
+    assert before.is_connected
+    fake_platform.bulk.read_script.append(_scripted_handshake(1))
+
+    app.events.publish(SystemResumed())
+
+    after = app.get(_LED_KEY)
+    assert after is not before, (
+        "resume must REBUILD the device — a still-connected object of the same "
+        "identity means the handler never ran (or is unsubscribed)")
+    assert not before.is_connected, "the stale instance must be released"
+    assert after.is_connected

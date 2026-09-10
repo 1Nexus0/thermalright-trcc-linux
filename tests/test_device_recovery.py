@@ -202,3 +202,37 @@ def test_recovery_tracker_default_permission_hint_is_generic(
     with caplog.at_level(logging.WARNING):
         tracker.note_error(OSError(13, "Permission denied"))
     assert "permission" in caplog.text.lower()
+
+
+def test_attach_gives_the_device_the_platforms_permission_hint(
+    tmp_path, caplog,
+) -> None:
+    """The OS-specific EACCES hint reaches the warning a user actually reads.
+
+    ``App.attach`` injects it (``set_permission_hint``), and MEASURED
+    2026-09-10 by deleting that line and running the whole suite: **4830
+    passed**.  Every device would have silently fallen back to the generic
+    "ensure you have permission to access USB devices" — dropping the one
+    sentence that tells a Linux user to install the udev rules, on the exact
+    failure that sentence exists for.
+
+    Asserted through the LOG rather than the private field, because the log is
+    where the hint has to arrive: ``trcc report`` pastes it, and that paste is
+    the whole diagnosis for hardware we do not own.
+    """
+    import logging as _logging
+
+    from tests.mock_platform import MockPlatform
+    from trcc.app import App
+
+    platform = MockPlatform([{"vid": "0416", "pid": "8001"}], tmp_path)
+    device = App(platform).attach(0x0416, 0x8001)
+
+    with caplog.at_level(_logging.WARNING, logger="trcc.core.device_recovery"):
+        device._recovery.note_error(
+            OSError(13, "Access denied (insufficient permissions)"))
+
+    warning = "\n".join(r.getMessage() for r in caplog.records)
+    assert platform.permission_denied_hint() in warning, (
+        "the platform's own hint must reach the permission-denied warning; "
+        f"got: {warning}")
