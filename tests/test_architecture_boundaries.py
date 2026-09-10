@@ -1701,3 +1701,79 @@ def test_selftest_dev_app_job_collector_has_teeth() -> None:
         visitor = _AppJobVisitor()
         visitor.visit(ast.parse(src))
         assert not visitor.hits, f"collector wrongly flags inspection: {src}"
+
+
+# ── Home resolution belongs to the system adapters, nowhere else ────────────
+#
+# ``adapters/system/`` IS the layer that turns "this OS" into concrete
+# directories -- it implements the ``Paths`` port, so ``Path.home()`` there is
+# the job.  Everywhere else it is a bypass: it hardcodes Linux's layout
+# (``config_dir()`` is ``%APPDATA%\trcc`` on Windows and
+# ``Application Support`` on macOS), and, worse, it needs no injection, so
+# nothing distinguishes the real app from a unit test.
+#
+# Both halves were live.  ``adapters/device/led.py`` built its probe cache at
+# ``Path.home() / ".trcc" / "led_probe_cache.json"``, and MEASURED on
+# 2026-09-10, running five LED test files wrote a fake ``pm=208 MAGIC_QUBE``
+# entry into the developer's OWN cache -- the file a second launch trusts
+# INSTEAD of a handshake, because the LED firmware answers only once per power
+# cycle.  A test run could redefine a real device's identity.
+# ``adapters/infra/sysinfo_config.py`` had the same default one ``load()``
+# away from renaming a file in the user's config dir.
+#
+# The devices now receive a resolved directory (``Device.set_state_dir``) and
+# ``SysInfoConfig`` requires its path, so both bypasses are unrepresentable
+# rather than merely unused.  The survivors are listed at their real counts:
+#
+#   * ``ipc.py``          -- the single-instance lock under ``~/.cache``, a
+#                            runtime path that is not app state at all.
+#   * ``infra/logging.py`` -- ``LAST_RESORT_LOG``, used when the Paths port
+#                            itself could not be built.  Deliberate.
+#   * ``ui/cli/shell.py``  -- the XDG state fallback for shell history.
+KNOWN_HOME_CALLS: dict[str, int] = {
+    "trcc/ipc.py": 2,
+    "trcc/adapters/infra/logging.py": 1,
+    "trcc/ui/cli/shell.py": 1,
+}
+
+
+def _home_call_counts() -> dict[str, int]:
+    """Per-file ``Path.home()`` calls outside the system adapters."""
+    counts: dict[str, int] = {}
+    for path in sorted((_SRC / "trcc").rglob("*.py")):
+        rel = str(path.relative_to(_SRC))
+        if "adapters/system/" in rel:      # the layer that owns home resolution
+            continue
+        n = sum(1 for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "home"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "Path")
+        if n:
+            counts[rel] = n
+    return counts
+
+
+def test_no_new_path_home_outside_the_system_adapters() -> None:
+    """New code asks the ``Paths`` port; it does not guess at ``~``."""
+    counts = _home_call_counts()
+    risen = {f: (KNOWN_HOME_CALLS.get(f, 0), n) for f, n in counts.items()
+             if n > KNOWN_HOME_CALLS.get(f, 0)}
+    assert not risen, (
+        "New Path.home() outside adapters/system/ — take the directory from "
+        "the Paths port (a device receives one via set_state_dir):\n"
+        + "\n".join(f"  {f}: {was} → {now}" for f, (was, now) in risen.items())
+    )
+
+
+def test_path_home_baseline_has_no_slack() -> None:
+    """Removing a bypass must lower the baseline, locking the win in."""
+    counts = _home_call_counts()
+    stale = {f: (want, counts.get(f, 0))
+             for f, want in KNOWN_HOME_CALLS.items()
+             if counts.get(f, 0) < want}
+    assert not stale, (
+        "Path.home() calls went DOWN — lower KNOWN_HOME_CALLS to lock it in:\n"
+        + "\n".join(f"  {f}: {want} → {now}" for f, (want, now) in stale.items())
+    )

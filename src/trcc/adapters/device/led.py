@@ -63,11 +63,14 @@ _DEFAULT_TIMEOUT_MS = 100
 # disk-backed cache keyed by (VID, PID, usb_path) lets the second
 # launch skip the handshake and use the cached PM/SUB.
 #
-# Cache file: ``~/.trcc/led_probe_cache.json`` — matches legacy layout
-# byte-for-byte so installs that migrated from legacy keep the cached
-# entries.
+# Cache file: ``<state_dir>/led_probe_cache.json`` — the filename matches
+# legacy byte-for-byte so a migrated install keeps its entries.  The DIRECTORY
+# is injected (``Device.set_state_dir``), not guessed: this was
+# ``Path.home() / ".trcc"``, which is the config dir on Linux and BSD only,
+# and needed no injection — so the test suite wrote fake devices into the real
+# user's cache.  A ``Led`` nobody handed a state dir now caches nothing.
 
-_PROBE_CACHE_PATH = Path.home() / ".trcc" / "led_probe_cache.json"
+_PROBE_CACHE_FILE = "led_probe_cache.json"
 
 
 def _probe_cache_key(vid: int, pid: int, usb_path: str = "") -> str:
@@ -83,6 +86,7 @@ def _probe_cache_key(vid: int, pid: int, usb_path: str = "") -> str:
 
 
 def _probe_cache_save(
+    path: Path,
     vid: int, pid: int,
     pm: int, sub: int, model_name: str,
     *, usb_path: str = "",
@@ -94,32 +98,32 @@ def _probe_cache_save(
     same-power-cycle restart skips the now-broken handshake step.
     """
     try:
-        _PROBE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         cache: dict[str, dict[str, object]] = {}
-        if _PROBE_CACHE_PATH.is_file():
+        if path.is_file():
             try:
                 cache = json.loads(
-                    _PROBE_CACHE_PATH.read_text(encoding="utf-8"),
+                    path.read_text(encoding="utf-8"),
                 )
             except (OSError, ValueError):
                 log.debug("probe cache: corrupt at %s, rewriting fresh",
-                          _PROBE_CACHE_PATH)
+                          path)
                 cache = {}
         cache[_probe_cache_key(vid, pid, usb_path)] = {
             "pm": pm, "sub": sub, "model_name": model_name,
         }
-        _PROBE_CACHE_PATH.write_text(
+        path.write_text(
             json.dumps(cache, indent=2) + "\n", encoding="utf-8",
         )
         log.info("probe cache: saved %04x:%04x pm=%d sub=%d → %s",
-                 vid, pid, pm, sub, _PROBE_CACHE_PATH)
+                 vid, pid, pm, sub, path)
     except OSError as e:
         log.warning("probe cache: save failed for %04x:%04x: %s: %s",
                     vid, pid, type(e).__name__, e)
 
 
 def _probe_cache_load(
-    vid: int, pid: int, *, usb_path: str = "",
+    path: Path, vid: int, pid: int, *, usb_path: str = "",
 ) -> tuple[int, int, str] | None:
     """Return cached ``(pm, sub, model_name)`` for this device or None.
 
@@ -128,9 +132,9 @@ def _probe_cache_load(
     a bus path still resolves.
     """
     try:
-        if not _PROBE_CACHE_PATH.is_file():
+        if not path.is_file():
             return None
-        cache = json.loads(_PROBE_CACHE_PATH.read_text(encoding="utf-8"))
+        cache = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         log.debug("probe cache: load failed: %s: %s",
                   type(e).__name__, e)
@@ -179,6 +183,26 @@ class Led(BaseBulkDevice, wire=Wire.LED):
         """An LED has no canvas — its handshake product is the style, not a
         profile, so that is what a disconnect drops."""
         self._led_handshake = None
+
+    def _probe_cache_file(self) -> Path | None:
+        """This device's probe-cache file, or ``None`` if nobody injected a
+        state directory.
+
+        ``None`` is not a degraded mode to paper over — it means the caller
+        built this ``Led`` outside the composition root (a unit test, a bare
+        script), and such a device has no business writing to a real user's
+        cache.  Warned rather than defaulted, because the consequence is worth
+        naming: without the cache a second launch in the same power cycle gets
+        the firmware's garbage answer instead of the remembered one.
+        """
+        if self._state_dir is None:
+            log.warning(
+                "Led %s: no state dir injected — the probe cache is disabled, "
+                "so a second connect this power cycle cannot fall back to the "
+                "remembered PM/SUB.  (App.attach injects it; a directly "
+                "constructed Led does not get one.)", self.info.key)
+            return None
+        return self._state_dir / _PROBE_CACHE_FILE
 
     def _handshake_detail(self, result: HandshakeResult) -> str:
         """The resolved style + model — an LED's whole identity."""
@@ -257,10 +281,11 @@ class Led(BaseBulkDevice, wire=Wire.LED):
         # power cycle can skip the now-broken handshake.  The
         # LED firmware only answers the HID handshake once per
         # power-on; subsequent handshakes return garbage.
-        _probe_cache_save(
-            self.info.vid, self.info.pid,
-            self._pm, self._sub, model_name,
-        )
+        if (cache_file := self._probe_cache_file()) is not None:
+            _probe_cache_save(
+                cache_file, self.info.vid, self.info.pid,
+                self._pm, self._sub, model_name,
+            )
         return HandshakeResult(
             resolution=(0, 0),        # LEDs have no screen resolution
             model_id=self._pm,
@@ -276,7 +301,10 @@ class Led(BaseBulkDevice, wire=Wire.LED):
         likely already published its identity earlier in this power cycle, so
         the cached fingerprint is the truth and the device stays usable.
         """
-        cached = _probe_cache_load(self.info.vid, self.info.pid)
+        cache_file = self._probe_cache_file()
+        cached = (None if cache_file is None
+                  else _probe_cache_load(cache_file, self.info.vid,
+                                         self.info.pid))
         if cached is None:
             raise failure
 

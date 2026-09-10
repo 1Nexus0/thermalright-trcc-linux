@@ -148,10 +148,18 @@ def _resolve_target(
 class SysInfoConfig:
     """Load / save the sensor-dashboard layout."""
 
-    def __init__(self, config_path: Path | None = None) -> None:
-        self._path = (
-            config_path or Path.home() / ".trcc" / "system_config.json"
-        )
+    def __init__(self, config_path: Path) -> None:
+        """*config_path* is REQUIRED — this used to default to
+        ``Path.home() / ".trcc" / "system_config.json"``.
+
+        That is the config dir on Linux and BSD only, and it made the correct
+        call (``App`` passes ``paths().config_dir()``) indistinguishable from
+        no call at all.  ``load()`` RENAMES a legacy file into place, so a
+        bare ``SysInfoConfig()`` in a test was one ``load()`` away from moving
+        a file in the real user's config directory.  Requiring the path makes
+        the bypass unrepresentable rather than merely unused.
+        """
+        self._path = config_path
         self.panels: list[PanelConfig] = []
 
     @property

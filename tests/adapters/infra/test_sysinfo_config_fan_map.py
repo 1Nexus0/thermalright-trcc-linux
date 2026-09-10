@@ -10,6 +10,8 @@ the fallback must prefer live readings.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from trcc.adapters.infra.sysinfo_config import SysInfoConfig
 from trcc.core.models import SensorReading
 
@@ -26,10 +28,10 @@ def _fan_panel(cfg: SysInfoConfig):
     return next(p for p in cfg.panels if p.category_id == 6)
 
 
-def test_positional_fallback_binds_spinning_fans_to_visible_slots() -> None:
+def test_positional_fallback_binds_spinning_fans_to_visible_slots(tmp_path: Path) -> None:
     # fan1/fan3/fan4/fan5 dead (disconnected headers), fan2 + fan6 spinning
     # (e.g. a hydronic pump + a radiator fan on arbitrary headers).
-    cfg = SysInfoConfig()
+    cfg = SysInfoConfig(tmp_path / "system_config.json")
     cfg.panels = SysInfoConfig.defaults()
     cfg.auto_map([
         _fan(1, 0.0), _fan(2, 895.0), _fan(3, 0.0),
@@ -46,10 +48,10 @@ def test_positional_fallback_binds_spinning_fans_to_visible_slots() -> None:
     assert rows[3].sensor_id == "fan:hwmon:nct6798:fan3:rpm"
 
 
-def test_all_dead_fans_still_bind_positionally_no_crash() -> None:
+def test_all_dead_fans_still_bind_positionally_no_crash(tmp_path: Path) -> None:
     # Degenerate case: nothing spinning at map time — must not crash and
     # still bind in id order (a fan idle now may spin under load later).
-    cfg = SysInfoConfig()
+    cfg = SysInfoConfig(tmp_path / "system_config.json")
     cfg.panels = SysInfoConfig.defaults()
     cfg.auto_map([_fan(1, 0.0), _fan(2, 0.0)])
 
@@ -58,14 +60,14 @@ def test_all_dead_fans_still_bind_positionally_no_crash() -> None:
     assert rows[1].sensor_id == "fan:hwmon:nct6798:fan2:rpm"
 
 
-def test_labelled_cpu_fan_still_wins_over_positional() -> None:
+def test_labelled_cpu_fan_still_wins_over_positional(tmp_path: Path) -> None:
     # Boards that DO label their fans must keep label-first mapping: a fan
     # labelled "CPU Fan" binds to the CPUFAN slot even if it isn't fan1.
     labelled = SensorReading(
         sensor_id="fan:hwmon:it87:fan3:rpm", category="fan",
         value=1200.0, unit="RPM", label="CPU Fan",
     )
-    cfg = SysInfoConfig()
+    cfg = SysInfoConfig(tmp_path / "system_config.json")
     cfg.panels = SysInfoConfig.defaults()
     cfg.auto_map([_fan(1, 800.0), labelled])
 

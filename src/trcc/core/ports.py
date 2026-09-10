@@ -173,6 +173,35 @@ class Device(ABC, Generic[T]):
         # successful send via ``_recovery.note_success``.
         from .device_recovery import RecoveryTracker
         self._recovery = RecoveryTracker(self.info.key)
+        # Where this device may persist its own state, injected by the
+        # composition root via ``set_state_dir``.  ``None`` means nobody told
+        # us, and a device that has not been told MUST NOT GUESS — see there.
+        self._state_dir: Path | None = None
+
+    def set_state_dir(self, path: Path) -> None:
+        """Inject the directory this device may persist its own state in.
+
+        A resolved ``Path``, never the ``Paths`` port — the same rule
+        :meth:`set_permission_hint` states: the composition root resolves, the
+        device receives a value and still knows nothing about the OS.
+
+        Exists because the alternative is what the LED adapter did for as long
+        as it existed: ``Path.home() / ".trcc" / ...`` as a module constant.
+        That is only the config dir on Linux and BSD (Windows uses
+        ``%APPDATA%``, macOS ``Application Support``), so on half our platforms
+        the file landed where nothing else lives and no report collects it —
+        and because the constant needed no injection, **the test suite wrote
+        into the real user's home**.  MEASURED: five LED test files put a fake
+        ``pm=208 MAGIC_QUBE`` entry in ``~/.trcc/led_probe_cache.json``, and
+        that cache is what a second launch trusts INSTEAD of a handshake, so a
+        test run could redefine a real device's identity.
+
+        Left ``None`` a device persists nothing and says so.  That is the point:
+        the un-injected case is now silent on disk by construction rather than
+        by every test remembering to monkeypatch a module constant.
+        """
+        self._state_dir = path
+        log.debug("Device %s: state_dir=%s", self.info.key, path)
 
     def set_permission_hint(self, hint: str) -> None:
         """Inject the OS-specific EACCES remediation hint (a pre-resolved

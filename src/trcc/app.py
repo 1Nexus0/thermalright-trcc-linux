@@ -628,6 +628,9 @@ class App:
         # is in scope) so the device's recovery tracker can surface it without
         # the device knowing which OS it's on.
         device.set_permission_hint(self.platform.permission_denied_hint())
+        # Where this device may persist its own state — resolved through the
+        # Paths port here, so no adapter has to reach for Path.home().
+        device.set_state_dir(self.platform.paths().config_dir())
         # Inject firmware-specific overrides resolved from the live fingerprint.
         device.set_quirks(quirks)
         self.devices[device.key] = device

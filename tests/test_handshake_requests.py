@@ -52,12 +52,10 @@ exists to prevent, reproduced in the file itself on the first try.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 import pytest
 
 from trcc.adapters.device import DEVICES, _f5
-from trcc.adapters.device import led as led_mod
 from trcc.core.models import ProductInfo, Wire
 from trcc.core.ports import Transport
 from trcc.core.registry import ALL_DEVICES, find_product
@@ -179,18 +177,13 @@ BULK_WIRE_HANDSHAKES: tuple[Handshake, ...] = (
 )
 
 
-@pytest.fixture(autouse=True)
-def _isolate_led_probe_cache(tmp_path: Path, monkeypatch) -> None:
-    """Keep ``Led.connect()`` out of the real ``~/.trcc``.
-
-    ``_PROBE_CACHE_PATH`` is ``Path.home() / ".trcc" / ...`` — a module constant
-    that bypasses the ``Paths`` port — and a successful LED handshake SAVES to
-    it.  So any test that connects an LED writes a fake device into the user's
-    own cache unless it redirects this first.  Autouse rather than per-row: the
-    next row added here should not have to know.
-    """
-    monkeypatch.setattr(
-        led_mod, "_PROBE_CACHE_PATH", tmp_path / "led_probe_cache.json")
+# There used to be an autouse fixture here redirecting the LED probe cache away
+# from the real ``~/.trcc``, because ``Led.connect()`` saved to a module
+# constant built from ``Path.home()`` and the LED row below would otherwise
+# write a fake device into the user's own cache.  It is gone, and nothing
+# replaced it: a ``Led`` nobody handed a state dir now persists nothing at all
+# (``Device.set_state_dir``).  Isolation by construction, not by every test
+# remembering to patch.
 
 
 def _product(vid: int, pid: int) -> ProductInfo:

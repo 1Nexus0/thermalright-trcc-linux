@@ -202,13 +202,13 @@ def test_led_probe_cache_save_on_success(
     """A successful handshake writes (pm, sub, model_name) to disk."""
     import json as _json
 
-    from trcc.adapters.device import led as led_mod
     cache_path = tmp_path / "led_probe_cache.json"
-    monkeypatch.setattr(led_mod, "_PROBE_CACHE_PATH", cache_path)
+
 
     transport = FakeBulkTransport()
     transport.read_script.append(_scripted_handshake_response(pm=80, sub=0))
     led = Led(_led_info(), transport)
+    led.set_state_dir(tmp_path)
     led.connect()
 
     assert cache_path.is_file()
@@ -232,7 +232,6 @@ def test_led_probe_cache_falls_back_when_handshake_fails(
     """
     import json as _json
 
-    from trcc.adapters.device import led as led_mod
 
     # Seed the cache with a known-good entry (as if a previous launch
     # had successfully handshaken PM=80 SUB=0).
@@ -242,11 +241,12 @@ def test_led_probe_cache_falls_back_when_handshake_fails(
             "pm": 80, "sub": 0, "model_name": "LF12",
         },
     }), encoding="utf-8")
-    monkeypatch.setattr(led_mod, "_PROBE_CACHE_PATH", cache_path)
+
 
     transport = FakeBulkTransport()
     # Empty read_script → reads raise → all handshake retries fail.
     led = Led(_led_info(), transport)
+    led.set_state_dir(tmp_path)
 
     result = led.connect()
 
@@ -266,14 +266,14 @@ def test_led_probe_cache_handles_corrupt_file(
 ) -> None:
     """A non-JSON cache file is treated as empty — re-saved fresh on
     next successful handshake.  Never blocks a real handshake."""
-    from trcc.adapters.device import led as led_mod
     cache_path = tmp_path / "led_probe_cache.json"
     cache_path.write_text("{ not json", encoding="utf-8")
-    monkeypatch.setattr(led_mod, "_PROBE_CACHE_PATH", cache_path)
+
 
     transport = FakeBulkTransport()
     transport.read_script.append(_scripted_handshake_response(pm=128, sub=0))
     led = Led(_led_info(), transport)
+    led.set_state_dir(tmp_path)
 
     result = led.connect()
 
@@ -374,17 +374,17 @@ def test_led_connect_cache_fallback_preserves_magic_qube(
     """
     import json as _json
 
-    from trcc.adapters.device import led as led_mod
     cache_path = tmp_path / "led_probe_cache.json"
     cache_path.write_text(_json.dumps({
         f"{0x0416:04x}_{0x8001:04x}": {
             "pm": 208, "sub": 0, "model_name": "MAGIC_QUBE",
         },
     }), encoding="utf-8")
-    monkeypatch.setattr(led_mod, "_PROBE_CACHE_PATH", cache_path)
+
 
     transport = FakeBulkTransport()   # empty script → live handshake fails
     led = Led(_led_info(), transport)
+    led.set_state_dir(tmp_path)
 
     led.connect()
 
@@ -467,3 +467,37 @@ def test_zone_led_map_agrees_with_the_declared_zone_count() -> None:
             f"{style.value}: zone_led_map has {len(display.zone_led_map)} "
             f"entries but LedStyleSpec declares {spec.zone_count} zones"
         )
+
+
+def test_app_attach_puts_the_probe_cache_in_the_platform_config_dir(
+    tmp_path: Path,
+) -> None:
+    """The composition root wires the state dir, end to end.
+
+    The RULE (no ``Path.home()`` outside the system adapters) is gated in
+    ``test_architecture_boundaries``; this gates the WIRING, which is a
+    different thing and was the half left open.  MEASURED: deleting
+    ``device.set_state_dir(...)`` from ``App.attach`` broke NOTHING —
+    212 tests passed with LED caching silently dead everywhere, because every
+    other test injects the directory itself.
+
+    So this one refuses to: it goes through the real ``App.attach`` and then
+    looks for the file where the ``Paths`` port says it belongs.  On Linux that
+    is indistinguishable from the old ``Path.home() / ".trcc"`` — which is
+    precisely why the platform here has a config dir that is NOT the home
+    directory, so a bypass cannot pass by coincidence.
+    """
+    from tests.mock_platform import MockPlatform
+    from trcc.app import App
+
+    platform = MockPlatform([{"vid": "0416", "pid": "8001"}], tmp_path)
+    app = App(platform)
+    device = app.attach(0x0416, 0x8001)
+    device.connect()
+
+    cache = platform.paths().config_dir() / "led_probe_cache.json"
+    assert cache.is_file(), (
+        f"probe cache is not under the Paths port's config_dir "
+        f"({platform.paths().config_dir()}) — App.attach must "
+        f"set_state_dir(), and the device must use it")
+    assert f"{0x0416:04x}_{0x8001:04x}" in cache.read_text(encoding="utf-8")
