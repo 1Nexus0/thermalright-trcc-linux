@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from trcc.core.models import OverlayElementConfig, OverlayMode
 from trcc.ui.presentation.overlay_model import MAX_ELEMENTS, OverlayModel
 from trcc.ui.presentation.overlay_serialization import (
@@ -252,3 +254,52 @@ def test_overlay_config_to_configs_reads_show_unit_into_mode_sub() -> None:
         }
         restored = overlay_config_to_configs(theme_shape)
         assert restored[0].mode_sub == expected
+
+
+# ── The pair's actual invariant: configs → dict → configs is identity ───────
+
+
+def _element(**kw):
+    """An element with every field set to something distinctive."""
+    cfg = OverlayElementConfig(
+        x=13, y=27, color="#ABCDEF", font_size=24, font_style=1,
+        font_name="Noto Sans",
+    )
+    for key, value in kw.items():
+        setattr(cfg, key, value)
+    return cfg
+
+
+@pytest.mark.parametrize("built", [
+    _element(mode=OverlayMode.TIME, mode_sub=1),
+    _element(mode=OverlayMode.DATE, mode_sub=2),
+    _element(mode=OverlayMode.WEEKDAY),
+    _element(mode=OverlayMode.CUSTOM, text="hello"),
+    # A pair WITH a canonical DC id.
+    _element(mode=OverlayMode.HARDWARE, main_count=1, sub_count=1, mode_sub=1),
+    # A pair WITHOUT one.  `configs_to_overlay_config` writes its own
+    # `hw_<main>_<sub>` fallback for these, and the reader could not parse it —
+    # so the element was written out and silently DROPPED coming back, and
+    # vanished from the editor grid.  264 of the 288 pairs in 0..23 x 0..11
+    # have no canonical id, so this is the common case, not the exotic one.
+    _element(mode=OverlayMode.HARDWARE, main_count=99, sub_count=77, mode_sub=0),
+], ids=["time", "date", "weekday", "custom", "hw-canonical", "hw-fallback"])
+def test_overlay_config_round_trips_every_mode(built) -> None:
+    """Serialise then read back must return what went in, for EVERY mode.
+
+    The two directions are separate functions dispatching on different things
+    — one on `OverlayMode`, one on the metric string — so nothing but this
+    forces them to agree.  The suite covered CUSTOM and TIME.
+    """
+    back = overlay_config_to_configs(
+        configs_to_overlay_config([built], enabled=True))
+
+    assert len(back) == 1, (
+        f"{built.mode.name} element was dropped on the round trip — the "
+        "reader does not understand what the writer emitted")
+    got = back[0]
+    for field in ("mode", "mode_sub", "x", "y", "main_count", "sub_count",
+                  "color", "font_name", "font_size", "font_style", "text"):
+        assert getattr(got, field) == getattr(built, field), (
+            f"{built.mode.name}: {field} changed across the round trip "
+            f"({getattr(built, field)!r} -> {getattr(got, field)!r})")

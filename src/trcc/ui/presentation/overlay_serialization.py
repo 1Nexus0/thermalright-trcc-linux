@@ -19,6 +19,7 @@ Models can use it without a backwards dependency on a concrete GUI.  The
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,37 @@ _DEFAULT_FONT_NAME = "Microsoft YaHei"
 # =========================================================================
 # OverlayElementConfig  ↔  legacy renderer dict
 # =========================================================================
+
+
+#: The fallback id ``configs_to_overlay_config`` emits for a (main, sub) pair
+#: with no canonical DC name.
+_HW_FALLBACK = re.compile(r"^hw_(\d+)_(\d+)$")
+
+
+def _hardware_ids(metric: str) -> tuple[int, int] | None:
+    """``metric`` → ``(main, sub)`` for EVERY spelling we can write.
+
+    Two exist.  ``Dc.metric_to_hardware`` reads the canonical DC id
+    (``"cpu:temp"``), and ``hw_<main>_<sub>`` is our OWN fallback for a pair
+    with no canonical name — written by :func:`configs_to_overlay_config` and,
+    until 2026-09-10, unreadable here.  A theme carrying such a metric had the
+    element written out and then silently DROPPED on the way back in, so it
+    vanished from the editor grid.
+
+    MEASURED: of the 288 ``(main, sub)`` pairs in 0..23 x 0..11, **264 have no
+    canonical id**, so the fallback is the common case rather than the exotic
+    one.  A writer and a reader that disagree about their own encoding is the
+    bug; this is the one place that knows both.
+    """
+    if (hw := Dc.metric_to_hardware(metric)) is not None:
+        log.debug("_hardware_ids: %r -> %s (canonical)", metric, hw)
+        return hw
+    if match := _HW_FALLBACK.match(metric):
+        ids = (int(match.group(1)), int(match.group(2)))
+        log.debug("_hardware_ids: %r -> %s (our own fallback id)", metric, ids)
+        return ids
+    log.debug("_hardware_ids: %r maps to no hardware pair", metric)
+    return None
 
 
 def configs_to_overlay_config(
@@ -145,7 +177,7 @@ def overlay_config_to_configs(
         elif "text" in cfg:
             elem.mode = OverlayMode.CUSTOM
             elem.text = cfg["text"]
-        elif (hw := Dc.metric_to_hardware(metric)) is not None:
+        elif (hw := _hardware_ids(metric)) is not None:
             elem.main_count, elem.sub_count = hw
             elem.mode = OverlayMode.HARDWARE
             # show_unit (button0) round-trips to mode_sub 1/0.
