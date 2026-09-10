@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 
@@ -1441,3 +1442,45 @@ def test_autostart_refresh_reports_when_there_is_nothing_to_refresh(
 
     assert result.exit_code == 0, result.output
     assert not fake_platform.autostart().is_enabled()
+
+
+# ── `--metric` spec parsing (#286) ──────────────────────────────────────────
+
+
+@pytest.mark.parametrize("spec,metric,x,y,color,size", [
+    # The example printed in the command's own --help.  It FAILED.
+    ("cpu:temp:160,90:#ff8800:24", "cpu:temp", 160, 90, "#ff8800", 24),
+    # Both optional fields omitted — the case the reporter's rsplit(":", 3)
+    # could not handle, which is why the boundary is found by shape instead.
+    ("cpu:temp:160,90", "cpu:temp", 160, 90, "#ffffff", 16),
+    ("gpu:0:temp:10,20:#fff", "gpu:0:temp", 10, 20, "#fff", 16),
+    ("gpu:amd:0:temp:1,2:#abc:32", "gpu:amd:0:temp", 1, 2, "#abc", 32),
+    # A key with no colon at all must keep working.
+    ("cpu_temp:5,5", "cpu_temp", 5, 5, "#ffffff", 16),
+])
+def test_metric_spec_keeps_colons_in_the_metric_key(
+    spec: str, metric: str, x: int, y: int, color: str, size: int,
+) -> None:
+    """A metric key is colon-namespaced, so the key/coords boundary cannot be
+    found by counting colons from either end (#286).
+
+    `split(":")` took parts[0] as the key, so `cpu:temp:160,90` parsed the key
+    as `cpu` and the coords as `temp` — making --metric unusable with every
+    real sensor, the documented example included.
+    """
+    from trcc.ui.cli.theme import _parse_metric_spec
+
+    assert _parse_metric_spec(spec) == {
+        "metric": metric, "x": x, "y": y, "color": color, "size": size,
+    }
+
+
+@pytest.mark.parametrize("spec", ["bogus", "cpu:temp", "cpu:temp:notcoords", ""])
+def test_metric_spec_still_rejects_garbage(spec: str) -> None:
+    """Locating coords by shape must not make the parser accept anything."""
+    import typer
+
+    from trcc.ui.cli.theme import _parse_metric_spec
+
+    with pytest.raises(typer.BadParameter):
+        _parse_metric_spec(spec)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 import typer
@@ -36,14 +37,40 @@ _METRIC_USAGE = (
 )
 
 
+#: The coords field, and the only part of a ``--metric`` spec shaped like this.
+#: Anchoring on it is what makes the parse work: a metric key is itself
+#: colon-namespaced (``cpu:temp``, ``gpu:0:temp``), so counting colons from
+#: either end cannot find the boundary.
+_COORDS_RE = re.compile(r"-?\d+\s*,\s*-?\d+")
+
+
 def _parse_metric_spec(spec: str) -> dict[str, object]:
-    """Parse a ``--metric`` arg into kwargs for AddOverlayElement."""
+    """Parse a ``--metric`` arg into kwargs for AddOverlayElement.
+
+    Grammar: ``metric_key:x,y[:color[:size]]`` where **metric_key may contain
+    colons** — every real sensor key does (``cpu:temp``, ``gpu:0:temp``).
+
+    This used to ``split(":")`` and take ``parts[0]`` as the key, so
+    ``cpu:temp:160,90`` parsed the key as ``cpu`` and the coords as ``temp``.
+    That made ``--metric`` unusable with any actual sensor, including the
+    example printed in the command's own ``--help`` (#286).
+
+    Splitting from the right instead — the fix the reporter found — works only
+    when both optional fields are supplied; ``cpu:temp:160,90`` still breaks.
+    So the boundary is located by SHAPE: coords is the first field matching
+    ``x,y``, everything before it is the key, everything after is
+    ``[color[, size]]``.  That holds for any number of colons on either side.
+    """
     parts = spec.split(":")
-    if len(parts) < 2:
+    idx = next((i for i, part in enumerate(parts)
+                if _COORDS_RE.fullmatch(part.strip())), None)
+    if idx is None or idx == 0:
         raise typer.BadParameter(
             f"Invalid metric spec {spec!r}; {_METRIC_USAGE}",
         )
-    metric_key, coords, *rest = parts
+    metric_key = ":".join(parts[:idx])
+    coords = parts[idx]
+    rest = parts[idx + 1:]
     try:
         x_str, y_str = coords.split(",")
         x, y = int(x_str), int(y_str)
