@@ -667,9 +667,9 @@ def wire_angle(
     ``portrait_content`` now only distinguishes the square / non-rotate fallback
     (where content is never portrait, so it is a no-op in practice).
     """
-    frame_log.debug("wire_angle: profile.sub=%d %dx%d @ %d° portrait=%s → %s",
+    frame_log.debug("wire_angle: profile.sub=%d %dx%d @ %d° portrait=%s",
                       profile.sub, profile.width, profile.height, orientation,
-                      portrait_content, angle)
+                      portrait_content)
     if profile.rotate:
         angle = resolve_encode_angle(profile, orientation)
         frame_log.debug("wire_angle: rotate panel %dx%d @ %d° -> %d° "
