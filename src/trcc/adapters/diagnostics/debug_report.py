@@ -37,7 +37,7 @@ from pathlib import Path
 
 from ...core.errors import HandshakeError, TransportError
 from ...core.models import Kind, ProductInfo
-from ...core.ports import Platform
+from ...core.ports import Paths, Platform
 from ...core.registry import find_product
 from ...services.settings import resolve_config_path
 from ..device import DEVICES
@@ -67,6 +67,7 @@ class DebugReport:
     powercap: list[dict[str, str]] = field(default_factory=list)
     settings_json: str = ""
     settings_error: str = ""
+    state_files: dict[str, str] = field(default_factory=dict)
     health: HealthReport = field(default_factory=HealthReport)
     log_tail: list[str] = field(default_factory=list)
     log_actions: list[str] = field(default_factory=list)
@@ -89,6 +90,7 @@ class DebugReport:
         sections.append(_render_sensors(self.sensors, self.sensors_error))
         sections.append(_render_powercap(self.powercap))
         sections.append(_render_settings(self.settings_json, self.settings_error))
+        sections.append(_render_state_files(self.state_files))
         sections.append(_render_health(self.health))
         # Narrative before detail: what the reporter DID reaches back through
         # the whole log, the raw tail is only the last moments before it.
@@ -128,9 +130,9 @@ def build_debug_report(
     devices, devices_err = _collect_devices(platform)
     sensors, sensors_err = _collect_sensors(platform)
     powercap = _collect_powercap()
-    settings_text, settings_err = _read_settings_file(
-        settings_path or resolve_config_path(platform.paths()),
-    )
+    live_settings = settings_path or resolve_config_path(platform.paths())
+    settings_text, settings_err = _read_settings_file(live_settings)
+    state_files = _collect_state_files(platform.paths(), live_settings)
     health = run_health_checks(platform)
     log_path = platform.paths().log_file()
     log_lines = tail_log(log_path, n_lines=log_tail_lines)
@@ -148,6 +150,7 @@ def build_debug_report(
         sensors_error=sensors_err,
         powercap=powercap,
         settings_json=settings_text,
+        state_files=state_files,
         settings_error=settings_err,
         health=health,
         log_tail=log_lines,
@@ -379,6 +382,52 @@ def _collect_powercap() -> list[dict[str, str]]:
     return rows
 
 
+#: Per-file cap for the state dump.  Generous — the largest of these today is
+#: the sensor layout at ~3 KB — but a report must not become unpasteable
+#: because one file grew unbounded.
+_STATE_FILE_MAX_CHARS = 8192
+
+
+def _collect_state_files(paths: Paths, settings_path: Path) -> dict[str, str]:
+    """Every OTHER ``*.json`` the app keeps beside its settings.
+
+    DISCOVERED, not enumerated.  The report used to carry exactly one of the
+    four state files in ``config_dir`` and named it with a literal, so the
+    other three were invisible to every diagnosis we have ever done — and the
+    one it named was the wrong file.  A glob cannot be out of date, and a state
+    file added next year shows up in reports without anyone remembering this
+    function exists.
+
+    Worth having, concretely: ``system_config.json`` IS the sensor-dashboard
+    layout, so "my temps don't show" is answered by it; ``led_probe_cache.json``
+    is what a second launch trusts INSTEAD of a handshake, because the LED
+    firmware answers only once per power cycle, so a stale entry explains a
+    device coming up as the wrong model.
+
+    The settings file is excluded — it has its own section.
+    """
+    log.debug("_collect_state_files: scanning %s", paths.config_dir())
+    out: dict[str, str] = {}
+    try:
+        found = sorted(paths.config_dir().glob("*.json"))
+    except OSError as e:
+        log.warning("_collect_state_files: cannot list %s: %s",
+                    paths.config_dir(), e)
+        return out
+    for path in found:
+        if path == settings_path:
+            continue
+        text, err = _read_settings_file(path)
+        body = err if (err and not text) else text
+        if len(body) > _STATE_FILE_MAX_CHARS:
+            body = (body[:_STATE_FILE_MAX_CHARS]
+                    + f"\n… truncated at {_STATE_FILE_MAX_CHARS} chars "
+                      f"({len(text)} total)")
+        out[path.name] = body
+        log.debug("_collect_state_files: + %s (%d chars)", path.name, len(body))
+    return out
+
+
 def _read_settings_file(path: Path) -> tuple[str, str]:
     log.debug("_read_settings_file: path=%s", path)
     if not path.is_file():
@@ -516,6 +565,18 @@ def _render_settings(text: str, error: str) -> str:
     indented = "\n".join(f"  {line}" for line in text.splitlines())
     note = f"  ({error})\n" if error else ""
     return f"## Settings\n{note}{indented}"
+
+
+def _render_state_files(files: dict[str, str]) -> str:
+    log.debug("_render_state_files: %d file(s): %s",
+              len(files), ", ".join(files) or "—")
+    if not files:
+        return "## State files\n  (none beside the settings file)"
+    blocks = []
+    for name, body in files.items():
+        indented = "\n".join(f"    {line}" for line in body.splitlines())
+        blocks.append(f"  {name}\n{indented}")
+    return f"## State files ({len(files)})\n" + "\n".join(blocks)
 
 
 def _render_health(report: HealthReport) -> str:

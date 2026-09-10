@@ -1306,7 +1306,7 @@ def test_build_debug_report_returns_filled_struct(fake_platform) -> None:
 #: ``test_debug_report_captures_live_handshake``.
 _REPORT_SECTIONS = frozenset({
     "Install", "Platform", "Paths", "Devices", "Sensors", "CPU power",
-    "Settings", "Health", "Actions", "Log tail",
+    "Settings", "State files", "Health", "Actions", "Log tail",
 })
 
 
@@ -1461,6 +1461,60 @@ def test_settings_write_path_never_follows_the_read_path(tmp_path: Path) -> None
     reloaded.set_language("pt")
     assert (tmp_path / "trcc.json").is_file(), "save must migrate the filename"
     assert '"pt"' in (tmp_path / "trcc.json").read_text(encoding="utf-8")
+
+
+def test_report_carries_every_state_file_beside_the_settings(
+    tmp_path: Path,
+) -> None:
+    """The other state files reach the report, and are DISCOVERED not listed.
+
+    Before this, the report carried exactly one of the four ``*.json`` files in
+    ``config_dir`` — and named it with a literal, which is how it ended up
+    naming the wrong one.  The three it ignored are not trivia:
+    ``system_config.json`` IS the sensor-dashboard layout ("my temps don't
+    show"), and ``led_probe_cache.json`` is what a second launch trusts instead
+    of a handshake.
+
+    The unknown file here is the load-bearing part of the assertion: nothing in
+    the collector knows that name, so it can only appear by being found.
+    """
+    from tests.mock_platform import MockPlatform
+    from trcc.services.settings import Settings
+
+    platform = MockPlatform([], tmp_path)
+    Settings(platform.paths()).set_language("nl")
+    (tmp_path / "system_config.json").write_text(
+        '{"panels": ["cpu-temp"]}', encoding="utf-8")
+    (tmp_path / "led_probe_cache.json").write_text(
+        '{"0416_8001": {"pm": 208}}', encoding="utf-8")
+    (tmp_path / "some_future_state.json").write_text(
+        '{"invented": "today"}', encoding="utf-8")
+
+    text = build_debug_report(platform).render_text()
+    state = text.split("## State files", 1)[1].split("\n## ", 1)[0]
+
+    assert "system_config.json" in state and "cpu-temp" in state
+    assert "led_probe_cache.json" in state and "208" in state
+    assert "some_future_state.json" in state and "invented" in state
+    # The settings file has its own section and must not be duplicated here.
+    assert "trcc.json" not in state
+    assert '"language": "nl"' in text
+
+
+def test_state_file_dump_is_capped(tmp_path: Path) -> None:
+    """One unbounded file must not make the whole report unpasteable."""
+    from tests.mock_platform import MockPlatform
+    from trcc.adapters.diagnostics.debug_report import _STATE_FILE_MAX_CHARS
+
+    platform = MockPlatform([], tmp_path)
+    (tmp_path / "huge.json").write_text(
+        '{"x": "' + "y" * (_STATE_FILE_MAX_CHARS * 2) + '"}', encoding="utf-8")
+
+    text = build_debug_report(platform).render_text()
+    state = text.split("## State files", 1)[1].split("\n## ", 1)[0]
+
+    assert "truncated at" in state
+    assert len(state) < _STATE_FILE_MAX_CHARS * 2
 
 
 def test_debug_report_writes_to_disk(fake_platform, tmp_path: Path) -> None:
