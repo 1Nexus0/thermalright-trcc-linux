@@ -404,15 +404,46 @@ class FakePlatform(Platform):
 # ── Fixtures ─────────────────────────────────────────────────────────
 
 
-@pytest.fixture
-def tmp_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect $HOME + XDG_CONFIG_HOME to a per-test tmp dir.
+@pytest.fixture(autouse=True)
+def _home_is_never_the_real_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No test may touch the developer's own ``~``.  Autouse, for cause.
 
-    Keeps XdgDesktopAutostart, LinuxPaths, etc. from touching the user's
-    real filesystem during tests.
+    ``tmp_home`` below has done this since forever, but only for the tests that
+    ASKED for it, and the ones that write are not the ones that ask: anything
+    reaching a real entry point resolves its log path through the REAL platform
+    (``ensure_configured`` -> ``current_platform().paths().log_file()``), so it
+    lands in ``~/.trcc/`` regardless of what fixtures the test declared.
+
+    MEASURED 2026-09-10 with ``HOME`` pointed at an empty directory and a
+    per-test tracer: a full run left ``trcc.log``, ``trcc.latest.log``, two
+    lock files, a ``.run`` marker and a ``data/`` tree there, from tests spread
+    across at least a dozen unrelated files — API routes, device catalog smoke,
+    geometry, quirks, the Windows WMI seam.  It is diffuse, which is exactly
+    why it has to be a blanket guard rather than a fixture each of them
+    remembers to request.
+
+    That matters beyond tidiness: ``~/.trcc/trcc.log`` is the file ``trcc
+    report`` tails, so a developer who ran the suite and then produced a report
+    was pasting test output into it.
+
+    I first measured this over EIGHT files, found one culprit
+    (``test_gui_entry_exit.py``) and concluded it was a one-file problem worth
+    a one-file fix.  The full trace overturned that.  Recorded because the
+    narrow measurement looked every bit as conclusive as the wide one.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+
+
+@pytest.fixture
+def tmp_home(tmp_path: Path) -> Path:
+    """The per-test HOME as a value.
+
+    The redirection itself is autouse above; this just names the directory for
+    the tests that want to read or seed it.
+    """
     return tmp_path
 
 

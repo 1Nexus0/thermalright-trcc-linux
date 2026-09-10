@@ -68,7 +68,17 @@ def test_the_bus_adds_no_heavy_import_to_a_cli_run() -> None:
         " if m.startswith(('PySide6','fastapi','uvicorn'))];"
         "print(len(heavy)); print(sorted(heavy)[:5])"
     )
-    env = {**os.environ, "PYTHONPATH": str(_SRC)}
+    # The child must resolve the same packages the parent did.  Inheriting
+    # PYTHONPATH=src alone is not enough: trcc's dependencies may live in the
+    # USER site (``~/.local/lib/...``), which Python locates through ``HOME``
+    # — and the suite deliberately redirects ``HOME`` to a tmp dir so no test
+    # writes into the developer's own ``~``.  Passing the parent's resolved
+    # ``sys.path`` makes this test independent of both, which is what a
+    # subprocess measuring IMPORT COST should have been all along.
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join([str(_SRC), *(p for p in sys.path if p)]),
+    }
     out = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True, text=True, env=env, check=True,
