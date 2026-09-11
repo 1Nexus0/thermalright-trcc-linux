@@ -276,6 +276,7 @@ class Layout:
     TOGGLE_MASK = (5, 5, 36, 18)
     ACTION_BTN_1 = (149, 30, 40, 40)
     ACTION_BTN_2 = (219, 30, 40, 40)
+    BG_STATIC_CHECKBOX = (309, 6, 14, 14)
 
     # Add element panel buttons
     ADD_BTN_X = 12
@@ -295,6 +296,7 @@ class Layout:
     ABOUT_FAHRENHEIT = (387, 214, 14, 14)
     ABOUT_HDD = (297, 254, 14, 14)
     ABOUT_REFRESH_INPUT = (299, 291, 36, 16)
+    ABOUT_KEEPALIVE_INPUT = (420, 291, 36, 16)
     ABOUT_WEBSITE = (94, 726, 353, 43)
     ABOUT_VERSION = (1150, 735, 87, 27)
     ABOUT_UPDATE_BTN = (297, 373, 48, 26)

@@ -48,9 +48,11 @@ from ...core.commands import (
     SetBackground,
     SetGpuDevice,
     SetHddEnabled,
+    SetKeepaliveInterval,
     SetLanguage,
     SetMaskVisible,
     SetRefreshInterval,
+    SetStaticBackground,
     SetTempUnit,
     StartScreencast,
     StopScreencast,
@@ -1588,6 +1590,7 @@ class TRCCApp(QMainWindow):
         self.uc_about.temp_unit_changed.connect(self._on_temp_unit_changed)
         self.uc_about.hdd_toggle_changed.connect(self._on_hdd_toggle_changed)
         self.uc_about.refresh_changed.connect(self._on_refresh_changed)
+        self.uc_about.keepalive_changed.connect(self._on_keepalive_changed)
         self.uc_about.gpu_changed.connect(self._on_gpu_changed)
 
     # ── Device Selection ────────────────────────────────────────────
@@ -1786,6 +1789,11 @@ class TRCCApp(QMainWindow):
                     # a render.  No direct ``_render_and_send`` needed.
                     self._app.dispatch(SetMaskVisible(
                         key=h.device_key, visible=bool(info),
+                    ))
+            case UCThemeSetting.CMD_STATIC_BACKGROUND:
+                if h:
+                    self._app.dispatch(SetStaticBackground(
+                        key=h.device_key, enabled=bool(info),
                     ))
             case UCThemeSetting.CMD_MASK_UPLOAD:
                 self._on_mask_upload_clicked()
@@ -2537,6 +2545,13 @@ class TRCCApp(QMainWindow):
         log.info("_on_refresh_changed: interval=%ss", interval)
         result = self._app.dispatch(SetRefreshInterval(seconds=float(interval)))
         log.info("_on_refresh_changed: dispatch result ok=%s message=%r",
+                 result.ok, result.message)
+        self.uc_preview.set_status(result.message)
+
+    def _on_keepalive_changed(self, seconds: float) -> None:
+        log.info("_on_keepalive_changed: seconds=%s", seconds)
+        result = self._app.dispatch(SetKeepaliveInterval(seconds=seconds))
+        log.info("_on_keepalive_changed: dispatch result ok=%s message=%r",
                  result.ok, result.message)
         self.uc_preview.set_status(result.message)
 

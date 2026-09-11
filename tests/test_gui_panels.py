@@ -3271,3 +3271,94 @@ def test_the_preview_wears_the_panel_s_bezel(qapp: object, tmp_path: Path) -> No
             )
     finally:
         app.close()
+
+
+# keepalive interval + static background — the two settings a front end
+# reads back from the snapshots rather than assuming
+# =========================================================================
+
+
+def test_about_keepalive_input_clamps_and_emits(qapp: object) -> None:
+    """The About field mirrors the refresh field: clamp, echo, emit — and an
+    empty box restores the last value instead of dispatching."""
+    from trcc.core.models import (
+        DEFAULT_KEEPALIVE_INTERVAL_S,
+        MAX_KEEPALIVE_INTERVAL_S,
+        MIN_KEEPALIVE_INTERVAL_S,
+    )
+    from trcc.ui.gui.uc_about import UCAbout
+
+    del qapp
+    about = UCAbout(gpu_list=[("nvidia:0", "RTX 4090")])
+    assert about.keepalive_input.text() == f"{DEFAULT_KEEPALIVE_INTERVAL_S:g}"
+
+    seen: list[float] = []
+    about.keepalive_changed.connect(seen.append)
+    for typed, expected in (
+        ("1.5", 1.5),
+        ("9", MAX_KEEPALIVE_INTERVAL_S),
+        ("0.01", MIN_KEEPALIVE_INTERVAL_S),
+    ):
+        about.keepalive_input.setText(typed)
+        about.keepalive_input.editingFinished.emit()
+        assert seen[-1] == expected
+        assert about.keepalive_input.text() == f"{expected:g}"
+
+    emitted = len(seen)
+    about.keepalive_input.setText("")
+    about.keepalive_input.editingFinished.emit()
+    assert len(seen) == emitted, "an empty box must not dispatch"
+
+
+def test_theme_setting_static_background_toggle(qapp: object) -> None:
+    """The static-background checkbox emits its delegate once per click, and
+    loading the device's flag sets the state WITHOUT re-dispatching."""
+    from trcc.ui.gui.uc_theme_setting import UCThemeSetting
+
+    del qapp
+    panel = UCThemeSetting()
+    seen: list[tuple[int, object]] = []
+    panel.delegate.connect(lambda cmd, info, data: seen.append((cmd, info)))
+
+    panel.static_bg_btn.click()
+    assert seen == [(UCThemeSetting.CMD_STATIC_BACKGROUND, True)]
+
+    panel.set_static_background(False)
+    assert panel.static_bg_btn.isChecked() is False
+    assert len(seen) == 1, "the snapshot load must not dispatch"
+
+
+def test_qtgui_keepalive_spinbox_mirrors_and_applies(gui_app: App) -> None:
+    from trcc.core.models import (
+        MAX_KEEPALIVE_INTERVAL_S,
+        MIN_KEEPALIVE_INTERVAL_S,
+    )
+    from trcc.ui.qtgui.panels.configuration_panel import ConfigurationPanel
+
+    panel = ConfigurationPanel(gui_app, _bus(gui_app), None)
+
+    assert panel._keepalive.minimum() == MIN_KEEPALIVE_INTERVAL_S
+    assert panel._keepalive.maximum() == MAX_KEEPALIVE_INTERVAL_S
+    assert panel._keepalive.value() == gui_app.settings.app.keepalive_interval_s
+
+    panel._keepalive.setValue(1.5)
+    panel._apply_app_settings()
+
+    assert gui_app.settings.app.keepalive_interval_s == 1.5
+
+
+def test_qtgui_static_background_checkbox_reads_and_writes(gui_app: App) -> None:
+    from trcc.ui.qtgui.panels.configuration_panel import ConfigurationPanel
+
+    key = next(iter(gui_app.devices), None) or "0402:3922"
+    panel = ConfigurationPanel(gui_app, _bus(gui_app), None)
+    panel._picker.set_key(key)
+
+    gui_app.settings.for_device(key).static_background = True
+    panel._load_from_snapshot()
+    assert panel._static.isChecked() is True
+
+    panel._static.setChecked(False)
+    panel._apply()
+
+    assert gui_app.settings.for_device(key).static_background is False

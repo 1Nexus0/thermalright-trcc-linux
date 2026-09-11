@@ -23,8 +23,8 @@ from pathlib import Path
 from threading import Thread
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QIntValidator
+from PySide6.QtCore import QEvent, QLocale, QObject, QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import QDoubleValidator, QIcon, QIntValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -44,7 +44,12 @@ from ...core.commands import (
     GetPlatformInfo,
     RefreshAutostart,
 )
-from ...core.models import DEFAULT_REFRESH_INTERVAL_S
+from ...core.models import (
+    DEFAULT_KEEPALIVE_INTERVAL_S,
+    DEFAULT_REFRESH_INTERVAL_S,
+    MAX_KEEPALIVE_INTERVAL_S,
+    MIN_KEEPALIVE_INTERVAL_S,
+)
 from .assets import Assets
 from .base import BasePanel, create_image_button, set_background_pixmap
 from .constants import Layout, Sizes, Styles
@@ -170,6 +175,7 @@ class UCAbout(BasePanel):
     temp_unit_changed = Signal(str)      # 'C' or 'F'
     hdd_toggle_changed = Signal(bool)    # HDD info enabled
     refresh_changed = Signal(int)        # refresh interval (seconds)
+    keepalive_changed = Signal(float)    # keepalive interval (seconds)
     gpu_changed = Signal(str)            # gpu_key for metrics
     _update_available = Signal(str)       # latest version
     _upgrade_finished = Signal(bool)     # True=success, False=failure
@@ -194,11 +200,13 @@ class UCAbout(BasePanel):
             self._autostart = app.dispatch(GetAutostartStatus()).enabled
             self._read_hdd = cc.hdd_enabled
             self._refresh_interval = int(cc.refresh_interval_s)
+            self._keepalive_interval = cc.keepalive_interval_s
             self._gpu_device = cc.active_gpu or ''
         else:
             self._autostart = False
             self._read_hdd = False
             self._refresh_interval = int(DEFAULT_REFRESH_INTERVAL_S)
+            self._keepalive_interval = DEFAULT_KEEPALIVE_INTERVAL_S
             self._gpu_device = ''
 
         # Load checkbox pixmaps
@@ -250,6 +258,22 @@ class UCAbout(BasePanel):
         )
         self.refresh_input.setToolTip("Data refresh interval (seconds)")
         self.refresh_input.editingFinished.connect(self._on_refresh_changed)
+
+        # === Keepalive interval input ===
+        self.keepalive_input = QLineEdit(f"{self._keepalive_interval:g}", self)
+        self.keepalive_input.setGeometry(*Layout.ABOUT_KEEPALIVE_INPUT)
+        self.keepalive_input.setMaxLength(5)
+        self.keepalive_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        keepalive_validator = QDoubleValidator(
+            MIN_KEEPALIVE_INTERVAL_S, MAX_KEEPALIVE_INTERVAL_S, 3, self)
+        keepalive_validator.setLocale(QLocale.c())
+        self.keepalive_input.setValidator(keepalive_validator)
+        self.keepalive_input.setStyleSheet(
+            "background-color: black; color: #B4964F; border: none;"
+            " font-family: 'Microsoft YaHei'; font-size: 9pt;"
+        )
+        self.keepalive_input.setToolTip("Keepalive interval (seconds)")
+        self.keepalive_input.editingFinished.connect(self._on_keepalive_changed)
 
         # === Running Mode radio buttons (v2.1.4: buttonSingle / buttonMulti) ===
         # Visual-only — always multi-threaded on Linux (Qt signals handle threading)
@@ -445,6 +469,24 @@ class UCAbout(BasePanel):
     @property
     def refresh_interval(self):
         return self._refresh_interval
+
+    # --- Keepalive interval ---
+
+    def _on_keepalive_changed(self):
+        log.info("_on_keepalive_changed")
+        text = self.keepalive_input.text().strip()
+        if not text:
+            self.keepalive_input.setText(f"{self._keepalive_interval:g}")
+            return
+        val = max(MIN_KEEPALIVE_INTERVAL_S,
+                  min(MAX_KEEPALIVE_INTERVAL_S, float(text)))
+        self.keepalive_input.setText(f"{val:g}")
+        self._keepalive_interval = val
+        self.keepalive_changed.emit(val)
+
+    @property
+    def keepalive_interval(self):
+        return self._keepalive_interval
 
     # --- GPU selection ---
 
