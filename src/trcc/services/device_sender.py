@@ -26,6 +26,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from ..core.logs import per_frame
+from ..core.models import DEFAULT_KEEPALIVE_INTERVAL_S
 from ..core.ports import SendTask
 
 if TYPE_CHECKING:
@@ -34,9 +35,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 frame_log = per_frame(__name__)
 
-# Resend cadence for volatile wires — below the ~2-3 s firmware-revert
-# threshold by an order of magnitude (legacy ``run_static_loop`` parity).
-_DEFAULT_KEEPALIVE_S = 0.150
 # How long a non-volatile task sleeps between idle wakeups — it only ever acts
 # on a producer ``submit``, so this is just a periodic liveness ceiling.
 _IDLE_WAIT_S = 3600.0
@@ -73,7 +71,7 @@ class DeviceSender(SendTask):
 
     def __init__(
         self, device: Device, *, volatile: bool,
-        keepalive_interval: float = _DEFAULT_KEEPALIVE_S,
+        keepalive_interval: float = DEFAULT_KEEPALIVE_INTERVAL_S,
         on_failure: Callable[[str, BaseException | None], None] | None = None,
     ) -> None:
         self._device = device
