@@ -9,8 +9,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from PySide6.QtGui import QImage
+
 from trcc.adapters.theme.filesystem import FileContentStore
+from trcc.app import App
+from trcc.core.commands import ConnectDevice, SetStaticBackground
 from trcc.core.commands.theme import _cloud_asset
+from trcc.services.media import MediaService, Playback
 
 
 def _touch(path: Path) -> Path:
@@ -63,3 +69,50 @@ def test_cloud_asset_static_without_a_still_falls_back(tmp_path: Path) -> None:
     """ffmpeg can fail silently, so a missing still must not break the load."""
     video = _touch(tmp_path / "a001.mp4")
     assert _cloud_asset(_store(), video, static=True) == video
+
+
+def test_video_for_finds_the_sibling_video(tmp_path: Path) -> None:
+    png = _touch(tmp_path / "a001.png")
+    video = _touch(tmp_path / "a001.mp4")
+    assert _store().video_for(png) == video
+
+
+def test_video_for_is_none_without_a_video(tmp_path: Path) -> None:
+    png = _touch(tmp_path / "a001.png")
+    _touch(tmp_path / "a001.gif")
+    assert _store().video_for(png) is None
+
+
+def test_set_static_background_flips_the_current_background(
+    fake_platform, tmp_home: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The switch re-applies what is already on screen — video → still → video,
+    with no theme reload in between (the round trip the toggle used to need)."""
+    key = "0402:3922"
+    app = App(platform=fake_platform)
+    resp = bytearray(0xE100)
+    resp[0] = 100
+    app.platform.scsi.read_script.append(bytes(resp))  # type: ignore[attr-defined]
+    assert app.dispatch(ConnectDevice(key=key)).ok
+
+    def fake_load(self, device_key: str, path: Path,
+                  size: tuple[int, int] | None, **kwargs):
+        playback = Playback(
+            frames=[b"\xff\xd8\xff\xe0" * 8] * 3, fps=kwargs.get("fps", 15),
+        )
+        self._playbacks[device_key] = playback
+        return playback
+
+    monkeypatch.setattr(MediaService, "load_video", fake_load)
+
+    video = tmp_home / "a001.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    still = tmp_home / "a001.png"
+    QImage(8, 8, QImage.Format.Format_RGB888).save(str(still), "PNG")
+    app.settings.set_background_path(key, str(video))
+
+    app.dispatch(SetStaticBackground(key=key, enabled=True))
+    assert app.settings.for_device(key).background_path == str(still)
+
+    app.dispatch(SetStaticBackground(key=key, enabled=False))
+    assert app.settings.for_device(key).background_path == str(video)

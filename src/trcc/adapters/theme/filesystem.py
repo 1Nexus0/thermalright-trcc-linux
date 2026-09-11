@@ -44,7 +44,14 @@ from typing import TYPE_CHECKING
 from ...core._safe import is_safe_zip_member
 from ...core.errors import ThemeError
 from ...core.logs import per_frame
-from ...core.models import DiscoveredMask, Theme, ThemeDir, WebPreviewInfo
+from ...core.models import (
+    MEDIA,
+    DiscoveredMask,
+    MediaKind,
+    Theme,
+    ThemeDir,
+    WebPreviewInfo,
+)
 from ...core.ports import ContentStore, SingleFileTheme
 from ...services import _dc as Dc
 
@@ -85,6 +92,9 @@ _BG_EXTS = _VIDEO_EXTS | {".png"}
 #: ``.gif`` — that one is ANIMATED (``core.models.MEDIA``) and would keep the
 #: loop busy.
 _STILL_EXTS: tuple[str, ...] = (".png", ".jpg", ".jpeg")
+
+#: Container extensions a still's video may carry, in preference order.
+_STILL_VIDEO_EXTS: tuple[str, ...] = (".mp4", ".mov", ".webm")
 
 
 @dataclass(frozen=True, slots=True)
@@ -758,6 +768,17 @@ class FileContentStore(ContentStore):
                 log.debug("still_for: %s → %s", video.name, candidate.name)
                 return candidate
         log.debug("still_for: %s → no still beside it", video.name)
+        return None
+
+    def video_for(self, still: Path) -> Path | None:
+        """The video *still* stands in for — see ContentStore.video_for."""
+        for ext in _STILL_VIDEO_EXTS:
+            candidate = still.with_suffix(ext)
+            if (candidate.is_file()
+                    and MEDIA.kind_of(candidate) is MediaKind.ANIMATED):
+                log.debug("video_for: %s → %s", still.name, candidate.name)
+                return candidate
+        log.debug("video_for: %s → no video beside it", still.name)
         return None
 
     def is_theme_dir(self, path: Path) -> bool:

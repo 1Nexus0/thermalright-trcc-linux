@@ -1536,6 +1536,15 @@ class ContentStore(ABC):
         """
 
     @abstractmethod
+    def video_for(self, still: Path) -> Path | None:
+        """The video *still* stands in for, or ``None`` if there is none.
+
+        The inverse of ``still_for``.  A background that renders as a picture
+        may be the stand-in for a video the device should animate again once
+        the ``static_background`` preference is switched off.
+        """
+
+    @abstractmethod
     def mask_path(self, theme: Theme) -> Path | None:
         """*theme*'s mask overlay — referenced library unit or in-dir."""
 

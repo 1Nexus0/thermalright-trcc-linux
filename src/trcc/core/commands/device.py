@@ -2329,24 +2329,45 @@ class SetStaticBackground(Command[StaticBackgroundResult]):
     explicit overrides all render as a single picture.  The render loop then
     keeps ``refresh_interval_s`` instead of the video's frame rate, which on a
     1280×480 panel is the difference between ~30% and ~3% of one core.
+
+    Takes effect on the background that is already on screen: it is re-applied
+    through ``PlayVideo``, the funnel that substitutes the still, so the panel
+    flips between the video and its picture without the theme being reloaded.
     """
     key: str
     enabled: bool
 
     def execute(self, app: App) -> StaticBackgroundResult:
         app.settings.set_static_background(self.key, self.enabled)
-        if self.enabled:
-            # A loaded playback would keep its animation timer and outrank the
-            # still, so drop it — StopVideo is idempotent and also clears a
-            # video ``background_path``, which is exactly the thing we must not
-            # leave behind for the next ``RenderAndSend`` to re-decode.
+        video = self._current_video(app)
+        # A loaded playback keeps its animation timer and outranks the still.
+        if video is None or self.enabled:
             StopVideo(key=self.key).execute(app)
+        if video is not None:
+            PlayVideo(key=self.key, path=video).execute(app)
         _invalidate_scene(app, self.key)
         return StaticBackgroundResult(
             ok=True, key=self.key, enabled=self.enabled,
             message=(f"static background {'on' if self.enabled else 'off'} "
                      f"for {self.key}"),
         )
+
+    def _current_video(self, app: App) -> Path | None:
+        """The video this device's background is, or stands in for."""
+        stored = app.settings.for_device(self.key).background_path
+        if not stored:
+            log.debug("SetStaticBackground: %s has no background override",
+                      self.key)
+            return None
+        path = Path(stored)
+        if MEDIA.kind_of(path) is MediaKind.ANIMATED:
+            log.debug("SetStaticBackground: %s background is the video %s",
+                      self.key, path.name)
+            return path
+        video = app.themes.video_for(path)
+        log.debug("SetStaticBackground: %s still %s → video %s",
+                  self.key, path.name, video)
+        return video
 
 
 @dataclass(frozen=True, slots=True)

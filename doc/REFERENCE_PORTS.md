@@ -49,13 +49,8 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | [`SensorEnumerator`](#sensorenumerator) | 11 | 6 | 1 |
 | [`BaseOS`](#baseos) | 12 | 18 | 8 |
 | [`Renderer`](#renderer) | 15 | 8 | 1 |
-<<<<<<< HEAD
 | [`Platform`](#platform) | 25 | 0 | 8 |
-| [`ContentStore`](#contentstore) | 26 | 0 | 1 |
-=======
-| [`Platform`](#platform) | 24 | 0 | 8 |
-| [`ContentStore`](#contentstore) | 27 | 0 | 1 |
->>>>>>> 5ebf7d40 (doc(ports): regenerate the reference, stop the generator crashing on 3.14)
+| [`ContentStore`](#contentstore) | 28 | 0 | 1 |
 
 ---
 
@@ -791,7 +786,7 @@ worker_thread_context() -> AbstractContextManager[None]
 
 Where themes, masks, backgrounds and capture configs are kept.
 
-**You implement (27):**
+**You implement (28):**
 
 ```python
 background_path(theme: 'Theme') -> Path | None
@@ -818,6 +813,7 @@ store_mask(image: 'bytes', width: 'int', height: 'int', dc: 'bytes | None' = Non
 store_media_player(uri: 'str') -> str
 store_screencast(region: 'tuple[int, int, int, int, bool]') -> str
 tile_path(theme_dir: 'Path') -> Path | None
+video_for(still: 'Path') -> Path | None
 video_path(theme: 'Theme') -> Path | None
 write_manifest(theme_dir: 'Path', manifest: 'dict') -> Path
 write_preview(theme_dir: 'Path', png: 'bytes') -> Path
