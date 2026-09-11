@@ -1338,26 +1338,6 @@ class VideoExportRequest:
     fit_mode: FitMode | None = None
 
 
-#: Extensions a video's still stand-in may carry, in preference order.  Not
-#: ``.gif`` — that one is ANIMATED (above) and would keep the loop busy.
-_STILL_EXTS: tuple[str, ...] = (".png", ".jpg", ".jpeg")
-
-
-def still_for(video: Path) -> Path | None:
-    """The still frame that stands in for *video*, or ``None`` if there is none.
-
-    Both sources of video already ship one beside it: ``materialise`` writes the
-    first-frame PNG next to every downloaded cloud video (ffmpeg), and the
-    vendor catalog ships the same ``<id>.png`` / ``.gif`` / ``.mp4`` trio.  Used
-    by the ``static_background`` preference and by ``LoadCloudTheme --static``.
-    """
-    for ext in _STILL_EXTS:
-        candidate = video.with_suffix(ext)
-        if candidate.is_file():
-            return candidate
-    return None
-
-
 # DC file (main_count, sub_count) → ``HardwareMetrics`` field name.
 # DERIVED — do not hand-edit; add a row to METRICS above.
 HARDWARE_METRICS: dict[tuple[int, int], str] = {

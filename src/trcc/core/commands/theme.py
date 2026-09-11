@@ -75,7 +75,7 @@ if TYPE_CHECKING:
     from ...app import App
     from ..models import DeviceSettings, Theme
 
-from ..models import MEDIA, MediaKind, still_for
+from ..models import MEDIA, MediaKind
 
 log = logging.getLogger(__name__)
 
@@ -1845,7 +1845,7 @@ class EnsureDataDownload(Command[EnsureDataDownloadResult]):
                      f"web={result.web_ok} masks={result.masks_ok}"),
         )
 
-def _cloud_asset(mp4_path: Path, static: bool) -> Path:
+def _cloud_asset(store: ContentStore, mp4_path: Path, static: bool) -> Path:
     """The file to install as the background for a cloud theme.
 
     ``materialise`` always downloads the video and writes a first-frame PNG
@@ -1856,7 +1856,7 @@ def _cloud_asset(mp4_path: Path, static: bool) -> Path:
     still falls back to the video, loudly.
     """
     if static:
-        still = still_for(mp4_path)
+        still = store.still_for(mp4_path)
         if still is not None:
             return still
         log.warning(
@@ -2004,7 +2004,7 @@ class LoadCloudTheme(Command[CloudThemeLoadResult]):
                 message=f"Local IO failed: {e}",
             )
 
-        target = _cloud_asset(mp4_path, self.static)
+        target = _cloud_asset(app.themes, mp4_path, self.static)
         log.info("LoadCloudTheme: %s ready at %s — applying as background",
                  self.theme_id, target)
         # SetBackground owns the persistence and the animated/still split, so a

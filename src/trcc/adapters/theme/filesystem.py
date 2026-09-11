@@ -81,6 +81,11 @@ _VIDEO_CANDIDATES = (
 _VIDEO_EXTS = frozenset(Path(c).suffix.lower() for c in _VIDEO_CANDIDATES)
 _BG_EXTS = _VIDEO_EXTS | {".png"}
 
+#: Extensions a video's still stand-in may carry, in preference order.  Not
+#: ``.gif`` — that one is ANIMATED (``core.models.MEDIA``) and would keep the
+#: loop busy.
+_STILL_EXTS: tuple[str, ...] = (".png", ".jpg", ".jpeg")
+
 
 @dataclass(frozen=True, slots=True)
 class FileSingleFileTheme(SingleFileTheme):
@@ -744,6 +749,16 @@ class FileContentStore(ContentStore):
         any_png = next(theme_dir.glob("*.png"), None)
         log.debug("tile_path: %s → %s (fallback)", theme_dir, any_png)
         return any_png
+
+    def still_for(self, video: Path) -> Path | None:
+        """The still frame that stands in for *video* — see ContentStore.still_for."""
+        for ext in _STILL_EXTS:
+            candidate = video.with_suffix(ext)
+            if candidate.is_file():
+                log.debug("still_for: %s → %s", video.name, candidate.name)
+                return candidate
+        log.debug("still_for: %s → no still beside it", video.name)
+        return None
 
     def is_theme_dir(self, path: Path) -> bool:
         """True iff *path* is a directory carrying a theme config.

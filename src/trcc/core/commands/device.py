@@ -106,7 +106,7 @@ if TYPE_CHECKING:
     from ..ports import Device
 
 from ..logs import per_frame
-from ..models import MEDIA, MediaKind, still_for
+from ..models import MEDIA, MediaKind
 from ..ports import CaptureNotReady
 
 log = logging.getLogger(__name__)
@@ -1122,7 +1122,7 @@ class PlayVideo(Command[VideoResult]):
         # animation timer, and the render loop keeps its metrics cadence
         # (``refresh_interval_s``) instead of the video's frame rate.
         if app.settings.for_device(self.key).static_background:
-            still = still_for(self.path)
+            still = app.themes.still_for(self.path)
             if still is None:
                 log.warning(
                     "PlayVideo.execute: static_background is on for %s but %s "

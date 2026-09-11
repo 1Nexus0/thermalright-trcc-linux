@@ -1524,6 +1524,18 @@ class ContentStore(ABC):
         """
 
     @abstractmethod
+    def still_for(self, video: Path) -> Path | None:
+        """The still frame that stands in for *video*, or ``None`` if there is none.
+
+        Both sources of video already ship one beside it: ``materialise`` writes
+        the first-frame PNG next to every downloaded cloud video (ffmpeg), and
+        the vendor catalog ships the same ``<id>.png`` / ``.gif`` / ``.mp4`` trio.
+        Used by the ``static_background`` preference and by
+        ``LoadCloudTheme --static``.  Asking the filesystem which file is there
+        is the store's job, not the caller's.
+        """
+
+    @abstractmethod
     def mask_path(self, theme: Theme) -> Path | None:
         """*theme*'s mask overlay — referenced library unit or in-dir."""
 

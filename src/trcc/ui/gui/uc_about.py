@@ -486,6 +486,7 @@ class UCAbout(BasePanel):
 
     @property
     def keepalive_interval(self):
+        log.debug("UCAbout.keepalive_interval: %ss", self._keepalive_interval)
         return self._keepalive_interval
 
     # --- GPU selection ---
