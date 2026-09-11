@@ -379,6 +379,7 @@ class UCThemeSetting(BasePanel):
         self.mask_panel.set_mask_visible(visible)
 
     def set_static_background(self, enabled: bool):
+        log.debug("set_static_background: %s", enabled)
         self.static_bg_btn.blockSignals(True)
         self.static_bg_btn.setChecked(enabled)
         self.static_bg_btn.blockSignals(False)

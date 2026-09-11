@@ -257,6 +257,7 @@ class ConfigurationPanel(BasePanel):
     def _load_app_settings(self) -> None:
         snap = self.dispatch(ControlCenterSnapshot())
         self._keepalive.setValue(float(snap.keepalive_interval_s))
+        log.debug("_load_app_settings: keepalive=%.2fs", snap.keepalive_interval_s)
 
     def _apply_app_settings(self) -> None:
         """Apply the device-independent app settings (no device key needed)."""
