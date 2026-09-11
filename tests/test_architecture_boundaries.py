@@ -1510,6 +1510,115 @@ def test_ui_adapter_import_baseline_has_no_slack() -> None:
     )
 
 
+# =========================================================================
+# UI network I/O
+#
+# The adapter-import audit above cannot see this one.  It counts imports of
+# ``trcc.adapters``, so a UI that reimplements HTTP with the STDLIB scores
+# CLEANER than one importing the port — the same trap already noted in
+# KNOWN_UI_ADAPTER_IMPORTS ("this audit counts imports, not duplication").
+#
+# That is how two GUI panels kept their own ``urllib`` download code straight
+# through the cutover while cli / api / qtgui went to the bus.  Measured
+# 2026-09-11, both were DEAD: ``uc_about``'s sat behind an ``app is None``
+# fallback production cannot reach, and ``uc_theme_mask``'s behind an
+# ``is_local`` flag every tile hardcodes to True.  The second pointed at
+# ``czhorde/tr/zt<res>/`` endpoints that appear NOWHERE in the C# 2.1.6 oracle
+# (0 occurrences, against 69 for the theme ``/tr/bj`` family) and return 404
+# today.  Both are gone; this keeps them gone.
+# =========================================================================
+
+#: Modules that open a socket.  A UI asks the bus; an adapter behind a port
+#: does the I/O, so one online check covers every face at once.
+_NETWORK_ROOTS: frozenset[str] = frozenset({
+    "urllib", "http", "socket", "ssl", "ftplib", "telnetlib", "smtplib",
+    "requests", "httpx", "aiohttp", "urllib3",
+})
+
+#: Real breaches, to burn down.  EMPTY — and it starts empty because the two
+#: that existed were deleted rather than grandfathered.  A stale entry FAILS,
+#: so this cannot quietly re-permit one.
+KNOWN_UI_NETWORK_IMPORTS: frozenset[tuple[str, str]] = frozenset()
+
+
+def _ui_network_imports() -> set[tuple[str, str]]:
+    """Every network-module import made from a UI, as (path, target).
+
+    Both statement forms, because the dead code used one of each: a top-level
+    ``from urllib.request import urlopen`` and a function-body ``import
+    urllib.request``.  A collector that walked only ``ImportFrom`` — as the
+    adapter audit above does — would have missed half of it.
+    """
+    found: set[tuple[str, str]] = set()
+    for path in (_SRC / "trcc" / "ui").rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(_SRC).as_posix()
+        module = _module_name(path)
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom):
+                targets = [_resolve_import(node, module)]
+            elif isinstance(node, ast.Import):
+                targets = [alias.name for alias in node.names]
+            else:
+                continue
+            for target in targets:
+                if target.split(".", 1)[0] in _NETWORK_ROOTS:
+                    found.add((rel, target))
+    return found
+
+
+def test_no_new_ui_network_imports() -> None:
+    """A UI must not do its own network I/O — ask the bus instead.
+
+    Not style: a capability a UI implements itself exists for that ONE face.
+    The cloud-mask download lived in the desktop GUI and therefore in no other
+    UI, and — because it never went through a port — no injected fake could
+    reach it and no test ever ran it.
+    """
+    new = _ui_network_imports() - KNOWN_UI_NETWORK_IMPORTS
+    assert not new, (
+        "UI does its own network I/O, bypassing the Command bus — a "
+        "daemon-mode client cannot do this, and no injected fake can test "
+        "it:\n"
+        + "\n".join(f"  {p} → {t}" for p, t in sorted(new))
+    )
+
+
+def test_ui_network_baseline_has_no_slack() -> None:
+    """A fixed breach must leave the list, locking the win in."""
+    stale = KNOWN_UI_NETWORK_IMPORTS - _ui_network_imports()
+    assert not stale, (
+        "These UI network imports are gone — delete them from "
+        "KNOWN_UI_NETWORK_IMPORTS:\n"
+        + "\n".join(f"  {p} → {t}" for p, t in sorted(stale))
+    )
+
+
+def test_selftest_ui_network_collector_catches_both_import_forms() -> None:
+    """The collector must have teeth for ``import x`` AND ``from x import y``.
+
+    Pinned because the audit it sits beside walks only ``ImportFrom``, and the
+    dead code this gate replaces used the other form inside a function body.
+    """
+    source = (
+        "from urllib.request import urlopen\n"
+        "def f():\n"
+        "    import http.client\n"
+        "    return urlopen, http.client\n"
+    )
+    targets = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom):
+            found = [node.module or ""]
+        elif isinstance(node, ast.Import):
+            found = [a.name for a in node.names]
+        else:
+            continue
+        targets.update(t for t in found if t.split(".", 1)[0] in _NETWORK_ROOTS)
+    assert targets == {"urllib.request", "http.client"}
+
+
 def test_composition_root_exemptions_all_still_exist() -> None:
     """An exemption for an import that no longer exists is a hole.
 

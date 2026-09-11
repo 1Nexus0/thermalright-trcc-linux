@@ -16,13 +16,11 @@ Windows controls (from UCAbout.cs):
 
 from __future__ import annotations
 
-import json
 import logging
 import webbrowser
 from pathlib import Path
 from threading import Thread
 from typing import TYPE_CHECKING
-from urllib.request import urlopen
 
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QIntValidator
@@ -76,40 +74,6 @@ def ensure_autostart(app: App) -> bool:
         return app.dispatch(EnableAutostart()).enabled
     log.info("ensure_autostart: entry present — refreshing Exec path")
     return app.dispatch(RefreshAutostart()).enabled
-
-
-_GITHUB_LATEST = (
-    'https://api.github.com/repos/Lexonight1/thermalright-trcc-linux'
-    '/releases/latest'
-)
-
-
-def _check_latest_release() -> tuple[str, dict[str, str]] | None:
-    """Fetch latest GitHub release. Returns (version, {ext: download_url}) or None."""
-    from urllib.error import URLError
-    from urllib.request import Request
-    try:
-        req = Request(_GITHUB_LATEST, headers={'Accept': 'application/vnd.github+json'})
-        with urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read())
-            tag = data.get('tag_name', '')
-            if not (ver := tag.lstrip('v') if tag else None):
-                return None
-            # Map file extensions to download URLs
-            assets: dict[str, str] = {}
-            for asset in data.get('assets', []):
-                name = asset.get('name', '')
-                url = asset.get('browser_download_url', '')
-                if name.endswith('.pkg.tar.zst'):
-                    assets['pacman'] = url
-                elif name.endswith('.rpm'):
-                    assets['dnf'] = url
-                elif name.endswith('.deb'):
-                    assets['apt'] = url
-            return ver, assets
-    except (URLError, OSError, TimeoutError, ValueError) as e:
-        log.debug("uc_about: GitHub release check failed: %s", e)
-        return None
 
 
 def _get_install_info(
@@ -168,7 +132,7 @@ class UCAbout(BasePanel):
     hdd_toggle_changed = Signal(bool)    # HDD info enabled
     refresh_changed = Signal(int)        # refresh interval (seconds)
     gpu_changed = Signal(str)            # gpu_key for metrics
-    _update_available = Signal(str, dict) # (version, {mgr: download_url})
+    _update_available = Signal(str)       # latest version
     _upgrade_finished = Signal(bool)     # True=success, False=failure
 
     def __init__(self, parent=None,
@@ -489,35 +453,34 @@ class UCAbout(BasePanel):
 
     # --- Software update ---
 
-    # Install commands per package manager (pkexec provides the sudo prompt)
-    _PKG_INSTALL: dict[str, list[str]] = {
-        'pacman': ['pkexec', 'pacman', '-U', '--noconfirm'],
-        'dnf':    ['pkexec', 'dnf', 'install', '-y'],
-        'apt':    ['pkexec', 'apt', 'install', '-y'],
-    }
-
     def _check_for_update(self):
-        """Background thread: query for newer release via the App."""
-        if self._app is not None:
-            from ...core.commands import CheckForUpdate
-            r = self._app.dispatch(CheckForUpdate())
-            if (r.ok and getattr(r, 'update_available', False)
-                    and getattr(r, 'latest_version', None)):
-                # next/'s CheckForUpdateResult shape: latest_version + assets.
-                assets = getattr(r, 'assets', {}) or {}
-                self._update_available.emit(r.latest_version, assets)
-            return
-        # Fallback to the direct GitHub-API helper if no App was passed.
-        if (result := _check_latest_release()):
-            ver, assets = result
-            self._update_available.emit(ver, assets)
+        """Background thread: ask the bus whether a newer release exists.
 
-    def _on_update_result(self, latest: str, assets: dict[str, str]):
+        One path, the same one cli / api / qtgui take.  A direct
+        ``urlopen`` of the GitHub API used to sit behind an ``app is None``
+        fallback here, with its own asset-URL parsing and a ``pkexec``
+        install table — the whole download-it-yourself mechanism that
+        ``RunUpgrade`` replaced.  Production never reached it (``TRCCApp``
+        takes a non-optional ``App`` and passes it), so the only callers
+        were two tests that construct this panel bare, which is why the
+        suite talked to GitHub.
+        """
+        if self._app is None:
+            log.warning("_check_for_update: no App injected — skipping the "
+                        "update check")
+            return
+        from ...core.commands import CheckForUpdate
+        r = self._app.dispatch(CheckForUpdate())
+        log.info("_check_for_update: ok=%s available=%s latest=%s",
+                 r.ok, r.update_available, r.latest_version)
+        if r.ok and r.update_available and r.latest_version:
+            self._update_available.emit(r.latest_version)
+
+    def _on_update_result(self, latest: str):
         """Handle version check result (runs on main thread via signal)."""
         from trcc.__version__ import __version__
         if parse_version(latest) > parse_version(__version__):
             self._latest_version = latest
-            self._pkg_assets = assets
             self._update_tooltip = f"Version {latest} available — click to update"
             self._update_overlay.show()
             log.info("Update available: %s → %s", __version__, latest)

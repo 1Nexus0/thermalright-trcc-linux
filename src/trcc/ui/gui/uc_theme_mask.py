@@ -16,12 +16,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QMenu
 
 from ...core.commands import ListMasks
-from ...core.models import (
-    CLOUD_MASK_URLS,
-    MaskItem,
-    ThemeDir,
-    is_safe_archive_member,
-)
+from ...core.models import MaskItem
 from .base import BaseThumbnail, DownloadableThemeBrowser
 
 if TYPE_CHECKING:
@@ -50,11 +45,7 @@ class UCThemeMask(DownloadableThemeBrowser):
     Custom masks live in ~/.trcc-user/data/web/zt{W}{H}/.
     """
 
-    # Cloud mask server URLs by resolution — canonical source in core/models.py
-    CLOUD_URLS = CLOUD_MASK_URLS
-
     CMD_MASK_SELECTED = 16
-    CMD_DOWNLOAD = 100
 
     mask_selected = Signal(object)
 
@@ -215,104 +206,20 @@ class UCThemeMask(DownloadableThemeBrowser):
         self._populate_grid(masks)
 
     def _on_item_clicked(self, item_info: MaskItem):
-        """Handle click — select local masks, download non-local ones.
+        """Handle click — select the mask.
 
-        No `_downloading` gate: user clicks are always honored, even when
-        an earlier download is still in flight.  Parallel downloads are
-        fine (different files) and the UI never feels "stuck on the
-        first click."
+        There is no download arm.  Every tile comes from ``ListMasks``, a
+        scan of what is already on disk, and ``refresh_masks`` builds each
+        one with ``is_local=True``, so the cloud-download branch that used
+        to live here could never run — in this tree or in legacy, which
+        hardcodes it identically.  Masks arrive via the bulk
+        ``zt{W}{H}.7z`` archive, which every UI shares.
         """
         log.info("_on_item_clicked")
         self._select_item(item_info)
-
-        if item_info.is_local:
-            self.mask_selected.emit(item_info)
-            self.theme_selected.emit(item_info)
-            self.invoke_delegate(self.CMD_MASK_SELECTED, item_info)
-        else:
-            self._download_cloud_mask(item_info.name)
-
-    def _on_download_complete(self, mask_id: str, success: bool):
-        """Handle download completion on the main thread — refresh grid."""
-        super()._on_download_complete(mask_id, success)
-        if success:
-            log.info("Mask %s downloaded — refreshing grid", mask_id)
-            self.refresh_masks()
-
-    # ── Cloud mask download ─────────────────────────────────────────
-
-    def _download_cloud_mask(self, mask_id: str):
-        """Download a cloud mask from the server."""
-        if not self.mask_directory or not self._resolution:
-            log.warning("Cannot download mask: directory or resolution not set")
-            return
-
-        base_url = self.CLOUD_URLS.get(self._resolution)
-        if not base_url:
-            log.warning("No cloud URL for resolution %s", self._resolution)
-            return
-
-        def download_fn():
-            import io
-            import urllib.error
-            import urllib.request
-            import zipfile
-
-            mask_url = f"{base_url}{mask_id}.zip"
-            assert self.mask_directory is not None
-            mask_dir = self.mask_directory / mask_id
-
-            log.info("Downloading mask %s from %s", mask_id, mask_url)
-            req = urllib.request.Request(mask_url, headers={
-                'User-Agent': 'TRCC-Linux/1.0'
-            })
-
-            try:
-                with urllib.request.urlopen(req, timeout=30) as response:
-                    data = response.read()
-
-                try:
-                    with zipfile.ZipFile(io.BytesIO(data)) as zf:
-                        mask_dir.mkdir(parents=True, exist_ok=True)
-                        for info in zf.infolist():
-                            if not is_safe_archive_member(info.filename):
-                                continue
-                            zf.extract(info, mask_dir)
-                        log.info("Extracted mask %s", mask_id)
-                except zipfile.BadZipFile:
-                    mask_dir.mkdir(parents=True, exist_ok=True)
-                    ThemeDir(mask_dir).preview.write_bytes(data)
-                return True
-
-            except urllib.error.HTTPError as e:
-                if e.code == 404:
-                    self._download_mask_files(mask_id, base_url, mask_dir)
-                    return True
-                log.warning("HTTP %d downloading mask %s", e.code, mask_id)
-                return False
-
-        self._start_download(mask_id, download_fn)
-
-    def _download_mask_files(self, mask_id: str, base_url: str, mask_dir: Path):
-        """Download individual mask files."""
-        import urllib.error
-        import urllib.request
-
-        mask_dir.mkdir(parents=True, exist_ok=True)
-        files = [ThemeDir.PREVIEW, ThemeDir.MASK, ThemeDir.DC]
-
-        for filename in files:
-            try:
-                url = f"{base_url}{mask_id}/{filename}"
-                req = urllib.request.Request(url, headers={'User-Agent': 'TRCC-Linux/1.0'})
-                with urllib.request.urlopen(req, timeout=30) as response:
-                    (mask_dir / filename).write_bytes(response.read())
-                    log.info("Downloaded %s/%s", mask_id, filename)
-            except urllib.error.HTTPError as e:
-                if e.code != 404:
-                    log.warning("HTTP %d downloading %s/%s", e.code, mask_id, filename)
-            except Exception as e:
-                log.warning("Failed to download %s/%s: %s", mask_id, filename, e)
+        self.mask_selected.emit(item_info)
+        self.theme_selected.emit(item_info)
+        self.invoke_delegate(self.CMD_MASK_SELECTED, item_info)
 
     def get_selected_mask(self):
         return self.selected_item
