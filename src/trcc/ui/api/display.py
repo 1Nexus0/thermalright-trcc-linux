@@ -59,6 +59,7 @@ from ...core.commands import (
     SetOverlayConfig,
     SetSlideshow,
     SetSplitMode,
+    SetStaticBackground,
     SleepDevice,
     StartScreencast,
     StartScreencastDriver,
@@ -103,6 +104,7 @@ from ...core.results import (
     SendResult,
     SlideshowResult,
     SplitModeResult,
+    StaticBackgroundResult,
     ThemeResult,
     VideoDurationResult,
     VideoExportResult,
@@ -148,6 +150,7 @@ from .schemas import (
     SlideshowDriveRequest,
     SlideshowToggleRequest,
     SplitModeRequest,
+    StaticBackgroundRequest,
     ThemeRequest,
     ThemeResponse,
     VideoStatusResponse,
@@ -321,6 +324,20 @@ def set_mask_visible(key: str, body: MaskVisibilityRequest,
     )
     result = request.app.state.trcc.dispatch(
         SetMaskVisible(key=key, visible=body.visible),
+    )
+    http_error_if_failed(result)
+    return result
+
+
+@router.post("/static-background")
+def set_static_background(key: str, body: StaticBackgroundRequest,
+                          request: Request) -> StaticBackgroundResult:
+    log.info(
+        "api POST /devices/{key}/display/static-background: key=%s enabled=%s",
+        key, body.enabled,
+    )
+    result = request.app.state.trcc.dispatch(
+        SetStaticBackground(key=key, enabled=body.enabled),
     )
     http_error_if_failed(result)
     return result

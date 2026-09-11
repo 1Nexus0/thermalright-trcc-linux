@@ -11,7 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 from ...core.models import (
     DEFAULT_REFRESH_INTERVAL_S,
+    MAX_KEEPALIVE_INTERVAL_S,
     MAX_REFRESH_INTERVAL_S,
+    MIN_KEEPALIVE_INTERVAL_S,
     MIN_REFRESH_INTERVAL_S,
     OVERLAY_DEFAULT_CLOCK_SOURCE,
     OVERLAY_DEFAULT_COLOR,
@@ -478,6 +480,11 @@ class MaskVisibilityRequest(BaseModel):
     visible: bool
 
 
+class StaticBackgroundRequest(BaseModel):
+    """Never wire a moving background for this device."""
+    enabled: bool
+
+
 class ThemeSaveRequest(BaseModel):
     """Save the device's active theme under a new name (basename only)."""
     key: str = Field(..., min_length=1)
@@ -676,6 +683,12 @@ class GpuDeviceRequest(BaseModel):
 class RefreshIntervalRequest(BaseModel):
     seconds: float = Field(
         ..., ge=MIN_REFRESH_INTERVAL_S, le=MAX_REFRESH_INTERVAL_S,
+    )
+
+
+class KeepaliveIntervalRequest(BaseModel):
+    seconds: float = Field(
+        ..., ge=MIN_KEEPALIVE_INTERVAL_S, le=MAX_KEEPALIVE_INTERVAL_S,
     )
 
 
