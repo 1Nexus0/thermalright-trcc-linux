@@ -18,8 +18,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QRegularExpression as QRE
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QPalette, QRegularExpressionValidator
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import (
+    QColor,
+    QDesktopServices,
+    QIcon,
+    QPalette,
+    QRegularExpressionValidator,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -1270,6 +1276,7 @@ class TRCCApp(QMainWindow):
             ABOUT_GPU_POS,
             ABOUT_HDD_POS,
             ABOUT_HDD_WARN_POS,
+            ABOUT_KEEPALIVE_POS,
             ABOUT_LANG_POS,
             ABOUT_MULTI_THREAD_POS,
             ABOUT_REFRESH_POS,
@@ -1280,6 +1287,7 @@ class TRCCApp(QMainWindow):
             ABOUT_VERSION_POS,
             BACKGROUND_LOAD_IMG_POS,
             BACKGROUND_LOAD_VIDEO_POS,
+            BACKGROUND_STATIC_POS,
             DISPLAY_ANGLE_POS,
             EXPORT_IMPORT_POS,
             GALLERY_TAB_FONT,
@@ -1373,7 +1381,8 @@ class TRCCApp(QMainWindow):
 
         bp = s.background_panel
         for key, pos in [('Load Image', BACKGROUND_LOAD_IMG_POS),
-                         ('Load Video', BACKGROUND_LOAD_VIDEO_POS)]:
+                         ('Load Video', BACKGROUND_LOAD_VIDEO_POS),
+                         ('Static', BACKGROUND_STATIC_POS)]:
             x, y, w, h, pt = pos
             _lbl(bp, tr(key, lang), x, y, w, h, pt, key)
 
@@ -1404,6 +1413,7 @@ class TRCCApp(QMainWindow):
             ('Reading hard disk information may cause some mechanical hard drives to read and write frequently. If you encounter this issue, please close the project.',
              ABOUT_HDD_WARN_POS),
             ('Data refresh time', ABOUT_REFRESH_POS),
+            ('Keepalive time', ABOUT_KEEPALIVE_POS),
             ('Running Mode', ABOUT_RUNNING_MODE_POS),
             ('Single-threaded (low resource usage)', ABOUT_SINGLE_THREAD_POS),
             ('Multi-threaded (high resource usage)', ABOUT_MULTI_THREAD_POS),
@@ -2575,10 +2585,9 @@ class TRCCApp(QMainWindow):
 
     def _on_help_clicked(self) -> None:
         log.info("_on_help_clicked")
-        import webbrowser
-        webbrowser.open(
+        QDesktopServices.openUrl(QUrl(
             'https://github.com/Lexonight1/thermalright-trcc-linux'
-            '/blob/main/doc/GUIDE_TROUBLESHOOTING.md')
+            '/blob/main/doc/GUIDE_TROUBLESHOOTING.md'))
 
     def _on_capture_requested(self) -> None:
         log.info("_on_capture_requested")

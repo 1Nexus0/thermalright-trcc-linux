@@ -18,13 +18,17 @@ from __future__ import annotations
 
 import logging
 import weakref
-import webbrowser
 from pathlib import Path
 from threading import Thread
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QLocale, QObject, QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QDoubleValidator, QIcon, QIntValidator
+from PySide6.QtCore import QEvent, QLocale, QObject, QPoint, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import (
+    QDesktopServices,
+    QDoubleValidator,
+    QIcon,
+    QIntValidator,
+)
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -420,7 +424,7 @@ class UCAbout(BasePanel):
 
     def _on_website_clicked(self) -> None:
         log.info("_on_website_clicked")
-        webbrowser.open('https://www.thermalright.com')
+        QDesktopServices.openUrl(QUrl('https://www.thermalright.com'))
 
     def _start_update_check(self) -> None:
         """Kick a background update check — slot fired by the 1-hour QTimer."""
