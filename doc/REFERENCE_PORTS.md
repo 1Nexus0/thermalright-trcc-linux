@@ -11,7 +11,7 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | port | implement | inherit | implementations |
 |---|---|---|---|
 | [`BaseSendTask`](#basesendtask) | 1 | 3 | 2 |
-| [`Command`](#command) | 1 | 0 | 144 |
+| [`Command`](#command) | 1 | 0 | 146 |
 | [`CpuSource`](#cpusource) | 1 | 4 | 10 |
 | [`DataInstaller`](#datainstaller) | 1 | 0 | 1 |
 | [`HttpFetcher`](#httpfetcher) | 1 | 0 | 1 |
@@ -19,21 +19,21 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | [`Query`](#query) | 1 | 0 | 38 |
 | [`ScreenCapture`](#screencapture) | 1 | 1 | 3 |
 | [`UserInterface`](#userinterface) | 1 | 7 | 5 |
+| [`_HidBinding`](#_hidbinding) | 1 | 0 | 2 |
 | [`_QtUI`](#_qtui) | 1 | 1 | 2 |
 | [`DataInstallRunner`](#datainstallrunner) | 2 | 0 | 2 |
-| [`IdentifiedSource`](#identifiedsource) | 2 | 0 | 18 |
+| [`IdentifiedSource`](#identifiedsource) | 2 | 0 | 17 |
 | [`SingleFileTheme`](#singlefiletheme) | 2 | 0 | 1 |
 | [`VideoExportRunner`](#videoexportrunner) | 2 | 0 | 2 |
-| [`_HidBinding`](#_hidbinding) | 2 | 0 | 2 |
 | [`_MappingPort`](#_mappingport) | 2 | 0 | 2 |
 | [`BaseBulkDevice`](#basebulkdevice) | 3 | 0 | 4 |
 | [`BaseDevice`](#basedevice) | 3 | 4 | 5 |
 | [`BoardTempSource`](#boardtempsource) | 3 | 0 | 1 |
-| [`Device`](#device) | 3 | 14 | 5 |
+| [`Device`](#device) | 3 | 13 | 5 |
 | [`DiskSource`](#disksource) | 3 | 0 | 2 |
 | [`DramSource`](#dramsource) | 3 | 0 | 1 |
-| [`FanSource`](#fansource) | 3 | 2 | 3 |
-| [`GpuSource`](#gpusource) | 3 | 8 | 11 |
+| [`FanSource`](#fansource) | 3 | 1 | 3 |
+| [`GpuSource`](#gpusource) | 3 | 7 | 10 |
 | [`HotplugMonitor`](#hotplugmonitor) | 3 | 0 | 5 |
 | [`SendScheduler`](#sendscheduler) | 3 | 0 | 2 |
 | [`_SharedRotatingFileHandler`](#_sharedrotatingfilehandler) | 3 | 4 | 2 |
@@ -46,11 +46,16 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | [`ScsiTransport`](#scsitransport) | 5 | 0 | 3 |
 | [`AutostartManager`](#autostartmanager) | 6 | 0 | 4 |
 | [`Diagnostics`](#diagnostics) | 7 | 0 | 1 |
-| [`SensorEnumerator`](#sensorenumerator) | 11 | 7 | 1 |
+| [`SensorEnumerator`](#sensorenumerator) | 11 | 6 | 1 |
 | [`BaseOS`](#baseos) | 12 | 18 | 8 |
-| [`Renderer`](#renderer) | 14 | 8 | 1 |
+| [`Renderer`](#renderer) | 15 | 8 | 1 |
+<<<<<<< HEAD
 | [`Platform`](#platform) | 25 | 0 | 8 |
 | [`ContentStore`](#contentstore) | 26 | 0 | 1 |
+=======
+| [`Platform`](#platform) | 24 | 0 | 8 |
+| [`ContentStore`](#contentstore) | 27 | 0 | 1 |
+>>>>>>> 5ebf7d40 (doc(ports): regenerate the reference, stop the generator crashing on 3.14)
 
 ---
 
@@ -82,7 +87,7 @@ A user action.  Exactly one execute method; returns one Result.
 execute(app: 'App') -> R_co
 ```
 
-**Implementations (144):** `AddOverlayElement` · `AdvanceSlideshow` · `ApplyMask` · `BuildPreview` · `CaptureScreencastFrame` · `CheckForUpdate` · `ConfigureSlideshow` · `ConnectDevice` · `ControlCenterSnapshot` · `CurrentFrame` · `DaemonStatus` · `DeleteOverlayElement` · `DeleteTheme` · `DeviceCanvas` · `DeviceConnectionIssues` · `DeviceState` · `DisableAutostart` · `DisconnectDevice` · `DiscoverDevices` · `DownloadCloudTheme` · `EnableAutostart` · `EnableLedTestMode` · `EnableOverlay` · `EnsureConnected` · `EnsureDaemon` · `EnsureDataDownload` · `ExportConfig` · `ExportDcTheme` · `ExportOverlay` · `ExportTheme` · `ExportVideoClip` · `FlashOverlayElement` · `GenerateDebugReport` · `GetAutostartStatus` · `GetFirstRunStatus` · `GetPaths` · `GetPlatformInfo` · `GetSensorDashboard` · `ImportConfig` · `ImportTheme` · `InitializeLed` · `KeepAliveLoop` · `LcdSnapshot` · `LedSnapshot` · `ListCloudThemes` · `ListDevices` · `ListDiskSensors` · `ListDisks` · `ListFans` · `ListFonts` · `ListGpus` · `ListLanguages` · `ListLedModes` · `ListLedStyles` · `ListMasks` · `ListMemorySlots` · `ListSensors` · `ListThemes` · `ListWebThemes` · `LoadCloudTheme` · `LoadImage` · `LoadTheme` · `LoadVideo` · `LoopVideo` · `MarkFirstRunDone` · `PauseVideo` · `PlayVideo` · `PreviewSize` · `ProbeVideoDuration` · `ReadSensors` · `RefreshAutostart` · `RenderAndSend` · `RenderDcStandalone` · `RenderLed` · `ResetDevice` · `ResolveOverlay` · `ResolveThemeDirectories` · `RestoreDeviceState` · `RestoreLastTheme` · `RunDoctor` · `RunHealthCheck` · `RunQuickstart` · `RunSetup` · `RunUpgrade` · `SaveTheme` · `SeekVideo` · `SelectZone` · `SendColor` · `SendFrame` · `SendImage` · `SendScreencastFrame` · `SetBackground` · `SetBackgroundMode` · `SetBrightness` · `SetClockFormat` · `SetDateFormat` · `SetDiskDevice` · `SetFitMode` · `SetGpuDevice` · `SetHddEnabled` · `SetLanguage` · `SetLedBrightness` · `SetLedColor` · `SetLedColors` · `SetLedLoadSource` · `SetLedMode` · `SetLedTempSource` · `SetLedZoneBrightness` · `SetLedZoneColor` · `SetLedZoneMode` · `SetLedZoneSync` · `SetLedZoneSyncInterval` · `SetLedZoneSyncZones` · `SetMaskPosition` · `SetMaskVisible` · `SetMediaPlayer` · `SetMemoryRatio` · `SetOrientation` · `SetOverlayBackground` · `SetOverlayConfig` · `SetRefreshInterval` · `SetSensorDashboard` · `SetSlideshow` · `SetSplitMode` · `SetTempUnit` · `SetTimeFormat` · `SetWeekStart` · `SleepDevice` · `StartScreencast` · `StartScreencastDriver` · `StartSlideshowDriver` · `StopDaemon` · `StopScreencast` · `StopScreencastDriver` · `StopSlideshowDriver` · `StopVideo` · `TickDisplay` · `ToggleLed` · `ToggleSegment` · `ToggleVideo` · `UpdateOverlayElement` · `UploadBootAnimation` · `UploadCustomMask` · `VideoStatus`
+**Implementations (146):** `AddOverlayElement` · `AdvanceSlideshow` · `ApplyMask` · `BuildPreview` · `CaptureScreencastFrame` · `CheckForUpdate` · `ConfigureSlideshow` · `ConnectDevice` · `ControlCenterSnapshot` · `CurrentFrame` · `DaemonStatus` · `DeleteOverlayElement` · `DeleteTheme` · `DeviceConnectionIssues` · `DeviceState` · `DisableAutostart` · `DisconnectDevice` · `DiscoverDevices` · `DownloadCloudTheme` · `EnableAutostart` · `EnableLedTestMode` · `EnableOverlay` · `EnsureConnected` · `EnsureDaemon` · `EnsureDataDownload` · `ExportConfig` · `ExportDcTheme` · `ExportOverlay` · `ExportTheme` · `ExportVideoClip` · `FlashOverlayElement` · `GenerateDebugReport` · `GetAutostartStatus` · `GetFirstRunStatus` · `GetPaths` · `GetPlatformInfo` · `GetSensorDashboard` · `ImportConfig` · `ImportTheme` · `InitializeLed` · `KeepAliveLoop` · `LcdSnapshot` · `LedSnapshot` · `ListCloudThemes` · `ListDevices` · `ListDiskSensors` · `ListDisks` · `ListFans` · `ListFonts` · `ListGpus` · `ListLanguages` · `ListLedModes` · `ListLedStyles` · `ListMasks` · `ListMemorySlots` · `ListSensors` · `ListThemes` · `ListWebThemes` · `LoadCloudTheme` · `LoadImage` · `LoadTheme` · `LoadVideo` · `LoopVideo` · `MarkFirstRunDone` · `OrientedThemeTarget` · `PauseVideo` · `PlayVideo` · `PreviewSize` · `ProbeVideoDuration` · `ReadSensors` · `RefreshAutostart` · `RenderAndSend` · `RenderDcStandalone` · `RenderLed` · `ResetDevice` · `ResolveOverlay` · `ResolveThemeDirectories` · `RestoreDeviceState` · `RestoreLastTheme` · `RunDoctor` · `RunHealthCheck` · `RunQuickstart` · `RunSetup` · `RunUpgrade` · `SaveTheme` · `SeekVideo` · `SelectZone` · `SendColor` · `SendFrame` · `SendImage` · `SendScreencastFrame` · `SetBackground` · `SetBackgroundMode` · `SetBrightness` · `SetClockFormat` · `SetDateFormat` · `SetDiskDevice` · `SetFitMode` · `SetGpuDevice` · `SetHddEnabled` · `SetKeepaliveInterval` · `SetLanguage` · `SetLedBrightness` · `SetLedColor` · `SetLedColors` · `SetLedLoadSource` · `SetLedMode` · `SetLedTempSource` · `SetLedZoneBrightness` · `SetLedZoneColor` · `SetLedZoneMode` · `SetLedZoneSync` · `SetLedZoneSyncInterval` · `SetLedZoneSyncZones` · `SetMaskPosition` · `SetMaskVisible` · `SetMediaPlayer` · `SetMemoryRatio` · `SetOrientation` · `SetOverlayBackground` · `SetOverlayConfig` · `SetRefreshInterval` · `SetSensorDashboard` · `SetSlideshow` · `SetSplitMode` · `SetStaticBackground` · `SetTempUnit` · `SetTimeFormat` · `SetWeekStart` · `SleepDevice` · `StartScreencast` · `StartScreencastDriver` · `StartSlideshowDriver` · `StopDaemon` · `StopScreencast` · `StopScreencastDriver` · `StopSlideshowDriver` · `StopVideo` · `TickDisplay` · `ToggleLed` · `ToggleSegment` · `ToggleVideo` · `UpdateOverlayElement` · `UploadBootAnimation` · `UploadCustomMask` · `VideoStatus`
 
 ## CpuSource
 
@@ -154,7 +159,7 @@ A question.  Answers, and changes nothing.
 execute(app: 'App') -> R_co
 ```
 
-**Implementations (38):** `BuildPreview` · `CheckForUpdate` · `ControlCenterSnapshot` · `CurrentFrame` · `DaemonStatus` · `DeviceCanvas` · `DeviceConnectionIssues` · `DeviceState` · `GetAutostartStatus` · `GetFirstRunStatus` · `GetPaths` · `GetPlatformInfo` · `GetSensorDashboard` · `LcdSnapshot` · `LedSnapshot` · `ListCloudThemes` · `ListDevices` · `ListDiskSensors` · `ListDisks` · `ListFans` · `ListFonts` · `ListGpus` · `ListLanguages` · `ListLedModes` · `ListLedStyles` · `ListMasks` · `ListMemorySlots` · `ListSensors` · `ListThemes` · `ListWebThemes` · `PreviewSize` · `ProbeVideoDuration` · `ReadSensors` · `ResolveOverlay` · `ResolveThemeDirectories` · `RunDoctor` · `RunHealthCheck` · `VideoStatus`
+**Implementations (38):** `BuildPreview` · `CheckForUpdate` · `ControlCenterSnapshot` · `CurrentFrame` · `DaemonStatus` · `DeviceConnectionIssues` · `DeviceState` · `GetAutostartStatus` · `GetFirstRunStatus` · `GetPaths` · `GetPlatformInfo` · `GetSensorDashboard` · `LcdSnapshot` · `LedSnapshot` · `ListCloudThemes` · `ListDevices` · `ListDiskSensors` · `ListDisks` · `ListFans` · `ListFonts` · `ListGpus` · `ListLanguages` · `ListLedModes` · `ListLedStyles` · `ListMasks` · `ListMemorySlots` · `ListSensors` · `ListThemes` · `ListWebThemes` · `OrientedThemeTarget` · `PreviewSize` · `ProbeVideoDuration` · `ReadSensors` · `ResolveOverlay` · `ResolveThemeDirectories` · `RunDoctor` · `RunHealthCheck` · `VideoStatus`
 
 ## ScreenCapture
 
@@ -187,6 +192,20 @@ run() -> int
 **You inherit (7):** `bring_up` · `compose` · `dispatch` · `events` · `preflight` · `start` · `teardown`
 
 **Implementations (5):** `ApiUI` · `CliUI` · `DaemonUI` · `GuiUI` · `QtGuiUI`
+
+## _HidBinding
+
+`adapters/device/transport.py`
+
+One ``hid`` python binding.  Children differ only in how a handle is opened and put into blocking mode; everything downstream is shared.
+
+**You implement (1):**
+
+```python
+open(vid: 'int', pid: 'int', serial: 'str | None') -> Any
+```
+
+**Implementations (2):** `_ApmortonHidBinding` · `_CythonHidBinding`
 
 ## _QtUI
 
@@ -232,7 +251,7 @@ key() -> str
 name() -> str
 ```
 
-**Implementations (18):** `AmdGpu` · `GpuSourceChain` · `HwinfoGpu` · `HwmonDisk` · `HwmonDram` · `HwmonFan` · `IntelGpu` · `LhmDisk` · `LhmGpu` · `MacosHidGpu` · `NouveauGpu` · `NvidiaGpu` · `PowermetricsGpu` · `PsutilBoardTemp` · `SmcFan` · `SmcGpu` · `SysctlFan` · `WmiVideoControllerGpu`
+**Implementations (17):** `AmdGpu` · `GpuSourceChain` · `HwinfoGpu` · `HwmonDisk` · `HwmonDram` · `HwmonFan` · `IntelGpu` · `LhmDisk` · `LhmGpu` · `MacosHidGpu` · `NvidiaGpu` · `PowermetricsGpu` · `PsutilBoardTemp` · `SmcFan` · `SmcGpu` · `SysctlFan` · `WmiVideoControllerGpu`
 
 ## SingleFileTheme
 
@@ -263,21 +282,6 @@ submit(token: 'str', request: 'VideoExportRequest') -> None
 ```
 
 **Implementations (2):** `SyncVideoExportRunner` · `ThreadVideoExportRunner`
-
-## _HidBinding
-
-`adapters/device/transport.py`
-
-One ``hid`` python binding.  Children differ only in how a handle is opened and put into blocking mode; everything downstream is shared.
-
-**You implement (2):**
-
-```python
-open(vid: 'int', pid: 'int', serial: 'str | None') -> Any
-open_path(path: 'bytes') -> Any
-```
-
-**Implementations (2):** `_ApmortonHidBinding` · `_CythonHidBinding`
 
 ## _MappingPort
 
@@ -366,7 +370,7 @@ disconnect() -> None
 send(payload: 'Any') -> bool
 ```
 
-**You inherit (14):** `can_boot_animate` · `handshake` · `is_connected` · `is_led` · `key` · `led_handshake` · `needs_keepalive` · `profile` · `quirks` · `send_boot_animation` · `set_permission_hint` · `set_quirks` · `set_state_dir` · `set_unit`
+**You inherit (13):** `can_boot_animate` · `handshake` · `is_connected` · `is_led` · `key` · `led_handshake` · `needs_keepalive` · `profile` · `quirks` · `send_boot_animation` · `set_permission_hint` · `set_quirks` · `set_state_dir`
 
 **Implementations (5):** `BulkLcd` · `HidLcd` · `Led` · `LyLcd` · `ScsiLcd`
 
@@ -416,7 +420,7 @@ name() -> str
 rpm() -> int | None
 ```
 
-**You inherit (2):** `on_gpu` · `percent`
+**You inherit (1):** `percent`
 
 **Implementations (3):** `HwmonFan` · `SmcFan` · `SysctlFan`
 
@@ -434,9 +438,9 @@ key() -> str
 name() -> str
 ```
 
-**You inherit (8):** `clock` · `fan` · `fan_rpm` · `power` · `temp` · `usage` · `vram_total` · `vram_used`
+**You inherit (7):** `clock` · `fan` · `power` · `temp` · `usage` · `vram_total` · `vram_used`
 
-**Implementations (11):** `AmdGpu` · `GpuSourceChain` · `HwinfoGpu` · `IntelGpu` · `LhmGpu` · `MacosHidGpu` · `NouveauGpu` · `NvidiaGpu` · `PowermetricsGpu` · `SmcGpu` · `WmiVideoControllerGpu`
+**Implementations (10):** `AmdGpu` · `GpuSourceChain` · `HwinfoGpu` · `IntelGpu` · `LhmGpu` · `MacosHidGpu` · `NvidiaGpu` · `PowermetricsGpu` · `SmcGpu` · `WmiVideoControllerGpu`
 
 ## HotplugMonitor
 
@@ -674,7 +678,7 @@ stop_polling() -> None
 unsupported() -> frozenset[str]
 ```
 
-**You inherit (7):** `fan_slots` · `preferred_disk` · `primary_gpu` · `set_interval` · `set_preferred_disk` · `set_preferred_gpu` · `snapshot`
+**You inherit (6):** `preferred_disk` · `primary_gpu` · `set_interval` · `set_preferred_disk` · `set_preferred_gpu` · `snapshot`
 
 **Implementations (1):** `BaselineSensors`
 
@@ -691,7 +695,7 @@ _build_autostart() -> AutostartManager
 _build_hotplug() -> HotplugMonitor
 _build_sensors() -> SensorEnumerator
 _make_paths() -> Paths
-_open_scsi(vid: 'int', pid: 'int', serial: 'str | None' = None, unit: 'str' = '') -> ScsiTransport
+_open_scsi(vid: 'int', pid: 'int', serial: 'str | None' = None) -> ScsiTransport
 check_permissions() -> list[str]
 disk_info() -> list[dict[str, str]]
 distro_name() -> str
@@ -711,7 +715,7 @@ setup(dry_run: 'bool' = False) -> int
 
 Rendering backend.  Concrete: QtRenderer (adapters/render/qt.py).
 
-**You implement (14):**
+**You implement (15):**
 
 ```python
 apply_brightness(surface: 'Any', percent: 'int') -> Any
@@ -721,6 +725,7 @@ decode_image(data: 'bytes') -> Any
 draw_text(surface: 'Any', x: 'int', y: 'int', text: 'str', color: 'str', size: 'int', bold: 'bool' = False, italic: 'bool' = False, family: 'str' = '') -> None
 encode_jpeg(surface: 'Any', quality: 'int' = 95, max_size: 'int' = 0) -> bytes
 encode_rgb565(surface: 'Any', byte_order: 'str' = '>') -> bytes
+flip_horizontal(surface: 'Any') -> Any
 from_raw_rgb24(frame: 'RawFrame') -> Any
 open_image(path: 'Path') -> Any
 resize(surface: 'Any', width: 'int', height: 'int') -> Any
@@ -763,7 +768,7 @@ install_method() -> str
 memory_info() -> list[dict[str, str]]
 minimize_on_close() -> bool
 no_devices_hint() -> str
-open_transport(wire: 'Wire', vid: 'int', pid: 'int', serial: 'str | None' = None, unit: 'str' = '') -> Transport
+open_transport(wire: 'Wire', vid: 'int', pid: 'int', serial: 'str | None' = None) -> Transport
 package_manager() -> str
 packages() -> PackageManager
 paths() -> Paths
@@ -774,7 +779,7 @@ sensors() -> SensorEnumerator
 setup(dry_run: 'bool' = False) -> int
 software_install_hint(tool: 'str') -> str
 upgrade_command() -> tuple[str, ...]
-usb_power_state(vid: 'int', pid: 'int', unit: 'str' = '') -> UsbPowerState | None
+usb_power_state(vid: 'int', pid: 'int') -> UsbPowerState | None
 worker_thread_context() -> AbstractContextManager[None]
 ```
 
@@ -786,7 +791,7 @@ worker_thread_context() -> AbstractContextManager[None]
 
 Where themes, masks, backgrounds and capture configs are kept.
 
-**You implement (26):**
+**You implement (27):**
 
 ```python
 background_path(theme: 'Theme') -> Path | None
@@ -807,6 +812,7 @@ resolve_ref(ref: 'str') -> Path | None
 screencast_region(theme: 'Theme') -> tuple[int, int, int, int, bool] | None
 single_file_theme(source: 'Path', kind: 'str') -> AbstractContextManager[SingleFileTheme]
 stage(target: 'Path') -> AbstractContextManager[Path]
+still_for(video: 'Path') -> Path | None
 store_background(data: 'bytes', ext: 'str', width: 'int', height: 'int') -> str
 store_mask(image: 'bytes', width: 'int', height: 'int', dc: 'bytes | None' = None, name: 'str | None' = None) -> str
 store_media_player(uri: 'str') -> str
