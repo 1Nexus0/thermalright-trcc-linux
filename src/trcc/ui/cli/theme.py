@@ -402,15 +402,23 @@ def cloud_download(
 def cloud_load(
     key: str = typer.Argument(..., help="Device key, e.g. 0402:3922"),
     theme_id: str = typer.Argument(..., help="Cloud theme id, e.g. a001"),
+    static: bool = typer.Option(
+        False, "--static",
+        help=("Install the theme's first-frame PNG instead of playing the "
+              "video: same picture, no per-tick decode+encode."),
+    ),
 ) -> None:
     """Download a cloud theme and load it on a device."""
-    log.info("cli theme cloud-load: key=%s theme_id=%s", key, theme_id)
+    log.info("cli theme cloud-load: key=%s theme_id=%s static=%s",
+             key, theme_id, static)
     app_obj = get_app()
-    # LoadCloudTheme dispatches PlayVideo on the wire; this stateless CLI
-    # process must attach the device first or it fails "Not attached".
+    # LoadCloudTheme touches the wire (PlayVideo / TickDisplay); this stateless
+    # CLI process must attach the device first or it fails "Not attached".
     # Idempotent when a daemon/GUI already holds it.  (#150)
     ensure_connected(app_obj, key)
-    result = app_obj.dispatch(LoadCloudTheme(key=key, theme_id=theme_id))
+    result = app_obj.dispatch(
+        LoadCloudTheme(key=key, theme_id=theme_id, static=static),
+    )
     typer.echo(result.message)
     if result.theme_path:
         typer.echo(f"  staged at: {result.theme_path}")

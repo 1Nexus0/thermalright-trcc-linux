@@ -86,6 +86,7 @@ from ..results import (
     SeekVideoResult,
     SendResult,
     SplitModeResult,
+    StaticBackgroundResult,
     ThemeDirectoriesResult,
     VideoResult,
     VideoStatusResult,
@@ -105,7 +106,7 @@ if TYPE_CHECKING:
     from ..ports import Device
 
 from ..logs import per_frame
-from ..models import MEDIA, MediaKind
+from ..models import MEDIA, MediaKind, still_for
 from ..ports import CaptureNotReady
 
 log = logging.getLogger(__name__)
@@ -1113,6 +1114,38 @@ class PlayVideo(Command[VideoResult]):
                         self.key, e)
             return VideoResult(ok=False, key=self.key, path=str(self.path),
                                 message=str(e))
+
+        # ``static_background``: this Command is the funnel every video
+        # background goes through — theme-bundled, cloud, explicit override or
+        # API — so one check here covers them all.  Substitute the still frame
+        # that sits beside the video and render it once: no playback, no
+        # animation timer, and the render loop keeps its metrics cadence
+        # (``refresh_interval_s``) instead of the video's frame rate.
+        if app.settings.for_device(self.key).static_background:
+            still = still_for(self.path)
+            if still is None:
+                log.warning(
+                    "PlayVideo.execute: static_background is on for %s but %s "
+                    "has no still frame beside it — playing the video",
+                    self.key, self.path.name,
+                )
+            else:
+                log.info(
+                    "PlayVideo.execute: static_background is on for %s — "
+                    "using %s instead of playing %s",
+                    self.key, still.name, self.path.name,
+                )
+                applied = SetBackground(key=self.key, path=still).execute(app)
+                if applied.ok:
+                    # SetBackground persists + invalidates + publishes, but
+                    # sends nothing; push the frame so a CLI one-shot shows it.
+                    TickDisplay(key=self.key).execute(app)
+                return VideoResult(
+                    ok=applied.ok, key=self.key, path=str(still),
+                    frame_count=1,
+                    message=(f"static background {still.name} "
+                             f"(not playing {self.path.name})"),
+                )
 
         if device.profile is not None:
             canvas_size = device.profile.resolution
@@ -2286,6 +2319,35 @@ class SetMaskVisible(Command[MaskVisibilityResult]):
             message=(f"mask {'shown' if self.visible else 'hidden'} "
                      f"for {self.key}"),
         )
+
+@dataclass(frozen=True, slots=True)
+class SetStaticBackground(Command[StaticBackgroundResult]):
+    """Never wire a moving background for this device.
+
+    Replaces every video background with the still frame beside it (see
+    ``still_for``) — set once, and theme-bundled videos, cloud videos and
+    explicit overrides all render as a single picture.  The render loop then
+    keeps ``refresh_interval_s`` instead of the video's frame rate, which on a
+    1280×480 panel is the difference between ~30% and ~3% of one core.
+    """
+    key: str
+    enabled: bool
+
+    def execute(self, app: App) -> StaticBackgroundResult:
+        app.settings.set_static_background(self.key, self.enabled)
+        if self.enabled:
+            # A loaded playback would keep its animation timer and outrank the
+            # still, so drop it — StopVideo is idempotent and also clears a
+            # video ``background_path``, which is exactly the thing we must not
+            # leave behind for the next ``RenderAndSend`` to re-decode.
+            StopVideo(key=self.key).execute(app)
+        _invalidate_scene(app, self.key)
+        return StaticBackgroundResult(
+            ok=True, key=self.key, enabled=self.enabled,
+            message=(f"static background {'on' if self.enabled else 'off'} "
+                     f"for {self.key}"),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class SetBackgroundMode(Command[BackgroundModeResult]):

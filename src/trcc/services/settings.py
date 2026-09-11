@@ -387,6 +387,18 @@ class Settings:
                 dev.media_player_uri = None
             self._save()
 
+    def set_static_background(self, key: str, enabled: bool) -> None:
+        """Swap moving backgrounds for their still frame on this device.
+
+        Honoured by ``PlayVideo`` — the single funnel every video background
+        goes through — so one setting covers theme-bundled videos, cloud
+        videos and explicit overrides alike.
+        """
+        log.info("set_static_background: key=%s enabled=%s", key, enabled)
+        with self._lock:
+            self.for_device(key).static_background = enabled
+            self._save()
+
     def set_screencast_region(
         self, key: str, region: tuple[int, int, int, int, bool] | None,
     ) -> None:

@@ -355,6 +355,13 @@ class OrientedThemeTargetResult(Result):
 
 
 @dataclass(frozen=True, slots=True)
+class StaticBackgroundResult(Result):
+    """Result of ``SetStaticBackground`` — the moving-background preference."""
+    key: str = ""
+    enabled: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class ThemeExportResult(Result):
     theme_name: str = ""
     archive_path: str = ""

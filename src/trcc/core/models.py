@@ -676,6 +676,13 @@ class DeviceSettings:
     # Set by LoadCloudTheme, cleared by LoadTheme (picking a local
     # theme reverts to its own background).  Survives app restart.
     background_path: str | None = None
+    # Never wire a moving background: every video (theme-bundled, cloud, or an
+    # explicit override) is replaced by the still frame written beside it, so
+    # the render loop stays at ``refresh_interval_s`` instead of video rate —
+    # a 1280×480 video background costs a decode + JPEG encode per tick (~24 ms
+    # at 12 fps ≈ 30% of one core; the still is ~3%).  Off by default: the
+    # vendor catalog is video-first and the port mirrors that.
+    static_background: bool = False
     # Active screencast region (x, y, w, h, audio) — the display source when the
     # screencast toggle is on.  ``None`` = not screencasting.  Persisted like
     # ``background_path`` so SaveTheme can bake it into a theme's ``screencast``
@@ -1317,6 +1324,26 @@ class VideoExportRequest:
     target_h: int
     rotation: int = 0
     fit_mode: FitMode | None = None
+
+
+#: Extensions a video's still stand-in may carry, in preference order.  Not
+#: ``.gif`` — that one is ANIMATED (above) and would keep the loop busy.
+_STILL_EXTS: tuple[str, ...] = (".png", ".jpg", ".jpeg")
+
+
+def still_for(video: Path) -> Path | None:
+    """The still frame that stands in for *video*, or ``None`` if there is none.
+
+    Both sources of video already ship one beside it: ``materialise`` writes the
+    first-frame PNG next to every downloaded cloud video (ffmpeg), and the
+    vendor catalog ships the same ``<id>.png`` / ``.gif`` / ``.mp4`` trio.  Used
+    by the ``static_background`` preference and by ``LoadCloudTheme --static``.
+    """
+    for ext in _STILL_EXTS:
+        candidate = video.with_suffix(ext)
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 # DC file (main_count, sub_count) → ``HardwareMetrics`` field name.
