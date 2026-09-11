@@ -67,7 +67,7 @@ Show this command's help and exit.
 .RE
 .SS cloud\-load
 .PP
-\fBtrcc theme cloud\-load\fR \fIKEY\fR \fITHEME_ID\fR
+\fBtrcc theme cloud\-load\fR \fIKEY\fR \fITHEME_ID\fR [\fIOPTIONS\fR]
 .PP
 Download a cloud theme and load it on a device.
 .PP
@@ -83,6 +83,9 @@ Cloud theme id, e.g. a001
 .PP
 Options:
 .RS 4
+.TP
+\fB\-\-static\fR
+Install the theme's first\-frame PNG instead of playing the video: same picture, no per\-tick decode+encode.
 .TP
 \fB\-\-help\fR
 Show this command's help and exit.
