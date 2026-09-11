@@ -794,6 +794,7 @@ class LcdSnapshotResult(Result):
     # callers need sends them around it.
     background_mode: str = "theme"
     overlay_background: tuple[int, int, int] = (0, 0, 0)
+    static_background: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -857,6 +858,7 @@ class ControlCenterSnapshotResult(Result):
     active_gpu: str | None = None
     active_disk: str | None = None
     refresh_interval_s: float = DEFAULT_REFRESH_INTERVAL_S
+    keepalive_interval_s: float = DEFAULT_KEEPALIVE_INTERVAL_S
     hdd_enabled: bool = False
 
 

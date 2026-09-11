@@ -356,15 +356,16 @@ class ControlCenterSnapshot(Query[ControlCenterSnapshotResult]):
     def execute(self, app: App) -> ControlCenterSnapshotResult:
         a = app.settings.app
         log.debug("ControlCenterSnapshot.execute: lang=%s unit=%s gpu=%s "
-                  "refresh=%ss hdd=%s",
+                  "refresh=%ss keepalive=%ss hdd=%s",
                   a.language, a.temp_unit, a.active_gpu,
-                  a.refresh_interval_s, a.hdd_enabled)
+                  a.refresh_interval_s, a.keepalive_interval_s, a.hdd_enabled)
         return ControlCenterSnapshotResult(
             ok=True,
             language=a.language,
             temp_unit=a.temp_unit,
             active_gpu=a.active_gpu,
             refresh_interval_s=a.refresh_interval_s,
+            keepalive_interval_s=a.keepalive_interval_s,
             hdd_enabled=a.hdd_enabled,
             message="App settings snapshot",
         )

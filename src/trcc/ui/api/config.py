@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request
 from ...core.commands import (
     SetDateFormat,
     SetGpuDevice,
+    SetKeepaliveInterval,
     SetLanguage,
     SetRefreshInterval,
     SetTempUnit,
@@ -16,6 +17,7 @@ from ...core.commands import (
 from ...core.results import (
     DateFormatResult,
     GpuDeviceResult,
+    KeepaliveIntervalResult,
     LanguageResult,
     RefreshIntervalResult,
     TempUnitResult,
@@ -27,6 +29,7 @@ from ._shared import (
 from .schemas import (
     DateFormatRequest,
     GpuDeviceRequest,
+    KeepaliveIntervalRequest,
     LanguageRequest,
     RefreshIntervalRequest,
     TempUnitRequest,
@@ -69,6 +72,18 @@ def set_refresh_interval(
     log.info("api POST /config/refresh-interval: seconds=%s", body.seconds)
     result = request.app.state.trcc.dispatch(
         SetRefreshInterval(seconds=body.seconds),
+    )
+    http_error_if_failed(result)
+    return result
+
+
+@router.post("/keepalive-interval")
+def set_keepalive_interval(
+    body: KeepaliveIntervalRequest, request: Request,
+) -> KeepaliveIntervalResult:
+    log.info("api POST /config/keepalive-interval: seconds=%s", body.seconds)
+    result = request.app.state.trcc.dispatch(
+        SetKeepaliveInterval(seconds=body.seconds),
     )
     http_error_if_failed(result)
     return result
