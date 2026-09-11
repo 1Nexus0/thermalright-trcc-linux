@@ -84,6 +84,7 @@ MASK_DESC_POS = (7, 45, 90, 50, 7)
 BACKGROUND_TITLE_POS = (7, 73, 140, 22, 12)
 BACKGROUND_LOAD_IMG_POS = (150, 73, 70, 16, 9)
 BACKGROUND_LOAD_VIDEO_POS = (230, 73, 80, 16, 9)
+BACKGROUND_STATIC_POS = (250, 8, 56, 16, 9)
 
 # Media Player panel (P01播放器) — 351x100
 MEDIA_PLAYER_TITLE_POS = (7, 73, 140, 22, 12)
@@ -126,6 +127,7 @@ ABOUT_UNIT_POS = (56, 214, 60, 22, 14)
 ABOUT_HDD_POS = (56, 254, 240, 22, 14)
 ABOUT_HDD_WARN_POS = (325, 251, 420, 30, 8)
 ABOUT_REFRESH_POS = (56, 293, 220, 22, 14)
+ABOUT_KEEPALIVE_POS = (460, 293, 200, 22, 14)
 ABOUT_RUNNING_MODE_POS = (56, 334, 200, 22, 14)
 ABOUT_SINGLE_THREAD_POS = (314, 334, 256, 18, 10)
 ABOUT_MULTI_THREAD_POS = (584, 334, 260, 18, 10)
@@ -274,6 +276,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Hard disk information': 'Hard disk information',
         'Reading hard disk information may cause some mechanical hard drives to read and write frequently. If you encounter this issue, please close the project.': 'Reading hard disk information may cause some mechanical hard drives to read and write frequently. If you encounter this issue, please close the project.',
         'Data refresh time': 'Data refresh time',
+        'Keepalive time': 'Keepalive time',
         'Running Mode': 'Running Mode',
         'Single-threaded (low resource usage)': 'Single-threaded (low resource usage)',
         'Multi-threaded (high resource usage)': 'Multi-threaded (high resource usage)',
@@ -403,6 +406,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Hard disk information': 'Информация о диске',
         'Reading hard disk information may cause some mechanical hard drives to read and write frequently. If you encounter this issue, please close the project.': 'Чтение информации о диске может вызвать частые обращения к HDD.',
         'Data refresh time': 'Время обновления',
+        'Keepalive time': 'Время keepalive',
         'Running Mode': 'Режим работы',
         'Single-threaded (low resource usage)': 'Однопоточный (мало ресурсов)',
         'Multi-threaded (high resource usage)': 'Многопоточный (больше ресурсов)',
