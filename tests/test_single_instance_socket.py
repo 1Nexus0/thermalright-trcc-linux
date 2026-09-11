@@ -14,16 +14,25 @@ day a user's second launch stops raising the window.
 """
 from __future__ import annotations
 
+import contextlib
+import gc
 import json
 import os
 import socket
 import threading
 import time
+import warnings
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from trcc.ipc import SingleInstance, _instance_socket_path
+from trcc.ipc import (
+    SingleInstance,
+    _instance_socket_path,
+    _peer_alive,
+    _send_raise,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -154,3 +163,73 @@ def test_only_a_raise_request_raises() -> None:
             f"a message that never asked to raise triggered one: {calls}")
     finally:
         inst.close()
+
+
+# ---------------------------------------------------------------------------
+# Descriptor hygiene on the failure paths
+#
+# Both helpers below are reached on EVERY launch, and the branch that matters
+# is the one that fails: a killed GUI leaves its socket file behind, so the
+# next launch connects to an inode with nothing accepting on it.  A socket
+# built inside a ``try`` and abandoned there leaks a descriptor exactly there,
+# and nothing noticed because the caller swallows the ``OSError``.
+# ---------------------------------------------------------------------------
+
+
+def _leave_a_stale_socket_file(path: Path) -> None:
+    """Bind and close, leaving the inode — what a killed GUI leaves behind.
+
+    Closing an ``AF_UNIX`` listener does not unlink its path, so this is the
+    real article rather than a plain file that would fail differently.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    stale.bind(str(path))
+    stale.close()
+
+
+@contextlib.contextmanager
+def _leaks_no_descriptor() -> Iterator[None]:
+    """Fail if the block abandons an unclosed socket.
+
+    CPython's deallocator reports one as ``ResourceWarning``, which the suite
+    already turns into an error — but only whenever the collector gets round
+    to it, which lands the failure on an unrelated test.  Trapping it here
+    names the culprit instead.  Pre-existing garbage is collected BEFORE the
+    trap opens so nothing else can be mistaken for this block's leak, and no
+    collection is forced inside it: an abandoned socket dies on refcount
+    alone.
+    """
+    gc.collect()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        yield
+    leaked = [str(w.message) for w in caught
+              if issubclass(w.category, ResourceWarning)]
+    assert not leaked, f"an unclosed socket was abandoned: {leaked}"
+
+
+def test_peer_alive_leaks_no_descriptor_on_a_stale_socket(tmp_path: Path) -> None:
+    """The branch taken by every launch that follows a crash."""
+    _needs_af_unix()
+    stale = tmp_path / "stale.sock"
+    _leave_a_stale_socket_file(stale)
+
+    with _leaks_no_descriptor():
+        assert _peer_alive(stale, 0.5) is False
+
+
+def test_send_raise_leaks_no_descriptor_when_the_peer_vanished(
+    tmp_path: Path,
+) -> None:
+    """`_peer_alive` can say yes and the peer die before this connects.
+
+    ``SingleInstance`` catches that ``OSError`` and carries on, so a leak on
+    this path produces no symptom at all until descriptors run out.
+    """
+    _needs_af_unix()
+    stale = tmp_path / "stale.sock"
+    _leave_a_stale_socket_file(stale)
+
+    with _leaks_no_descriptor(), pytest.raises(OSError):
+        _send_raise(stale, b'{"raise": true}\n', 0.5)

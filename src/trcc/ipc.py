@@ -1075,25 +1075,38 @@ def _msvcrt_acquire(name: str) -> Any | None:
 
 
 def _peer_alive(path: Path, timeout: float) -> bool:
-    """True if a peer is currently bound + accepting on ``path``."""
+    """True if a peer is currently bound + accepting on ``path``.
+
+    The socket is opened in a ``with`` block because the interesting answer is
+    *no*: a socket file left behind by a killed GUI still exists, so every
+    launch after a crash reaches ``connect()`` and it raises.  Constructing the
+    socket inside the ``try`` leaked one descriptor down exactly that path.
+    """
     if not path.exists():
+        log.debug("_peer_alive: %s — no socket file, no peer", path)
         return False
     try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect(str(path))
-        sock.close()
-        return True
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            sock.connect(str(path))
     except OSError:
+        log.debug("_peer_alive: %s — stale socket file, nothing accepting",
+                  path, exc_info=True)
         return False
+    log.debug("_peer_alive: %s — a peer is accepting", path)
+    return True
 
 
 def _send_raise(path: Path, payload: bytes, timeout: float) -> None:
-    """Connect + send a raise message to an existing peer."""
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    sock.connect(str(path))
-    try:
+    """Connect + send a raise message to an existing peer.
+
+    ``connect()`` sits inside the ``with`` for the same reason as above: the
+    peer can die between :func:`_peer_alive` saying yes and this call, and the
+    caller swallows that ``OSError`` — so a descriptor leaked here was never
+    noticed.
+    """
+    log.debug("_send_raise: %d byte(s) to %s", len(payload), path)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        sock.connect(str(path))
         sock.sendall(payload)
-    finally:
-        sock.close()

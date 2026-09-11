@@ -71,7 +71,7 @@ import logging_coverage  # noqa: E402  # pyright: ignore[reportMissingImports]
 #: packaged install goes through, and it said nothing.
 _SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "trcc"
 
-MAX_SILENT = 1324
+MAX_SILENT = 1322
 
 
 def test_logging_coverage_only_improves() -> None:
