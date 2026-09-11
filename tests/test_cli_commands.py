@@ -1164,6 +1164,25 @@ def test_config_refresh_interval_persists(cli_runner: CliRunner, cli_app) -> Non
     assert result.exit_code == 0
 
 
+def test_config_keepalive_interval_persists(cli_runner: CliRunner, cli_app) -> None:
+    del cli_app
+    result = cli_runner.invoke(
+        _app(), ["config", "keepalive-interval", "1.0"],
+    )
+    assert result.exit_code == 0
+
+
+def test_config_keepalive_interval_rejects_out_of_range(
+    cli_runner: CliRunner, cli_app,
+) -> None:
+    del cli_app
+    result = cli_runner.invoke(
+        _app(), ["config", "keepalive-interval", "5"],
+    )
+    assert result.exit_code == 1
+    assert "0.05" in result.output
+
+
 # =========================================================================
 # theme sub-app — save / export / import
 # =========================================================================
