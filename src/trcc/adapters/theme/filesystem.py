@@ -54,6 +54,7 @@ from ...core.models import (
 )
 from ...core.ports import ContentStore, SingleFileTheme
 from ...services import _dc as Dc
+from ...services.media import extract_first_frame_png
 
 if TYPE_CHECKING:
     from ...core.ports import Paths
@@ -768,6 +769,21 @@ class FileContentStore(ContentStore):
                 log.debug("still_for: %s → %s", video.name, candidate.name)
                 return candidate
         log.debug("still_for: %s → no still beside it", video.name)
+        return None
+
+    def ensure_still(self, video: Path) -> Path | None:
+        """The still for *video* — the one beside it, or a first frame."""
+        still = self.still_for(video)
+        if still is not None:
+            return still
+        target = video.with_suffix(".png")
+        if extract_first_frame_png(video, target) and target.is_file():
+            log.info("ensure_still: wrote %s for %s", target.name, video.name)
+            return target
+        log.warning(
+            "ensure_still: %s has no still beside it and no frame could be "
+            "extracted", video.name,
+        )
         return None
 
     def video_for(self, still: Path) -> Path | None:

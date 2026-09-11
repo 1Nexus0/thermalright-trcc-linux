@@ -1536,6 +1536,17 @@ class ContentStore(ABC):
         """
 
     @abstractmethod
+    def ensure_still(self, video: Path) -> Path | None:
+        """The still for *video* — the one beside it, or a first frame.
+
+        ``still_for`` only *finds* a still; a theme that ships a video without
+        one (nothing called ``materialise`` on it) would leave the
+        ``static_background`` preference with nothing to show, so the store
+        extracts the first frame instead.  ``None`` means neither worked and
+        the caller must keep the video.
+        """
+
+    @abstractmethod
     def video_for(self, still: Path) -> Path | None:
         """The video *still* stands in for, or ``None`` if there is none.
 

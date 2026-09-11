@@ -551,3 +551,33 @@ class MediaService:
         if had is not None:
             log.info("unload: dropped %d-frame playback for %s",
                      len(had.frames), device_key)
+
+
+def extract_first_frame_png(video: Path, png: Path) -> bool:
+    """Write *video*'s first frame to *png*, returning whether ffmpeg succeeded.
+
+    Best-effort by design: a theme whose video has no still must still render —
+    the caller falls back to the moving picture — so a missing ffmpeg or an
+    undecodable file is a ``False`` with a warning, not an exception.  Whether
+    the file is really there is the caller's check: the store owns the
+    filesystem, this owns the tool.
+    """
+    log.info("extract_first_frame_png: %s → %s", video.name, png.name)
+    try:
+        result = subprocess.run(
+            [toolchain.resolve("ffmpeg") or "ffmpeg",
+             "-i", str(video), "-vframes", "1", "-y", str(png)],
+            capture_output=True, check=False, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        log.warning("extract_first_frame_png: %s failed: %s: %s",
+                    video.name, type(e).__name__, e)
+        return False
+    if result.returncode != 0:
+        log.warning(
+            "extract_first_frame_png: %s rc=%d: %s", video.name,
+            result.returncode,
+            result.stderr.decode("utf-8", errors="replace")[:200],
+        )
+        return False
+    return True

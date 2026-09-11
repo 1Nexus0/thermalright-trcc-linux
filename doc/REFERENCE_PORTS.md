@@ -50,7 +50,7 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | [`BaseOS`](#baseos) | 12 | 18 | 8 |
 | [`Renderer`](#renderer) | 15 | 8 | 1 |
 | [`Platform`](#platform) | 25 | 0 | 8 |
-| [`ContentStore`](#contentstore) | 28 | 0 | 1 |
+| [`ContentStore`](#contentstore) | 29 | 0 | 1 |
 
 ---
 
@@ -786,13 +786,14 @@ worker_thread_context() -> AbstractContextManager[None]
 
 Where themes, masks, backgrounds and capture configs are kept.
 
-**You implement (28):**
+**You implement (29):**
 
 ```python
 background_path(theme: 'Theme') -> Path | None
 copy_preview(src_theme_dir: 'Path', dst_theme_dir: 'Path') -> bool
 delete(directory: 'Path', name: 'str') -> Path
 discover_masks(cloud_masks_dir: 'Path | None' = None, user_masks_dir: 'Path | None' = None) -> builtins.list[DiscoveredMask]
+ensure_still(video: 'Path') -> Path | None
 export(theme_path: 'Path', archive_path: 'Path') -> None
 export_dc(theme_dir: 'Path', output_path: 'Path', elements: 'list[dict] | None' = None) -> Path
 import_(archive_path: 'Path', into_dir: 'Path') -> Theme

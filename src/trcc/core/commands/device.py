@@ -1122,11 +1122,12 @@ class PlayVideo(Command[VideoResult]):
         # animation timer, and the render loop keeps its metrics cadence
         # (``refresh_interval_s``) instead of the video's frame rate.
         if app.settings.for_device(self.key).static_background:
-            still = app.themes.still_for(self.path)
+            still = app.themes.ensure_still(self.path)
             if still is None:
                 log.warning(
                     "PlayVideo.execute: static_background is on for %s but %s "
-                    "has no still frame beside it — playing the video",
+                    "has no still frame beside it and none could be extracted "
+                    "— playing the video",
                     self.key, self.path.name,
                 )
             else:
