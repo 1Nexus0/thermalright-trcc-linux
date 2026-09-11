@@ -62,6 +62,8 @@ class _Step:
 
 def _platform() -> Any:
     """Build the FakePlatform used by tests/conftest.py."""
+    import atexit
+    import shutil
     import tempfile
 
     sys.path.insert(0, str(_REPO_ROOT / "tests"))
@@ -70,7 +72,13 @@ def _platform() -> Any:
     # resolve it from the dev script — runtime-only.
     from conftest import FakePlatform  # type: ignore[import-not-found]
 
-    return FakePlatform(Path(tempfile.mkdtemp(prefix="trcc-smoke-")))
+    # Registered rather than wrapped in ``try/finally`` so it also fires when
+    # a step raises, and under pytest, where this module is imported and
+    # driven rather than run.  It was never cleaned at all: 22 abandoned
+    # roots holding 537 MB were on the dev box when this was found.
+    root = Path(tempfile.mkdtemp(prefix="trcc-smoke-"))
+    atexit.register(shutil.rmtree, root, ignore_errors=True)
+    return FakePlatform(root)
 
 
 def _smoke_renderer() -> Any:
@@ -118,16 +126,20 @@ def _build_app() -> Any:
     return App(platform=_platform(), renderer=_smoke_renderer())
 
 
-def _all_dirs_populated(app: Any, resolution: tuple[int, int]) -> bool:
-    """Are the three per-resolution data dirs already populated?"""
+def _seed_data_dirs(app: Any, resolution: tuple[int, int]) -> None:
+    """Populate the three per-resolution dirs so ``ensure_all`` short-circuits.
+
+    ``DataInstaller.install`` returns early on ``_is_populated`` — any single
+    entry is enough — which is the whole point of the step below: prove the
+    wiring, never fetch.
+    """
     paths = app.platform.paths()
     w, h = resolution
-    candidates = [
-        paths.theme_dir(w, h),
-        paths.cloud_theme_dir(w, h),
-        paths.cloud_mask_dir(w, h),
-    ]
-    return all(d.is_dir() and any(d.iterdir()) for d in candidates)
+    for directory in (paths.theme_dir(w, h),
+                      paths.cloud_theme_dir(w, h),
+                      paths.cloud_mask_dir(w, h)):
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "00.png").touch()
 
 
 def _run_steps() -> list[_Step]:
@@ -228,12 +240,22 @@ def _run_steps() -> list[_Step]:
     steps.append(variant_step)
 
     # ── EnsureData install pipeline (per-resolution archives).  Hits
-    #     the just-ported DataInstallService.  Uses a populated dir so
+    #     the just-ported DataInstallService.  The dirs are SEEDED first so
     #     it short-circuits — proves the wiring, no actual download.
+    #
+    #     That is what this comment always claimed, and it was false: the
+    #     platform above hands out a fresh ``mkdtemp``, which can never be
+    #     populated, so every run fetched 23.4 MB from GitHub (theme 26 KB +
+    #     web 6.9 MB + masks 17.5 MB) and the suite FAILED outright with no
+    #     route.  Nothing caught it because the pytest wrapper's fixture
+    #     (``tests/test_integration_pipeline.py``) is module-scoped, and
+    #     conftest's autouse offline stub is function-scoped — pytest sets
+    #     higher scopes up first, so the guard was not yet in effect.
     install_step = _Step(label="DataInstallService.ensure_all")
     try:
+        _seed_data_dirs(app, (320, 320))
         result = app.data_install.ensure_all((320, 320))
-        install_step.passed = result.ok or _all_dirs_populated(app, (320, 320))
+        install_step.passed = result.ok
         install_step.detail = (
             f"themes={result.themes_ok} web={result.web_ok} "
             f"masks={result.masks_ok}"

@@ -7,7 +7,9 @@ touching USB / SG_IO / ioctl.
 from __future__ import annotations
 
 import inspect
+import ipaddress
 import logging
+import socket
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
@@ -404,11 +406,97 @@ class FakePlatform(Platform):
 # ── Fixtures ─────────────────────────────────────────────────────────
 
 
+# ── The scope trap ───────────────────────────────────────────────────
+#
+# pytest sets HIGHER-scoped fixtures up FIRST.  A function-scoped autouse
+# guard therefore does NOT protect anything a session-, package-, module- or
+# class-scoped fixture does in its own setup — that work runs before the guard
+# exists.  Measured 2026-09-11: a module-scoped fixture sees the real
+# ``HOME=/home/<user>`` and the REAL ``DataInstallService.ensure_all``, while
+# the test body it feeds sees the tmp_path and the stub.
+#
+# That is not hypothetical.  ``tests/test_integration_pipeline.py`` drives the
+# full-pipeline smoke from a MODULE-scoped fixture, so ``_stub_data_install``
+# below — whose docstring says "every test is offline-safe" — was never in
+# effect for it, and every suite run downloaded 23.4 MB of theme archives from
+# GitHub.  With no route the suite failed outright.
+#
+# So a guard that must hold EVERYWHERE is session-scoped, and the per-test
+# guards below narrow it further.  Six module-scoped fixtures exist in tests/.
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _the_suite_is_hermetic() -> Iterator[None]:
+    """Nothing in the suite talks to the network.
+
+    ``ConnectionRefusedError`` rather than something louder so production error
+    handling behaves exactly as it does on a machine with no route:
+    ``UrllibHttpFetcher`` turns ``OSError`` into ``HttpFetchError`` and every
+    caller degrades the way it was written to.  A green suite then means the
+    same thing online and offline, which is the property that was missing.
+
+    Loopback stays open — blocking it would break any future in-process server
+    — but nothing reaches off the machine.  Measured before landing this: the
+    only outbound connections in the whole suite were to GitHub.
+    """
+    real_connect = socket.socket.connect
+
+    def _is_local(family: int, address: object) -> bool:
+        if family == getattr(socket, "AF_UNIX", None):
+            return True
+        if not (isinstance(address, tuple) and address):
+            return False
+        host = address[0]
+        if not isinstance(host, str):
+            return False
+        try:
+            return ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            return host == "localhost"
+
+    def connect(self: socket.socket, address: Any) -> Any:
+        if not _is_local(self.family, address):
+            raise ConnectionRefusedError(
+                f"the trcc test suite is hermetic — blocked an outbound "
+                f"connection to {address!r}.  Stub the port (HttpFetcher, "
+                f"DataInstallService, GithubReleases) instead of reaching "
+                f"the network.",
+            )
+        return real_connect(self, address)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(socket.socket, "connect", connect)
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _home_is_never_the_real_one_at_any_scope(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[None]:
+    """Cover the window the per-test HOME guard cannot reach.
+
+    See "The scope trap" above: the function-scoped guard below is set up
+    AFTER every higher-scoped fixture, so a module-scoped one that resolves a
+    log path or a data dir does it against the developer's real ``~``.  This
+    closes that window for the whole session; the per-test guard still gives
+    each test its own fresh directory.
+    """
+    root = tmp_path_factory.mktemp("session-home")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("HOME", str(root))
+        mp.setenv("XDG_CONFIG_HOME", str(root / ".config"))
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _home_is_never_the_real_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No test may touch the developer's own ``~``.  Autouse, for cause.
+
+    Function-scoped, so it does NOT reach module/session fixture setup — see
+    "The scope trap" above; ``_home_is_never_the_real_one_at_any_scope``
+    covers that window.
 
     ``tmp_home`` below has done this since forever, but only for the tests that
     ASKED for it, and the ones that write are not the ones that ask: anything
@@ -497,6 +585,11 @@ def _stub_data_install(monkeypatch: pytest.MonkeyPatch) -> None:
     ``DataInstallService.ensure_all``, which would otherwise run the real
     ``UrllibHttpFetcher``.  Stub it at the class so every test is offline-safe;
     tests that assert on the call replace ``app.data_install`` locally.
+
+    Function-scoped, so "every test" is literally true and no more: work done
+    in a module- or session-scoped fixture's SETUP runs before this exists.
+    See "The scope trap" above — that gap really did ship.  The hermetic
+    guard is the session-scoped backstop.
     """
     from trcc.services.data_install import DataInstallService, EnsureDataResult
 
