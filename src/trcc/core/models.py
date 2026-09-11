@@ -127,6 +127,18 @@ MAX_REFRESH_INTERVAL_S: float = 100.0
 #: exception.
 DEFAULT_REFRESH_INTERVAL_S: float = 2.0
 
+# Resend bounds for "volatile" wires — firmware that falls back to its own boot
+# logo when the frame stream stops (``DeviceQuirks.keepalive_stream``; this
+# panel's 0416:5302/fw-4.07 fingerprint included).  The default is the
+# vendor-parity cadence, an order of magnitude below the ~2-3 s revert window;
+# the ceiling keeps a user-set value inside that window.  Raising it towards the
+# ceiling cuts idle CPU and USB traffic proportionally — 1.0 s measured clean on
+# the HID unit (#228 fingerprints), and a panel that flickers at a slower
+# cadence is simply one whose window is shorter.
+DEFAULT_KEEPALIVE_INTERVAL_S: float = 0.150
+MIN_KEEPALIVE_INTERVAL_S: float = 0.05
+MAX_KEEPALIVE_INTERVAL_S: float = 2.0
+
 
 def parse_resolution(resolution: str) -> tuple[int, int]:
     """Parse a ``"320x320"`` resolution string into ``(width, height)``.

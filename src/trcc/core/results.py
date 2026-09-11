@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .models import (
+    DEFAULT_KEEPALIVE_INTERVAL_S,
     DEFAULT_REFRESH_INTERVAL_S,
     OVERLAY_DEFAULT_CLOCK_SOURCE,
     OVERLAY_DEFAULT_COLOR,
@@ -638,6 +639,17 @@ class GpuDeviceResult(Result):
 @dataclass(frozen=True, slots=True)
 class RefreshIntervalResult(Result):
     seconds: float = 2.0
+
+
+@dataclass(frozen=True, slots=True)
+class KeepaliveIntervalResult(Result):
+    """Result of ``SetKeepaliveInterval`` — the volatile-wire resend cadence.
+
+    Distinct from :class:`RefreshIntervalResult`: that one paces metric polling
+    and rendering, this one paces the resend of an *unchanged* frame to firmware
+    that blanks without a stream.
+    """
+    seconds: float = DEFAULT_KEEPALIVE_INTERVAL_S
 
 
 @dataclass(frozen=True, slots=True)

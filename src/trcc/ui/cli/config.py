@@ -9,6 +9,7 @@ from ...core.commands import (
     SetDateFormat,
     SetDiskDevice,
     SetGpuDevice,
+    SetKeepaliveInterval,
     SetLanguage,
     SetRefreshInterval,
     SetTempUnit,
@@ -86,6 +87,27 @@ def refresh_interval(
     """Set the global metrics-refresh / render-and-send tick interval."""
     log.info("cli config refresh-interval: seconds=%s", seconds)
     result = get_app().dispatch(SetRefreshInterval(seconds=seconds))
+    typer.echo(result.message)
+    if not result.ok:
+        raise typer.Exit(code=1)
+
+
+@app.command("keepalive-interval")
+def keepalive_interval(
+    seconds: float = typer.Argument(
+        ..., help="Seconds between keepalive resends (0.05 to 2)",
+    ),
+) -> None:
+    """Set how often an unchanged frame is resent to firmware that blanks.
+
+    Only "volatile" wires resend an unchanged frame at all — firmware that
+    falls back to its own boot logo when the stream stops (this panel's
+    fingerprint included).  Raising the cadence cuts idle CPU and USB traffic
+    proportionally; lower it again if the panel flickers.  Applies when a
+    device is next attached.
+    """
+    log.info("cli config keepalive-interval: seconds=%s", seconds)
+    result = get_app().dispatch(SetKeepaliveInterval(seconds=seconds))
     typer.echo(result.message)
     if not result.ok:
         raise typer.Exit(code=1)

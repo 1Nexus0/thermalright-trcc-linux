@@ -22,7 +22,9 @@ from ..events import (
 )
 from ..models import (
     AUTOSTART_TARGETS,
+    MAX_KEEPALIVE_INTERVAL_S,
     MAX_REFRESH_INTERVAL_S,
+    MIN_KEEPALIVE_INTERVAL_S,
     MIN_REFRESH_INTERVAL_S,
     SLIDESHOW_POLL_S,
     PanelConfig,
@@ -48,6 +50,7 @@ from ..results import (
     GpuEntry,
     GpusListResult,
     HealthReportResult,
+    KeepaliveIntervalResult,
     KeepaliveResult,
     LanguageEntry,
     LanguageResult,
@@ -1512,6 +1515,52 @@ class SetRefreshInterval(Command[RefreshIntervalResult]):
         return RefreshIntervalResult(
             ok=True, seconds=self.seconds,
             message=f"refresh interval set to {self.seconds:.2f}s",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SetKeepaliveInterval(Command[KeepaliveIntervalResult]):
+    """Set the resend cadence for "volatile" wires — firmware that falls back to
+    its own boot logo when the frame stream stops
+    (``DeviceQuirks.keepalive_stream``).
+
+    Only wires carrying that quirk resend an *unchanged* frame at all; every
+    other device sleeps until a producer submits one, so this setting is inert
+    for them.  Validated to
+    [``MIN_KEEPALIVE_INTERVAL_S``, ``MAX_KEEPALIVE_INTERVAL_S``] = [0.05, 2] s:
+    the ceiling stays inside the firmware's ~2-3 s revert window, the floor
+    stops a pathological sub-frame-rate stream.
+
+    Takes effect when a sender is next built (attach / reconnect) — a live
+    sender keeps the cadence it was constructed with.
+    """
+    seconds: float
+
+    def execute(self, app: App) -> KeepaliveIntervalResult:
+        log.info("SetKeepaliveInterval.execute: seconds=%.3f", self.seconds)
+        if not MIN_KEEPALIVE_INTERVAL_S <= self.seconds <= MAX_KEEPALIVE_INTERVAL_S:
+            log.warning(
+                "SetKeepaliveInterval.execute: out-of-range %.3f rejected "
+                "(allowed [%.2f, %.1f])", self.seconds,
+                MIN_KEEPALIVE_INTERVAL_S, MAX_KEEPALIVE_INTERVAL_S,
+            )
+            return KeepaliveIntervalResult(
+                ok=False, seconds=self.seconds,
+                message=(f"keepalive interval must be in "
+                         f"[{MIN_KEEPALIVE_INTERVAL_S}, "
+                         f"{MAX_KEEPALIVE_INTERVAL_S}] seconds, "
+                         f"got {self.seconds}"),
+            )
+        old = app.settings.app.keepalive_interval_s
+        app.settings.set_keepalive_interval(self.seconds)
+        applied = app.settings.app.keepalive_interval_s
+        log.info(
+            "SetKeepaliveInterval.execute: settings.app.keepalive_interval_s "
+            "%.3f -> %.3f (applies on the next sender attach)", old, applied,
+        )
+        return KeepaliveIntervalResult(
+            ok=True, seconds=applied,
+            message=f"keepalive interval set to {applied:.3f}s",
         )
 
 
