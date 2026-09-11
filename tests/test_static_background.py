@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtGui import QImage
 
+from trcc.adapters.theme import filesystem
 from trcc.adapters.theme.filesystem import FileContentStore
 from trcc.app import App
 from trcc.core.commands import ConnectDevice, SetStaticBackground
@@ -75,6 +76,42 @@ def test_video_for_finds_the_sibling_video(tmp_path: Path) -> None:
     png = _touch(tmp_path / "a001.png")
     video = _touch(tmp_path / "a001.mp4")
     assert _store().video_for(png) == video
+
+
+def test_ensure_still_keeps_an_existing_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    video = _touch(tmp_path / "a001.mp4")
+    png = _touch(tmp_path / "a001.png")
+
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError("an existing still must not start ffmpeg")
+
+    monkeypatch.setattr(filesystem, "extract_first_frame_png", _forbidden)
+    assert _store().ensure_still(video) == png
+
+
+def test_ensure_still_extracts_a_frame_when_there_is_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A theme video with no still beside it must not leave static mode blind."""
+    video = _touch(tmp_path / "a001.mp4")
+
+    def fake_extract(source: Path, png: Path) -> bool:
+        png.write_bytes(b"\x89PNG\r\n\x1a\n")
+        return True
+
+    monkeypatch.setattr(filesystem, "extract_first_frame_png", fake_extract)
+    assert _store().ensure_still(video) == tmp_path / "a001.png"
+
+
+def test_ensure_still_is_none_when_no_frame_can_be_extracted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    video = _touch(tmp_path / "a001.mp4")
+    monkeypatch.setattr(filesystem, "extract_first_frame_png",
+                        lambda _source, _png: False)
+    assert _store().ensure_still(video) is None
 
 
 def test_video_for_is_none_without_a_video(tmp_path: Path) -> None:

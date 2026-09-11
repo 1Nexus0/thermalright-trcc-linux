@@ -25,9 +25,9 @@ import logging
 import subprocess
 from pathlib import Path
 
-from ..core import toolchain
 from ..core.models import CloudCategory, CloudThemeEntry
 from ..core.ports import CloudCatalog, Paths
+from .media import extract_first_frame_png
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ class CloudThemeService:
         # static fallback matches the video's actual content).
         png_target = target_dir / f"{theme_id}.png"
         if not _is_first_frame_png(png_target, mp4_target):
-            _extract_first_frame_png(mp4_target, png_target)
+            extract_first_frame_png(mp4_target, png_target)
 
         # Animated 120×120 GIF thumbnail for the GUI tile (QMovie).
         gif_target = target_dir / f"{theme_id}.gif"
@@ -148,16 +148,6 @@ def _run_ffmpeg_or_warn(
             "materialise: %s rc=%d: %s", label, result.returncode,
             result.stderr.decode("utf-8", errors="replace")[:200],
         )
-
-
-def _extract_first_frame_png(mp4: Path, png: Path) -> None:
-    """Write the MP4's first frame to *png*.  Best-effort."""
-    log.info("materialise: extracting first-frame PNG → %s", png)
-    _run_ffmpeg_or_warn(
-        [toolchain.resolve("ffmpeg") or "ffmpeg",
-         "-i", str(mp4), "-vframes", "1", "-y", str(png)],
-        timeout=10, label=f"first-frame PNG for {mp4.name}",
-    )
 
 
 def _generate_animated_gif(mp4: Path, gif: Path) -> None:
