@@ -1,0 +1,20 @@
+# Line endings are OS-independent by decree, not by each contributor's git
+# config.  Without this file the working-tree EOL depends on `core.autocrlf`,
+# an ambient per-machine setting — so a Windows checkout gets CRLF, and any
+# test comparing a committed file byte-for-byte against a freshly generated
+# string (doc/manpage consistency, the diagnostics scan) fails there while
+# passing on Linux.  `encoding="utf-8"` does NOT fix this: encoding and line
+# ending are orthogonal.  Force LF in every working tree on every OS.
+#
+# The 2026-09-12 Windows CI break was the same disease one level up: a byte
+# offset shifted 531 -> 540 because 9 LF newlines became CRLF at checkout.
+
+* text=auto eol=lf
+
+# Binaries: never normalised, never EOL-touched.  `text=auto` already
+# auto-detects these, but declaring them removes the guess.
+*.png  binary
+*.gif  binary
+*.ico  binary
+*.7z   binary
+*.TTC  binary
