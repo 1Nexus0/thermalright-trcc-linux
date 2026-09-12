@@ -1988,7 +1988,15 @@ def _classes_by_file() -> dict[Path, list[ast.ClassDef]]:
         if "__pycache__" in path.parts:
             continue
         try:
-            tree = ast.parse(path.read_text())
+            # ``encoding=`` is not optional: without it the default is the
+            # locale's, which on Windows is the ANSI code page (cp1252) and
+            # cannot decode the box-drawing / em-dash characters 13 of our
+            # sources contain.  ``except SyntaxError`` does not catch
+            # ``UnicodeDecodeError``, so it propagated and failed the Windows
+            # CI job while every Linux job passed -- Qt resets the C locale to
+            # C.UTF-8 when conftest builds the QApplication, which masks it
+            # here.  ``ports.py`` three lines below always did this correctly.
+            tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError:                       # pragma: no cover - not our code
             continue
         found = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
@@ -2190,7 +2198,8 @@ _ENUMERATOR_LOGGERS: dict[str, frozenset[str]] = {
 
 
 def _enumerator_methods() -> dict[str, ast.FunctionDef]:
-    tree = ast.parse((_SRC / "adapters" / "sensors" / "aggregator.py").read_text())
+    tree = ast.parse((_SRC / "adapters" / "sensors" / "aggregator.py")
+                     .read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and node.name == "BaselineSensors":
             return {
