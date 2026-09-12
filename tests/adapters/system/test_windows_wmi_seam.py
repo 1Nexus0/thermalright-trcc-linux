@@ -74,5 +74,5 @@ def test_wmi_handle_raises_without_wmi(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_windows_platform_has_no_direct_wmi_construction() -> None:
     """Every WMI handle in windows.py goes through the wmi_handle seam."""
-    src = Path("src/trcc/adapters/system/windows.py").read_text()
+    src = Path("src/trcc/adapters/system/windows.py").read_text(encoding="utf-8")
     assert "wmi.WMI(" not in src, "construct WMI via wmi_handle(), not wmi.WMI() directly"

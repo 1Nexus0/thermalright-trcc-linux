@@ -159,7 +159,7 @@ def _probe_linux_specifics() -> Section:
         s.skip('rapl', 'no Intel RAPL on this CPU (AMD or kernel <3.13)')
     else:
         try:
-            with rapl.open() as f:
+            with rapl.open(encoding='utf-8') as f:
                 _val = int(f.read().strip())
             s.ok('rapl', f'readable as user (energy_uj = {_val} µJ)')
         except PermissionError:

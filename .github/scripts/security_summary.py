@@ -14,7 +14,7 @@ def main():
 
     if os.path.exists('pip_audit_results.json'):
         try:
-            data = json.load(open('pip_audit_results.json'))
+            data = json.load(open('pip_audit_results.json', encoding='utf-8'))
             vulns = data.get('vulns') or data.get('vulnerabilities') or data
             high = sum(
                 1 for v in vulns
@@ -27,7 +27,7 @@ def main():
 
     if os.path.exists('bandit_report.json'):
         try:
-            data = json.load(open('bandit_report.json'))
+            data = json.load(open('bandit_report.json', encoding='utf-8'))
             results = data.get('results', [])
             high = sum(1 for r in results if r.get('issue_severity', '').upper() == 'HIGH')
             summary['bandit_high'] = high
@@ -37,7 +37,7 @@ def main():
 
     if os.path.exists('safety_report.json'):
         try:
-            data = json.load(open('safety_report.json'))
+            data = json.load(open('safety_report.json', encoding='utf-8'))
             vulns = (data.get('vulnerabilities') if isinstance(data, dict) else data) or []
             total = len(vulns) if isinstance(vulns, list) else 0
             high = sum(
@@ -49,7 +49,7 @@ def main():
         except Exception:
             pass
 
-    with open('security_findings.json', 'w') as f:
+    with open('security_findings.json', 'w', encoding='utf-8') as f:
         json.dump(summary, f)
 
     print('Security summary:')

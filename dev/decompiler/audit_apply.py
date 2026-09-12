@@ -112,7 +112,7 @@ def owning_doc(filename: str) -> Path | None:
 
 def splice(doc: Path, entry: Entry) -> tuple[str, str]:
     """`doc` text with this method's bullet replaced, or appended. (text, how)"""
-    lines = doc.read_text().splitlines(keepends=True)
+    lines = doc.read_text(encoding="utf-8").splitlines(keepends=True)
     want = re.compile(
         rf"^\s*(?:[-*+]|\d+\.)\s+\**`{re.escape(entry.method)}\s*(?:\([^`]*\))?`")
     bullet = entry.markdown.rstrip() + "\n"

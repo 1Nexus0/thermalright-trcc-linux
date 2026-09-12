@@ -964,7 +964,7 @@ def _cpu_is_adl_rpl() -> bool:
     """Rootless: True iff /proc/cpuinfo is an Intel family-6 Alder/Raptor Lake."""
     family = model = None
     try:
-        with Path("/proc/cpuinfo").open() as f:
+        with Path("/proc/cpuinfo").open(encoding="utf-8") as f:
             for line in f:
                 if line.startswith("vendor_id") and "GenuineIntel" not in line:
                     return False

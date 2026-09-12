@@ -105,7 +105,7 @@ def _tally(log_file: Path, before: int, frames: int,
 
     stop = after if end is None else end
     by_site: collections.Counter[str] = collections.Counter()
-    with log_file.open("r", errors="replace") as fh:
+    with log_file.open("r", encoding="utf-8", errors="replace") as fh:
         fh.seek(before)
         while fh.tell() < stop:
             line = fh.readline()

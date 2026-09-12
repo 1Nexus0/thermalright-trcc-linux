@@ -147,7 +147,7 @@ class CSharpSource:
 
     @classmethod
     def read(cls, path: Path) -> CSharpSource:
-        return cls(path.read_text(errors="replace"), path.name)
+        return cls(path.read_text(encoding="utf-8", errors="replace"), path.name)
 
     @property
     def text(self) -> str:

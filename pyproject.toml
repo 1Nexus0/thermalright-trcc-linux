@@ -191,8 +191,21 @@ filterwarnings = [
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# `preview` is required for PLW1514 (unspecified-encoding) — still a preview
+# rule.  `explicit-preview-rules = true` below keeps preview mode from selecting
+# the ~900 OTHER preview findings (E241, E302, …) by prefix — only preview rules
+# named in `select` activate.  It does NOT, however, stop preview from changing
+# the BEHAVIOUR of already-selected stable rules: enabling it surfaced exactly
+# one extra finding, a legitimate F401 (a deliberately-unused import that needed
+# the `# noqa` its sibling line already had), now annotated.  That is the trade:
+# a ruff upgrade could add another such finding, but it fails loudly in CI —
+# never silent — and is the price of gating the encoding class OS-independently.
+preview = true
 
 [tool.ruff.lint]
+# Opt in to preview rules ONE at a time; without this, `preview = true` would
+# enable every preview rule in the selected families.
+explicit-preview-rules = true
 select = [
     "E",     # pycodestyle errors
     "F",     # pyflakes
@@ -206,6 +219,7 @@ select = [
     "FA",    # flake8-future-annotations (require `from __future__ import annotations`)
     "PTH",   # flake8-use-pathlib (prefer pathlib over os.path)
     "TID251", # flake8-tidy-imports banned-api — UI cannot import past the Trcc seam (TID252 left off — relative imports are fine in this codebase)
+    "PLW1514", # unspecified-encoding — read_text/open without encoding= inherits the locale (cp1252 on Windows). Preview rule; see `preview`/`explicit-preview-rules` above. OS-independence: broke Windows CI 2026-09-12.
 ]
 ignore = [
     "E501",   # line length — wrapping not always clearer

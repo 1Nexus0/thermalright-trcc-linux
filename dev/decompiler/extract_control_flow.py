@@ -158,7 +158,7 @@ def _test_before(stmt: str, q: int) -> str:
 
 
 def scan_file(path: Path) -> list[Method]:
-    lines = path.read_text(errors="replace").splitlines(keepends=True)
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
     # 1) method signature lines (interval boundaries)
     sigs: list[tuple[int, str]] = []
     for i, line in enumerate(lines):

@@ -15,11 +15,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def _sub(path: Path, pattern: str, repl: str) -> None:
     """Regex-replace in file. Raises if no match found."""
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     new, n = re.subn(pattern, repl, text, flags=re.MULTILINE)
     if n == 0:
         raise RuntimeError(f"No match for {pattern!r} in {path}")
-    path.write_text(new)
+    path.write_text(new, encoding="utf-8")
     print(f"  {path.relative_to(ROOT)}: {n} replacement(s)")
 
 

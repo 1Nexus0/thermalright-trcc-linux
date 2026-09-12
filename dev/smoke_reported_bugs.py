@@ -373,7 +373,7 @@ def repro_166_linux_import_no_fcntl() -> ReproResult:
         sys.modules.pop(mod, None)
     try:
         with patch.object(builtins, "__import__", _blocker):
-            import trcc.adapters.system.linux
+            import trcc.adapters.system.linux  # noqa: F401 — the import IS the test
             import trcc.adapters.system  # noqa: F401
     except ModuleNotFoundError as e:
         return _bug(f"linux.py pulls fcntl at module top: {e}")

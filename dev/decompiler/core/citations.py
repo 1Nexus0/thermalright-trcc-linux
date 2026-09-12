@@ -216,7 +216,7 @@ def walk(doc: Path, text: str | None = None) -> Iterator[tuple[str, list[Hit]]]:
     """
     current: str | None = None
     in_fence = False
-    for raw in (text if text is not None else doc.read_text()).splitlines():
+    for raw in (text if text is not None else doc.read_text(encoding="utf-8")).splitlines():
         if raw.lstrip().startswith(_FENCE):
             in_fence = not in_fence
             yield raw, []
@@ -262,7 +262,7 @@ def documented(doc: Path) -> frozenset[str]:
     checked for staleness.
     """
     return frozenset(
-        m.group(1) for raw in doc.read_text().splitlines()
+        m.group(1) for raw in doc.read_text(encoding="utf-8").splitlines()
         if (m := _SUBJECT.match(raw)) and m.group(1) not in _NOT_A_NAME
     )
 
@@ -275,7 +275,7 @@ def files_mentioned(doc: Path) -> frozenset[str]:
     whichever file was mentioned last.  The mentioned set is what a method-named
     citation may legitimately be checked against.
     """
-    return frozenset(_CSFILE.findall(doc.read_text()))
+    return frozenset(_CSFILE.findall(doc.read_text(encoding="utf-8")))
 
 
 def parse_all(docs: Iterable[Path]) -> list[Citation]:

@@ -46,7 +46,7 @@ def test_audit_docs_exist() -> None:
 @pytest.mark.parametrize("doc", _DOCS, ids=lambda p: p.name)
 def test_doc_records_which_release_it_describes(doc: Path) -> None:
     """Each doc carries a state block naming its origin and what it addresses."""
-    state = audit_release.State.read(doc.read_text())
+    state = audit_release.State.read(doc.read_text(encoding="utf-8"))
     assert state is not None, (
         f"{doc.name} has no audit-state block — run: "
         f"python3.12 dev/decompiler/audit_release.py --rebase"
@@ -63,7 +63,7 @@ def test_doc_names_no_release_outside_its_state_block(doc: Path) -> None:
     version in a title is false for half of it. That is exactly how the original
     "TRCC 2.1.6" label came to be wrong.
     """
-    prose = audit_release._STATE_RE.sub("", doc.read_text())
+    prose = audit_release._STATE_RE.sub("", doc.read_text(encoding="utf-8"))
     named = sorted(set(audit_release._VERSION_ANY.findall(prose)))
     assert not named, (
         f"{doc.name} names TRCC {', '.join(named)} in prose. Only the "
@@ -81,7 +81,7 @@ def test_citations_resolve_in_the_release_the_doc_addresses(doc: Path) -> None:
     `known-bad` list — recomputing "was this already broken?" would wave through
     a citation corrupted to line 9999, because a bogus line fails everywhere.
     """
-    state = audit_release.State.read(doc.read_text())
+    state = audit_release.State.read(doc.read_text(encoding="utf-8"))
     assert state is not None
     if not _TREES:
         pytest.skip(f"no decompile under {DECOMPILE_ROOT.parent}")

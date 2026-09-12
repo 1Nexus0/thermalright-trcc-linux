@@ -364,7 +364,7 @@ def measure_origin(doc: Path, trees: list[Tree]) -> Tree | None:
     citations *after* a rebase is the bug this tool exists to prevent — which is
     why the answer is recorded the moment it is taken.
     """
-    claims = {f: int(n.replace(",", "")) for f, n in _DECLARED.findall(doc.read_text())}
+    claims = {f: int(n.replace(",", "")) for f, n in _DECLARED.findall(doc.read_text(encoding="utf-8"))}
     exact = []
     for tree in trees:
         files = tree.files()

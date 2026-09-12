@@ -1762,7 +1762,7 @@ _PER_FRAME_RATE = 0.5
 def _records_by_site(log_file: Path, start: int) -> dict[str, int]:
     """Count records appended after byte offset *start*, keyed by call site."""
     counts: dict[str, int] = {}
-    with log_file.open("r", errors="replace") as fh:
+    with log_file.open("r", encoding="utf-8", errors="replace") as fh:
         fh.seek(start)
         for line in fh:
             m = re.match(r"^\S+ \w+\s+(\S+?):(\S+?):(\d+):", line)

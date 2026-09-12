@@ -59,7 +59,7 @@ _GPU_TEMP_LABELS = ("pkg", "gpu", "edge", "vram")
 
 def _read_text(path: Path) -> str | None:
     try:
-        return path.read_text().strip()
+        return path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError):
         return None
 

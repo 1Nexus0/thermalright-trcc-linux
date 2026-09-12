@@ -65,7 +65,7 @@ def _specs_from_report(report_path: str) -> list[dict]:
     sys.path.insert(0, str(_REPO_ROOT / 'dev' / 'tools'))
     from diagnose import parse_report  # type: ignore[import-not-found]
 
-    text = Path(report_path).read_text()
+    text = Path(report_path).read_text(encoding='utf-8')
     report = parse_report(text)
     if report.os_name:
         print(f"User OS: {report.os_name}")

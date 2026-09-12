@@ -363,7 +363,7 @@ def _replay_report_actions(app: Any, report_path: str) -> tuple[int, int]:
     from diagnose import parse_dispatch_sequence  # type: ignore[import-not-found]
     from trcc.ipc import decode_command
 
-    seq = parse_dispatch_sequence(Path(report_path).read_text(errors="replace"))
+    seq = parse_dispatch_sequence(Path(report_path).read_text(encoding="utf-8", errors="replace"))
     log.info("mock_gui._replay_report_actions: %d action(s) from %s",
              len(seq), report_path)
     print(f"Replaying {len(seq)} reported action(s) from {report_path}")

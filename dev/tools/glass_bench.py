@@ -87,7 +87,7 @@ def _pinned(cmd: list[str]) -> list[str]:
     """
     if not _PCORES.exists():
         return cmd
-    return ["taskset", "-c", _PCORES.read_text().strip(), *cmd]
+    return ["taskset", "-c", _PCORES.read_text(encoding="utf-8").strip(), *cmd]
 
 
 def _perf_instructions(cmd: list[str], env_src: str | None) -> tuple[int, int, int]:
@@ -103,13 +103,13 @@ def _perf_instructions(cmd: list[str], env_src: str | None) -> tuple[int, int, i
         env["PYTHONPATH"] = env_src
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-    with tempfile.NamedTemporaryFile("r", suffix=".perf") as out:
+    with tempfile.NamedTemporaryFile("r", encoding="utf-8", suffix=".perf") as out:
         proc = subprocess.run(
             ["perf", "stat", "-x,", "-e", "instructions:u", "-o", out.name,
              "--", *_pinned(cmd)],
             env=env, capture_output=True, text=True, check=False,
         )
-        text = Path(out.name).read_text()
+        text = Path(out.name).read_text(encoding="utf-8")
 
     total = 0
     for line in text.splitlines():
@@ -196,13 +196,13 @@ def _selftest() -> None:
 
     def instructions(n: int) -> int:
         cmd = [sys.executable, "-c", f"sum(range({n}))"]
-        with tempfile.NamedTemporaryFile("r", suffix=".perf") as out:
+        with tempfile.NamedTemporaryFile("r", encoding="utf-8", suffix=".perf") as out:
             subprocess.run(
                 ["perf", "stat", "-x,", "-e", "instructions:u", "-o", out.name,
                  "--", *_pinned(cmd)],
                 env=dict(os.environ), capture_output=True, text=True, check=False,
             )
-            text = Path(out.name).read_text()
+            text = Path(out.name).read_text(encoding="utf-8")
         return sum(
             int(re.sub(r"[^0-9]", "", ln.split(",")[0]) or 0)
             for ln in text.splitlines() if "instructions" in ln

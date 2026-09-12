@@ -376,7 +376,7 @@ def main() -> None:
     if path == "-":
         text = sys.stdin.read()
     else:
-        text = Path(path).read_text(errors="replace")
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
 
     report = parse_report(text)
 

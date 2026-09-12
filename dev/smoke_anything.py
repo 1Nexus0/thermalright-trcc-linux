@@ -660,7 +660,7 @@ def _select_devices_from_report(
     report_path: Path,
 ) -> tuple[str, list[tuple[tuple[int, int], ProductInfo]]]:
     """Run probes against every registered device the report mentions."""
-    text = report_path.read_text(errors="replace")
+    text = report_path.read_text(encoding="utf-8", errors="replace")
     os_label = _os_from_report(text)
     pairs = _vid_pids_from_report(text)
     matched = [(vp, ALL_DEVICES[vp]) for vp in pairs if vp in ALL_DEVICES]
