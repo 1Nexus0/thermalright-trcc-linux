@@ -2143,10 +2143,16 @@ def test_role_port_implementations_all_live_in_the_sensors_adapter() -> None:
     the scan to ``adapters/sensors`` would make a stray implementation
     invisible to the gate above rather than failing it.
     """
+    # ``as_posix()``, not ``str()``: on Windows ``str()`` renders
+    # ``adapters\\sensors\\hwmon.py``, so the forward-slash prefix matched
+    # NOTHING and all 12 files were reported stray -- the gate inverted rather
+    # than failing to run.  Same family as the missing ``encoding=`` above: a
+    # value inherited from the platform instead of named.
+    # ``test_architecture_boundaries.py`` uses ``as_posix()`` for exactly this.
     stray = [
-        str(path.relative_to(_SRC))
+        path.relative_to(_SRC).as_posix()
         for path in _role_implementations()
-        if not str(path.relative_to(_SRC)).startswith("adapters/sensors/")
+        if not path.relative_to(_SRC).as_posix().startswith("adapters/sensors/")
     ]
     assert not stray, (
         "role-port implementations outside adapters/sensors -- either move "
