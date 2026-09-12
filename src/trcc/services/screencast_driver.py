@@ -25,63 +25,24 @@ running and keep capturing for a disconnected device; ``App`` removes both.
 from __future__ import annotations
 
 import logging
-import threading
-from typing import TYPE_CHECKING
 
 from ..core.logs import per_frame
 from ..core.models import SCREENCAST_TICK_S
-from ..core.ports import SendTask
-
-if TYPE_CHECKING:                                    # pragma: no cover
-    from ..app import App
+from ._send_task import BaseSendTask
 
 log = logging.getLogger(__name__)
 frame_log = per_frame(__name__)
 
-#: Re-exported from core, which owns it — a Command's default argument cannot
-#: reach a function-local import, and both need the same number.
-TICK_S = SCREENCAST_TICK_S
 
-#: Prefix that keeps this out of the device's own scheduler slot.
-KEY_PREFIX = "screencast:"
+class ScreencastDriver(BaseSendTask):
+    """Dispatches ``CaptureScreencastFrame`` for one device, every tick.
 
+    Namespace + cadence + ``run_once``; the wait/wake/key machinery is
+    :class:`~trcc.services._send_task.BaseSendTask`.
+    """
 
-def task_key(device_key: str) -> str:
-    """The scheduler key for *device_key*'s screencast driver."""
-    key = f"{KEY_PREFIX}{device_key}"
-    log.debug("task_key: %s → %s", device_key, key)
-    return key
-
-
-class ScreencastDriver(SendTask):
-    """Dispatches ``CaptureScreencastFrame`` for one device, every tick."""
-
-    def __init__(self, app: App, device_key: str,
-                 interval_s: float = TICK_S) -> None:
-        log.info("ScreencastDriver: %s every %.0f ms",
-                 device_key, interval_s * 1000)
-        self._app = app
-        self._device_key = device_key
-        self._interval = interval_s
-        self._wake = threading.Event()
-
-    @property
-    def key(self) -> str:
-        """The NAMESPACED scheduler key — see the module docstring."""
-        log.debug("ScreencastDriver.key: %s", self._device_key)
-        return task_key(self._device_key)
-
-    def wait(self, timeout: float) -> None:
-        """Block until woken or *timeout* elapses."""
-        frame_log.debug("ScreencastDriver.wait: %s %.3fs",
-                        self._device_key, timeout)
-        self._wake.wait(timeout)
-        self._wake.clear()
-
-    def wake(self) -> None:
-        """Interrupt a pending :meth:`wait` (scheduler teardown)."""
-        frame_log.debug("ScreencastDriver.wake: %s", self._device_key)
-        self._wake.set()
+    KEY_PREFIX = "screencast:"
+    DEFAULT_INTERVAL_S = SCREENCAST_TICK_S
 
     def run_once(self, now: float) -> float:
         """Capture one frame; return the seconds to wait before the next.
@@ -98,3 +59,15 @@ class ScreencastDriver(SendTask):
         frame_log.debug("ScreencastDriver.run_once: %s ok=%s",
                         self._device_key, result.ok)
         return self._interval
+
+
+def task_key(device_key: str) -> str:
+    """The scheduler key for *device_key*'s screencast driver (public helper).
+
+    A namespaced key for callers that only have the device key, not a driver
+    instance (``App.stop_sender`` removing both driver slots, the Commands
+    registering/removing a task).  Single source: the class attribute.
+    """
+    key = f"{ScreencastDriver.KEY_PREFIX}{device_key}"
+    log.debug("task_key: %s → %s", device_key, key)
+    return key

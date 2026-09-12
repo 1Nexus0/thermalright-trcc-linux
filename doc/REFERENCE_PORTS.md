@@ -6,10 +6,11 @@ Every abstract contract in the tree: what a new implementation must write, what 
 
 Ordered **cheapest to extend first** — the ports at the top are where this codebase welcomes a contributor, the ones at the bottom are where it does not yet.
 
-39 ports.
+40 ports.
 
 | port | implement | inherit | implementations |
 |---|---|---|---|
+| [`BaseSendTask`](#basesendtask) | 1 | 3 | 2 |
 | [`Command`](#command) | 1 | 0 | 144 |
 | [`DataInstaller`](#datainstaller) | 1 | 0 | 1 |
 | [`HttpFetcher`](#httpfetcher) | 1 | 0 | 1 |
@@ -51,6 +52,22 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | [`ContentStore`](#contentstore) | 26 | 0 | 1 |
 
 ---
+
+## BaseSendTask
+
+`services/_send_task.py`
+
+A :class:`SendTask` driven on a fixed cadence for one device.
+
+**You implement (1):**
+
+```python
+run_once(now: 'float') -> float
+```
+
+**You inherit (3):** `key` · `wait` · `wake`
+
+**Implementations (2):** `ScreencastDriver` · `SlideshowDriver`
 
 ## Command
 

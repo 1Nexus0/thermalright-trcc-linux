@@ -31,63 +31,24 @@ nothing displayed, so it resolves the same way ``RestoreLastTheme`` does, with
 from __future__ import annotations
 
 import logging
-import threading
-from typing import TYPE_CHECKING
 
 from ..core.logs import per_frame
 from ..core.models import SLIDESHOW_POLL_S
-from ..core.ports import SendTask
-
-if TYPE_CHECKING:                                    # pragma: no cover
-    from ..app import App
+from ._send_task import BaseSendTask
 
 log = logging.getLogger(__name__)
 frame_log = per_frame(__name__)
 
-#: Re-exported from core, which owns it — a Command's default argument cannot
-#: reach a function-local import, and both need the same number.
-POLL_S = SLIDESHOW_POLL_S
 
-#: Prefix that keeps this out of the device's own scheduler slot.
-KEY_PREFIX = "slideshow:"
+class SlideshowDriver(BaseSendTask):
+    """Asks ``AdvanceSlideshow`` whether a rotation is due, and loads it.
 
+    Namespace + cadence + ``run_once``; the wait/wake/key machinery is
+    :class:`~trcc.services._send_task.BaseSendTask`.
+    """
 
-def task_key(device_key: str) -> str:
-    """The scheduler key for *device_key*'s slideshow driver."""
-    key = f"{KEY_PREFIX}{device_key}"
-    log.debug("task_key: %s → %s", device_key, key)
-    return key
-
-
-class SlideshowDriver(SendTask):
-    """Asks ``AdvanceSlideshow`` whether a rotation is due, and loads it."""
-
-    def __init__(self, app: App, device_key: str,
-                 interval_s: float = POLL_S) -> None:
-        log.info("SlideshowDriver: %s polling every %.0f ms",
-                 device_key, interval_s * 1000)
-        self._app = app
-        self._device_key = device_key
-        self._interval = interval_s
-        self._wake = threading.Event()
-
-    @property
-    def key(self) -> str:
-        """The NAMESPACED scheduler key — see the module docstring."""
-        log.debug("SlideshowDriver.key: %s", self._device_key)
-        return task_key(self._device_key)
-
-    def wait(self, timeout: float) -> None:
-        """Block until woken or *timeout* elapses."""
-        frame_log.debug("SlideshowDriver.wait: %s %.3fs",
-                        self._device_key, timeout)
-        self._wake.wait(timeout)
-        self._wake.clear()
-
-    def wake(self) -> None:
-        """Interrupt a pending :meth:`wait` (scheduler teardown)."""
-        frame_log.debug("SlideshowDriver.wake: %s", self._device_key)
-        self._wake.set()
+    KEY_PREFIX = "slideshow:"
+    DEFAULT_INTERVAL_S = SLIDESHOW_POLL_S
 
     def run_once(self, now: float) -> float:
         """Rotate if due; return the seconds to wait before asking again.
@@ -125,3 +86,15 @@ class SlideshowDriver(SendTask):
         log.info("SlideshowDriver: %s → %s (ok=%s)",
                  self._device_key, result.theme_name, load.ok)
         return self._interval
+
+
+def task_key(device_key: str) -> str:
+    """The scheduler key for *device_key*'s slideshow driver (public helper).
+
+    For callers that hold the device key but no driver instance (``App``
+    removing both slots, the Commands registering/removing a task).  Single
+    source: the class attribute.
+    """
+    key = f"{SlideshowDriver.KEY_PREFIX}{device_key}"
+    log.debug("task_key: %s → %s", device_key, key)
+    return key
