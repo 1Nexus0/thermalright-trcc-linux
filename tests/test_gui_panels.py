@@ -71,7 +71,6 @@ def test_bus_bridge_subscribes_to_every_event_type(qapp: object) -> None:
     """Constructing BusBridge wires one subscription per declared event
     type.  Crashing here means a misnamed Signal or missing event
     import in bus_bridge.py."""
-    del qapp
     from trcc.core.events import EventBus
     from trcc.ui.bus_bridge import BusBridge
 
@@ -91,7 +90,6 @@ def test_bus_bridge_subscribes_to_every_event_type(qapp: object) -> None:
 def test_bus_bridge_forwards_events_to_qt_signals(qapp: object) -> None:
     """End-to-end: publishing an Event on the bus must arrive on the
     matching Qt signal.  Smokes the subscribe → emit pipeline."""
-    del qapp
     from trcc.core.events import DeviceConnected, EventBus
     from trcc.ui.bus_bridge import BusBridge
 
@@ -140,7 +138,6 @@ def test_uc_device_overflow_scrolls_within_fixed_area(qapp: object) -> None:
     scroll area's own geometry never changes, so the sidebar stays in its
     allotted space and never pushes the sensor/about buttons.
     """
-    del qapp
     from trcc.ui.gui.assets import _PKG_ASSETS_DIR, set_assets_dir
     from trcc.ui.gui.constants import Layout
     from trcc.ui.gui.uc_device import UCDevice
@@ -204,7 +201,6 @@ def test_list_gpus_no_gpus_does_not_crash(tmp_home: Path) -> None:
 def test_uc_about_gpu_widget_label_and_dropdown(qapp: object) -> None:
     """UCAbout shows the GPU name (not 'No GPU detected') for one GPU and a
     list-select dropdown for multiple."""
-    del qapp
     from trcc.ui.gui.assets import _PKG_ASSETS_DIR, set_assets_dir
     from trcc.ui.gui.uc_about import UCAbout
     set_assets_dir(_PKG_ASSETS_DIR)
@@ -227,7 +223,6 @@ def test_sensor_picker_renders_hardware_metrics(
     (``ReadSensors``) for identities AND values in one call, so a daemon-mode
     client can open it.
     """
-    del qapp
     from trcc.ui.gui.assets import _PKG_ASSETS_DIR, set_assets_dir
     from trcc.ui.gui.uc_sensor_picker import SensorPickerDialog
     set_assets_dir(_PKG_ASSETS_DIR)
@@ -525,7 +520,6 @@ def test_overlay_grid_loads_metric_and_edits_persist(
     edit payload carried no id so SetOverlayConfig rejected it (colour/drag
     never applied).  This drives the real widget + Command bus end to end.
     """
-    del qapp
     from trcc.core.commands import SetOverlayConfig
     from trcc.ui.gui.overlay_grid import OverlayGridPanel
 
@@ -977,7 +971,6 @@ def test_color_wheel_emits_hue_on_click(qapp: object) -> None:
     wheel.set_hue(120)
     assert wheel.hue() == 120
     assert received == []
-    del qapp
 
 
 def test_image_crop_dialog_renders_target_size(qapp: object, tmp_path) -> None:
@@ -999,7 +992,6 @@ def test_image_crop_dialog_renders_target_size(qapp: object, tmp_path) -> None:
     assert cropped is not None
     assert cropped.width() == 120
     assert cropped.height() == 80
-    del qapp
     del tmp_path
 
 
@@ -1013,7 +1005,6 @@ def test_splash_make_returns_widget_with_fallback(qapp: object) -> None:
     splash = make_splash()
     assert hasattr(splash, "show")
     assert hasattr(splash, "close")
-    del qapp
 
 
 def test_video_exporter_rejects_missing_source(tmp_path) -> None:
@@ -1154,7 +1145,6 @@ def test_led_color_tab_refresh(gui_app: App, qapp: object) -> None:
     assert tab._g.value() == 200
     assert tab._b.value() == 60
     assert tab._brightness.value() == 42
-    del qapp
 
 
 def test_led_color_tab_apply_dispatches_commands(
@@ -1170,7 +1160,6 @@ def test_led_color_tab_apply_dispatches_commands(
     settings = gui_app.settings.for_led(_led_key())
     assert settings.color == (255, 128, 0)
     assert settings.brightness == 77
-    del qapp
 
 
 def test_led_mode_tab_selects_radio_for_persisted_mode(
@@ -1183,7 +1172,6 @@ def test_led_mode_tab_selects_radio_for_persisted_mode(
     tab = ModeTab(gui_app, _led_key)
     tab.refresh_from(_snap(mode=LEDMode.RAINBOW.name))
     assert tab._radios[LEDMode.RAINBOW].isChecked()
-    del qapp
 
 
 def test_led_zone_tab_hides_for_single_zone(
@@ -1195,7 +1183,6 @@ def test_led_zone_tab_hides_for_single_zone(
     tab = ZoneTab(gui_app, _led_key)
     tab.refresh_from(_snap(zones=()))
     assert tab.has_visible_content() is False
-    del qapp
 
 
 def test_led_zone_tab_builds_rows_for_multi_zone(
@@ -1216,7 +1203,6 @@ def test_led_zone_tab_builds_rows_for_multi_zone(
     ))
     assert tab.has_visible_content() is True
     assert len(tab._zone_widgets) == 3
-    del qapp
 
 
 def test_led_segment_tab_hides_when_no_segments(
@@ -1228,7 +1214,6 @@ def test_led_segment_tab_hides_when_no_segments(
     tab = SegmentTab(gui_app, _led_key)
     tab.refresh_from(_snap(segment_on=()))
     assert tab.has_visible_content() is False
-    del qapp
 
 
 def test_led_segment_tab_builds_checks(gui_app: App, qapp: object) -> None:
@@ -1241,7 +1226,6 @@ def test_led_segment_tab_builds_checks(gui_app: App, qapp: object) -> None:
     assert len(tab._checks) == 5
     assert tab._checks[0].isChecked() is True
     assert tab._checks[1].isChecked() is False
-    del qapp
 
 
 def test_led_advanced_tab_refreshes_radio_state(
@@ -1260,7 +1244,6 @@ def test_led_advanced_tab_refreshes_radio_state(
     assert tab._test_check.isChecked()
     assert not tab._clock_24h.isChecked()
     assert tab._week_sunday.isChecked()
-    del qapp
 
 
 def test_led_panel_constructs_with_tabs(gui_app: App, qapp: object) -> None:
@@ -1277,7 +1260,6 @@ def test_led_panel_constructs_with_tabs(gui_app: App, qapp: object) -> None:
     # on device — start hidden).
     visible_tab_count = panel._tabs.count()
     assert visible_tab_count >= 3
-    del qapp
 
 
 # =========================================================================
@@ -1296,7 +1278,6 @@ def test_device_picker_populates_from_app(gui_app: App, qapp: object) -> None:
     # Programmatic set + read round-trips without emitting.
     picker.set_key("0402:3922")
     assert picker.current_key() == "0402:3922"
-    del qapp
 
 
 def test_device_picker_emits_key_changed_on_text_finished(
@@ -1313,7 +1294,6 @@ def test_device_picker_emits_key_changed_on_text_finished(
     line_edit.setText("0416:8001")
     line_edit.editingFinished.emit()
     assert received[-1] == "0416:8001"
-    del qapp
 
 
 def test_device_picker_selected_item_yields_key_not_label(
@@ -1341,7 +1321,6 @@ def test_device_picker_selected_item_yields_key_not_label(
     picker._populate_from_app()
     picker._combo.setCurrentIndex(0)   # SELECT the dropdown item — the bug path
     assert picker.current_key() == "87ad:70db"   # the KEY, not the label
-    del qapp
 
 
 def test_mask_browser_position_dispatches_command(
@@ -1357,7 +1336,6 @@ def test_mask_browser_position_dispatches_command(
     panel._on_position_changed()
     settings = gui_app.settings.for_device("0402:3922")
     assert settings.mask_position == (40, 60)
-    del qapp
 
 
 def test_mask_browser_visibility_dispatches_command(
@@ -1373,7 +1351,6 @@ def test_mask_browser_visibility_dispatches_command(
     panel._on_visibility_changed(False)
     settings = gui_app.settings.for_device("0402:3922")
     assert settings.mask_visible is False
-    del qapp
 
 
 # =========================================================================
@@ -1389,7 +1366,6 @@ def test_screencast_panel_constructs(gui_app: App, qapp: object) -> None:
     assert panel is not None
     assert panel._start_btn.isEnabled() is True
     assert panel._stop_btn.isEnabled() is False
-    del qapp
 
 
 def test_screencast_panel_start_without_region_is_a_no_op(
@@ -1403,7 +1379,6 @@ def test_screencast_panel_start_without_region_is_a_no_op(
     panel._on_start()
     assert panel._casting_key is None
     assert "region" in panel._status.text().lower()
-    del qapp
 
 
 def test_screencast_panel_start_without_key_is_a_no_op(
@@ -1417,7 +1392,6 @@ def test_screencast_panel_start_without_key_is_a_no_op(
     panel._on_start()
     assert panel._casting_key is None
     assert "device" in panel._status.text().lower()
-    del qapp
 
 
 def test_screencast_panel_records_picked_region(
@@ -1431,7 +1405,6 @@ def test_screencast_panel_records_picked_region(
     assert panel._region == (40, 60, 320, 240)
     assert "320" in panel._region_label.text()
     assert "240" in panel._region_label.text()
-    del qapp
 
 
 def test_screencast_build_frame_returns_bytes(gui_app: App) -> None:
@@ -1461,7 +1434,258 @@ def test_region_overlay_constructs(qapp: object) -> None:
     overlay = RegionSelectOverlay()
     assert hasattr(overlay, "region_selected")
     assert hasattr(overlay, "cancelled")
-    del qapp
+
+
+# =========================================================================
+# Drag-select overlays — ONE interaction, proven on BOTH skins
+#
+# gui's ``ScreenCaptureOverlay`` and qtgui's ``RegionSelectOverlay`` are the
+# same press-drag-release behaviour; it lives once, in ``DragSelectOverlay``.
+# Before that it was written twice and NOTHING drove it, which is how the two
+# copies came to disagree on their own constants (``_MIN_SELECTION`` vs
+# ``_MIN_EDGE``, same value) and their control flow.  These tests are
+# parametrized over both skins so one shared body is proven for both.
+# =========================================================================
+
+
+#: Skin name -> the drag-select overlay it ships.  Resolved INSIDE the test,
+#: never at decorator time: importing a Qt widget module during collection
+#: runs its class bodies before ``QApplication`` exists.
+_DRAG_SKINS = {
+    "gui": ("trcc.ui.gui.screen_capture", "ScreenCaptureOverlay"),
+    "qtgui": ("trcc.ui.qtgui.region_overlay", "RegionSelectOverlay"),
+}
+
+
+def _drag_overlay(skin: str) -> type:
+    from importlib import import_module
+
+    module, name = _DRAG_SKINS[skin]
+    return getattr(import_module(module), name)
+
+
+def _mouse_event(kind: str, x: int, y: int, button: str, held: str):
+    """Build a QMouseEvent at (x, y) — the non-deprecated QPointF overload."""
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    at = QPointF(x, y)
+    return QMouseEvent(
+        getattr(QMouseEvent.Type, kind), at, at,
+        getattr(Qt.MouseButton, button), getattr(Qt.MouseButton, held),
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def _point(x: int, y: int):
+    from PySide6.QtCore import QPoint
+
+    return QPoint(x, y)
+
+
+def _press(overlay: object, x: int, y: int, button: str = "LeftButton") -> None:
+    overlay.mousePressEvent(  # type: ignore[attr-defined]
+        _mouse_event("MouseButtonPress", x, y, button, button))
+
+
+def _move_to(overlay: object, x: int, y: int) -> None:
+    overlay.mouseMoveEvent(  # type: ignore[attr-defined]
+        _mouse_event("MouseMove", x, y, "NoButton", "LeftButton"))
+
+
+def _release(overlay: object, x: int, y: int) -> None:
+    overlay.mouseReleaseEvent(  # type: ignore[attr-defined]
+        _mouse_event("MouseButtonRelease", x, y, "LeftButton", "NoButton"))
+
+
+def _confirmed_rects(overlay: object) -> list[tuple[int, int, int, int]]:
+    """Subscribe to whichever signal this skin confirms with."""
+    seen: list[tuple[int, int, int, int]] = []
+
+    def _on_region(x: int, y: int, w: int, h: int) -> None:
+        seen.append((x, y, w, h))
+
+    def _on_captured(pixmap: object) -> None:
+        seen.append((0, 0, -1, -1) if pixmap is None else (0, 0, 1, 1))
+
+    if hasattr(overlay, "region_selected"):
+        overlay.region_selected.connect(_on_region)  # type: ignore[attr-defined]
+    else:
+        overlay.captured.connect(_on_captured)  # type: ignore[attr-defined]
+    return seen
+
+
+@pytest.mark.parametrize("skin", sorted(_DRAG_SKINS))
+def test_drag_select_confirms_a_real_drag(skin: str, qtbot) -> None:
+    """Press, drag, release over the minimum edge confirms the rectangle."""
+    overlay = _drag_overlay(skin)()
+    qtbot.addWidget(overlay)
+    seen = _confirmed_rects(overlay)
+
+    _press(overlay, 100, 120)
+    _move_to(overlay, 300, 260)
+    _release(overlay, 300, 260)
+
+    assert len(seen) == 1
+    if hasattr(overlay, "region_selected"):
+        assert seen[0] == (100, 120, 201, 141)
+
+
+@pytest.mark.parametrize("skin", sorted(_DRAG_SKINS))
+def test_drag_select_ignores_a_misclick(skin: str, qtbot) -> None:
+    """A drag shorter than ``_MIN_EDGE`` on either axis confirms nothing."""
+    overlay = _drag_overlay(skin)()
+    qtbot.addWidget(overlay)
+    seen = _confirmed_rects(overlay)
+
+    _press(overlay, 100, 120)
+    _move_to(overlay, 105, 200)          # 5px wide — under the minimum
+    _release(overlay, 105, 200)
+
+    assert seen == []
+    assert overlay._MIN_EDGE == 10       # the shared constant, one spelling
+
+
+#: The same rectangle, dragged from each of its four corners.
+_DIAGONALS = {
+    "down-right": ((100, 120), (300, 260)),
+    "up-left": ((300, 260), (100, 120)),
+    "down-left": ((300, 120), (100, 260)),
+    "up-right": ((100, 260), (300, 120)),
+}
+
+
+@pytest.mark.parametrize("skin", sorted(_DRAG_SKINS))
+@pytest.mark.parametrize("gesture", sorted(_DIAGONALS))
+def test_drag_select_is_direction_independent(skin: str, gesture: str,
+                                              qtbot) -> None:
+    """The same rectangle, whichever corner the drag started from.
+
+    Qt's two-point ``QRect`` is INCLUSIVE of both corners, but
+    ``normalized()`` repairs a negative extent by moving both edges inward.
+    Both skins used to call it, so an up-left drag measured 199x139 at
+    (101, 121) where the identical down-right drag measured 201x141 at
+    (100, 120) — 2px smaller and 1px offset, decided by which way the hand
+    moved.  Nothing drove the interaction, so nothing caught it.
+    """
+    (x0, y0), (x1, y1) = _DIAGONALS[gesture]
+    overlay = _drag_overlay(skin)()
+    qtbot.addWidget(overlay)
+    seen = _confirmed_rects(overlay)
+
+    _press(overlay, x0, y0)
+    _move_to(overlay, x1, y1)
+    _release(overlay, x1, y1)
+
+    assert len(seen) == 1
+    if hasattr(overlay, "region_selected"):
+        assert seen[0] == (100, 120, 201, 141)
+
+
+@pytest.mark.parametrize("skin", sorted(_DRAG_SKINS))
+def test_drag_select_keeps_both_edge_pixels(skin: str, qtbot) -> None:
+    """A drag that starts and ends on one pixel selects that one pixel.
+
+    Pins the inclusive convention the sizes above rest on: 100 to 300 is
+    201 columns because both ends are inside the selection, not 200.
+    """
+    overlay = _drag_overlay(skin)()
+    qtbot.addWidget(overlay)
+    overlay._start = overlay._end = _point(50, 50)
+    assert overlay._selection_rect().width() == 1
+    assert overlay._selection_rect().height() == 1
+
+
+@pytest.mark.parametrize("skin", sorted(_DRAG_SKINS))
+def test_drag_select_right_click_cancels(skin: str, qtbot) -> None:
+    """Right-click routes to the skin's own cancel signal, not a selection."""
+    cancelled: list[bool] = []
+    overlay = _drag_overlay(skin)()
+    qtbot.addWidget(overlay)
+    if hasattr(overlay, "cancelled"):
+        overlay.cancelled.connect(lambda: cancelled.append(True))
+    else:
+        overlay.captured.connect(lambda px: cancelled.append(px is None))
+
+    _press(overlay, 100, 120, button="RightButton")
+
+    assert cancelled == [True]
+
+
+@pytest.mark.parametrize("gesture", sorted(_DIAGONALS))
+def test_screen_capture_crops_the_pixels_that_were_dragged_over(
+    gesture: str, qtbot,
+) -> None:
+    """The gui skin emits the SOURCE pixels inside the rectangle, not just
+    a pixmap of the right size.
+
+    Every pixel of the stand-in screenshot encodes its own coordinates, so
+    the crop names its own provenance: read a corner back and it says which
+    screen pixel it came from.  Sizes alone would pass even if the crop were
+    taken from the wrong origin.
+    """
+    from PySide6.QtGui import QImage, QPixmap
+
+    from trcc.ui.gui.screen_capture import ScreenCaptureOverlay
+
+    width, height = 64, 48
+    shot = QImage(width, height, QImage.Format.Format_RGB32)
+    for y in range(height):
+        for x in range(width):
+            shot.setPixel(x, y, (0xFF << 24) | (x << 16) | (y << 8))
+
+    (x0, y0), (x1, y1) = _DIAGONALS[gesture]
+    # Scale the shared diagonals down into this small stand-in screen.
+    x0, x1, y0, y1 = x0 // 10, x1 // 10, y0 // 10, y1 // 10
+
+    got: list[object] = []
+    overlay = ScreenCaptureOverlay()
+    qtbot.addWidget(overlay)
+    overlay._screenshot = QPixmap.fromImage(shot)
+    overlay.captured.connect(got.append)
+
+    _press(overlay, x0, y0)
+    _move_to(overlay, x1, y1)
+    _release(overlay, x1, y1)
+
+    assert len(got) == 1 and got[0] is not None
+    cropped = got[0].toImage()          # type: ignore[attr-defined]
+    left, right = sorted((x0, x1))
+    top, bottom = sorted((y0, y1))
+    assert (cropped.width(), cropped.height()) == (right - left + 1,
+                                                   bottom - top + 1)
+    for corner_x, corner_y, want in (
+        (0, 0, (left, top)),
+        (cropped.width() - 1, cropped.height() - 1, (right, bottom)),
+    ):
+        colour = cropped.pixelColor(corner_x, corner_y)
+        assert (colour.red(), colour.green()) == want, (
+            f"{gesture}: crop corner ({corner_x}, {corner_y}) came from screen "
+            f"pixel {(colour.red(), colour.green())}, expected {want}"
+        )
+
+
+def test_both_skins_share_one_drag_implementation() -> None:
+    """Neither skin may re-implement the interaction it inherits.
+
+    The gate, not the comment: if a future edit copies press/drag/release
+    back down into a skin, this fails and names the method.
+    """
+    from trcc.ui.screen_overlay import DragSelectOverlay
+
+    shared = ("mousePressEvent", "mouseMoveEvent", "mouseReleaseEvent",
+              "_selection_rect", "paintEvent", "_draw_size_label", "__init__")
+    for skin in sorted(_DRAG_SKINS):
+        overlay_cls = _drag_overlay(skin)
+        assert issubclass(overlay_cls, DragSelectOverlay)
+        redefined = [m for m in shared if m in overlay_cls.__dict__]
+        assert not redefined, (
+            f"{overlay_cls.__name__} re-implements {redefined}, which "
+            f"DragSelectOverlay already owns for every skin."
+        )
+        # ...and each skin DOES say what its own rectangle means.
+        assert "_confirm" in overlay_cls.__dict__
+        assert "_emit_cancel" in overlay_cls.__dict__
 
 
 def test_led_panel_refreshes_on_key_set(gui_app: App, qapp: object) -> None:
@@ -1480,14 +1704,12 @@ def test_led_panel_refreshes_on_key_set(gui_app: App, qapp: object) -> None:
     assert panel._color_tab._r.value() == 50
     assert panel._color_tab._brightness.value() == 33
     assert panel._mode_tab._radios[LEDMode.BREATHING].isChecked()
-    del qapp
 
 
 def test_brightness_slider_debounces_to_one_send(qapp: object) -> None:
     """A brightness drag must coalesce into ONE ``brightness_changed`` emit,
     not one per slider tick — the per-tick flood interleaved with the
     segment-number refresh and glitched the display (#202)."""
-    del qapp
     from PySide6.QtCore import QEventLoop, QTimer
 
     from trcc.ui.gui.assets import _PKG_ASSETS_DIR, set_assets_dir
@@ -1631,3 +1853,110 @@ def test_overlay_editor_does_not_reseed_an_emptied_layer(gui_app: App) -> None:
         "the user deleted has come back"
     )
     assert panel._list.count() == 0
+
+
+# =========================================================================
+# Screencast aspect lock — a BEHAVIOUR gate, not a construction smoke
+#
+# This layer is verified to build, not to compute, and that is exactly how
+# ``_on_coord_changed`` shipped with its multiply and divide the wrong way
+# round: on an 854x480 panel a width of 201 locked the height to 357 where
+# 113 is correct, and square panels were skipped outright by a
+# ``ratio != 1.0`` guard so they never locked at all.  ruff, pyright, the
+# logging ratchet and 4882 tests were all green on it, because none of them
+# look at what a widget COMPUTES.
+#
+# Every panel geometry the device catalog can produce is covered, so a panel
+# added to the catalog without a matching ratio cannot regress silently —
+# which is the other half of the same bug: the ratio used to come from a
+# hardcoded table that had drifted, missing 640x172 entirely and defaulting
+# it to 0.75 where 0.2687 is correct.
+# =========================================================================
+
+
+def _catalog_geometries() -> list[tuple[int, int]]:
+    """Every distinct panel resolution the app can meet, from the registry."""
+    from trcc.core.protocol import FBL_PROFILES
+
+    return sorted({(p.width, p.height) for p in FBL_PROFILES.values()})
+
+
+@pytest.mark.parametrize("panel", _catalog_geometries(),
+                         ids=lambda wh: f"{wh[0]}x{wh[1]}")
+def test_screencast_aspect_lock_matches_the_panel(panel: tuple[int, int],
+                                                  qtbot) -> None:
+    """Typing a width locks the height to the panel's own aspect, both ways.
+
+    The ratio is ``height / width``, so ``height = width * ratio`` and
+    ``width = height / ratio``.  Asserted against the panel geometry itself,
+    never a table — a table is what drifted.
+    """
+    from trcc.ui.gui.display_mode_panels import ScreenCastPanel
+
+    width, height = panel
+    ratio = height / width
+
+    typed_w = ScreenCastPanel()
+    qtbot.addWidget(typed_w)
+    typed_w.set_resolution(width, height)
+    typed_w.entry_w.setText("200")
+    assert typed_w.entry_h.text() == str(round(200 * ratio))
+
+    typed_h = ScreenCastPanel()
+    qtbot.addWidget(typed_h)
+    typed_h.set_resolution(width, height)
+    typed_h.entry_h.setText("200")
+    assert typed_h.entry_w.text() == str(round(200 / ratio))
+
+
+@pytest.mark.parametrize("panel", _catalog_geometries(),
+                         ids=lambda wh: f"{wh[0]}x{wh[1]}")
+def test_screencast_plus_button_keeps_the_region_on_aspect(
+    panel: tuple[int, int], qtbot,
+) -> None:
+    """The gesture a user actually makes: nudge the width with ``+``.
+
+    Drives the button's own handler rather than setting text, because that is
+    the path a click takes and it is where the emitted params come from.
+    """
+    from trcc.ui.gui.display_mode_panels import ScreenCastPanel
+
+    width, height = panel
+    emitted: list[tuple[int, int, int, int]] = []
+    scp = ScreenCastPanel()
+    qtbot.addWidget(scp)
+    scp.set_resolution(width, height)
+    scp.screencast_params_changed.connect(
+        lambda x, y, w, h: emitted.append((x, y, w, h)),
+    )
+    scp.set_values(x=100, y=100, w=200, h=round(200 * height / width))
+
+    scp._increment(scp.entry_w, +1)
+
+    assert emitted, "nudging the width emitted nothing"
+    _, _, got_w, got_h = emitted[-1]
+    assert got_w == 201
+    assert got_h == round(201 * height / width)
+
+
+def test_screencast_does_not_lock_before_a_device_is_known(qtbot) -> None:
+    """With no resolution set the lock stays out of the way.
+
+    ``_get_aspect_ratio`` returns 0.0 rather than a plausible default, so a
+    width typed before any device is attached does not silently write a
+    height computed from somebody else's panel.
+    """
+    from trcc.ui.gui.display_mode_panels import ScreenCastPanel
+
+    scp = ScreenCastPanel()
+    qtbot.addWidget(scp)
+    # None, the same word ``DeviceStateResult.resolution`` uses for it — not a
+    # 0.0 sentinel the panel invented, and not a plausible default ratio.
+    assert scp._get_aspect_ratio() is None
+    scp.entry_w.setText("200")
+    assert scp.entry_h.text() == "0"      # untouched, not invented
+
+    # A device that answers nonsense is the THIRD state and is not the same
+    # as never having asked: it warns, and still declines to lock.
+    scp.set_resolution(0, 0)
+    assert scp._get_aspect_ratio() is None

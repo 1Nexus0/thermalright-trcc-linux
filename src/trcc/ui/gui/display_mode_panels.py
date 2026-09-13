@@ -510,14 +510,6 @@ class ScreenCastPanel(DisplayModePanel):
         " font-family: 'Microsoft YaHei'; font-size: 9pt;"
     )
 
-    # Aspect ratios per resolution
-    _ASPECT_RATIOS = {
-        (240, 240): 1.0, (320, 320): 1.0, (360, 360): 1.0, (480, 480): 1.0,
-        (640, 480): 0.75, (800, 480): 0.6, (854, 480): 0.5621,
-        (960, 540): 0.5625, (1280, 480): 0.375, (1600, 720): 0.45,
-        (1920, 462): 77.0 / 320.0,
-    }
-
     capture_requested = Signal()  # launch screen capture
 
     def __init__(self, parent=None):
@@ -525,7 +517,11 @@ class ScreenCastPanel(DisplayModePanel):
         self._updating = False
         self._show_border = True
         self._aspect_lock = True
-        self._resolution = (0, 0)
+        # None, not (0, 0) — ``DeviceStateResult.resolution`` keeps "we have
+        # not asked the hardware yet" distinct from "a 0x0 panel", and a
+        # presentation that collapses them cannot tell a user with no device
+        # from a user whose device answered nonsense.
+        self._resolution: tuple[int, int] | None = None
         self._setup_screencast_ui()
 
     def _setup_screencast_ui(self):
@@ -617,15 +613,22 @@ class ScreenCastPanel(DisplayModePanel):
         except ValueError:
             return
 
-        if self._aspect_lock and which in ('w', 'h'):
-            ratio = self._get_aspect_ratio()
+        if self._aspect_lock and which in ('w', 'h') and (
+                ratio := self._get_aspect_ratio()):
+            # ratio is height/width, so height = width * ratio and
+            # width = height / ratio.  These were the wrong way round, which
+            # made every non-square panel move the locked edge the WRONG WAY:
+            # on an 854x480 panel a width of 201 produced a height of 357
+            # where 113 is correct.  Square panels were skipped outright by a
+            # ``ratio != 1.0`` guard, so they never locked at all.
             self._updating = True
-            if which == 'w' and ratio != 1.0:
-                h = int(val / ratio)
-                self.entry_h.setText(str(h))
-            elif which == 'h' and ratio != 1.0:
-                w = int(val * ratio)
-                self.entry_w.setText(str(w))
+            if which == 'w':
+                self.entry_h.setText(str(round(val * ratio)))
+            else:
+                self.entry_w.setText(str(round(val / ratio)))
+            log.debug("_on_coord_changed: aspect lock %s=%d ratio=%.4f -> %sx%s",
+                      which, val, ratio,
+                      self.entry_w.text(), self.entry_h.text())
             self._updating = False
 
         self._emit_params()
@@ -641,8 +644,29 @@ class ScreenCastPanel(DisplayModePanel):
         except ValueError:
             pass
 
-    def _get_aspect_ratio(self):
-        return self._ASPECT_RATIOS.get(self._resolution, 0.75)
+    def _get_aspect_ratio(self) -> float | None:
+        """The panel's height/width, or ``None`` before a device is known.
+
+        Derived, not tabulated.  A hardcoded resolution->ratio table used to
+        live here; every one of its 11 entries was exactly ``height / width``,
+        so it was a second copy of geometry this panel is already handed by
+        :meth:`set_resolution` — and it had drifted, missing 640x172 entirely
+        and falling back to a 0.75 default that is 2.8x wrong for that panel.
+
+        ``None`` carries the same meaning it does on
+        ``DeviceStateResult.resolution``, which is where this geometry comes
+        from: nobody has told us yet.  A UI that answered 0.75 anyway would be
+        constraining the user's region to a panel it has not met.
+        """
+        if self._resolution is None:
+            log.debug("_get_aspect_ratio: no device yet — no aspect lock")
+            return None
+        width, height = self._resolution
+        if width <= 0 or height <= 0:
+            log.warning("_get_aspect_ratio: device reported %dx%d — no aspect lock",
+                        width, height)
+            return None
+        return height / width
 
     def _on_border_toggle(self):
         log.debug("_on_border_toggle: show_border=%s→%s", self._show_border, not self._show_border)
@@ -678,7 +702,7 @@ class ScreenCastPanel(DisplayModePanel):
             self.entry_h.setText(str(h))
         self._updating = False
 
-    def set_resolution(self, width, height):
+    def set_resolution(self, width: int, height: int) -> None:
         """Set LCD resolution for aspect ratio calculations."""
         self._resolution = (width, height)
 
