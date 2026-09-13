@@ -77,12 +77,20 @@ import logging_coverage  # noqa: E402  # pyright: ignore[reportMissingImports]
 #: silent table lookup.  Deriving the ratio from the panel geometry the bus
 #: already hands it gave it the branch logs THE RULE asks for — it now says
 #: when no device has been seen, and warns when one reports a 0x0 panel.
+#: 1305 -> 1262 the same day: the sensor ports stopped DEMANDING every quantity
+#: from every backend.  43 method bodies across 28 backends existed only to
+#: write ``return None`` and say "I cannot" — countable, silent, and carrying
+#: no information a reporter could use.  The port now answers None by default
+#: and a backend that has no such sensor simply does not override it, so all 43
+#: are gone.  They are not replaced by 43 silent base methods: the defaults are
+#: docstring-only, which the stub rule above correctly excludes — no body ran,
+#: so nothing happened to report.
 #: 1306 -> 1305 the same day: ``ScreenCastPanel._get_aspect_ratio`` was a
 #: silent table lookup; deriving the ratio from the panel geometry gave it the
 #: branch log THE RULE asks for (it now says when there is no device yet).
 _SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "trcc"
 
-MAX_SILENT = 1305
+MAX_SILENT = 1262
 
 
 def test_logging_coverage_only_improves() -> None:

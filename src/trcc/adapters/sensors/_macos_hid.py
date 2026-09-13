@@ -469,16 +469,6 @@ class MacosHidCpu(CpuSource):
     def temp(self) -> float | None:
         return self._snap.cpu_temp()
 
-    def usage(self) -> float | None:
-        return None
-
-    def freq(self) -> float | None:
-        return None
-
-    def power(self) -> float | None:
-        return None
-
-
 class MacosHidGpu(GpuSource):
     """Apple Silicon integrated GPU temperature via HID hub.
 
@@ -505,20 +495,3 @@ class MacosHidGpu(GpuSource):
     def temp(self) -> float | None:
         return self._snap.gpu_temp()
 
-    def usage(self) -> float | None:
-        return None
-
-    def clock(self) -> float | None:
-        return None
-
-    def power(self) -> float | None:
-        return None
-
-    def fan(self) -> float | None:
-        return None
-
-    def vram_used(self) -> float | None:
-        return None
-
-    def vram_total(self) -> float | None:
-        return None

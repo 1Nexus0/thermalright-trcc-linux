@@ -128,16 +128,6 @@ class SmcCpu(CpuSource):
                 hottest = value
         return hottest
 
-    def usage(self) -> float | None:
-        return None
-
-    def freq(self) -> float | None:
-        return None
-
-    def power(self) -> float | None:
-        return None
-
-
 # =========================================================================
 # SmcGpu — single GPU view via SMC
 # =========================================================================
@@ -201,14 +191,6 @@ class SmcGpu(GpuSource):
 
     # SMC doesn't expose GPU usage / clock / power / fan / vram in any
     # consistent way across Mac generations — those fall through.
-    def usage(self) -> float | None: return None
-    def clock(self) -> float | None: return None
-    def power(self) -> float | None: return None
-    def fan(self) -> float | None: return None
-    def vram_used(self) -> float | None: return None
-    def vram_total(self) -> float | None: return None
-
-
 # =========================================================================
 # SmcFan — one SMC fan key wrapped as a FanSource
 # =========================================================================
@@ -250,12 +232,6 @@ class SmcFan(FanSource):
         if value is None:
             return None
         return int(value)
-
-    def percent(self) -> float | None:
-        # SMC F{i}Mn (min) / F{i}Mx (max) can compute a percent; legacy
-        # didn't bother, and most Mac fan UIs report RPM directly.
-        return None
-
 
 def discover_smc_fans(client: SmcClientPort) -> list[FanSource]:
     """Probe ``FNum`` and materialise one ``SmcFan`` per discovered fan."""

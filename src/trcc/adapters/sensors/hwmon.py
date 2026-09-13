@@ -457,11 +457,6 @@ class IntelGpu(GpuSource):
         # missing file and yields None (#gpu-temp-empty).
         return self._hwmon.read_temp_labeled() if self._hwmon is not None else None
 
-    def usage(self) -> float | None:
-        # i915 exposes gt busy as `gt_cur_freq_mhz` / max ratio — approximate;
-        # proper util requires `intel_gpu_top` which isn't sysfs.  Skip for now.
-        return None
-
     def clock(self) -> float | None:
         if self._drm is None:
             return None
@@ -473,13 +468,6 @@ class IntelGpu(GpuSource):
     def fan(self) -> float | None:
         # Intel iGPUs don't have their own fan.  Arc discrete may.
         return self._hwmon.read_pwm(1) if self._hwmon is not None else None
-
-    def vram_used(self) -> float | None:
-        return None  # Intel GPUs don't expose VRAM accounting through sysfs
-
-    def vram_total(self) -> float | None:
-        return None
-
 
 def discover_amd_gpus(devices: list[HwmonDevice]) -> list[GpuSource]:
     """Find amdgpu hwmon entries, link them to /sys/class/drm cards."""

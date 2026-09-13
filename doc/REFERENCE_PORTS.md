@@ -12,6 +12,7 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 |---|---|---|---|
 | [`BaseSendTask`](#basesendtask) | 1 | 3 | 2 |
 | [`Command`](#command) | 1 | 0 | 144 |
+| [`CpuSource`](#cpusource) | 1 | 4 | 10 |
 | [`DataInstaller`](#datainstaller) | 1 | 0 | 1 |
 | [`HttpFetcher`](#httpfetcher) | 1 | 0 | 1 |
 | [`MissPolicy`](#misspolicy) | 1 | 0 | 2 |
@@ -30,21 +31,20 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | [`Device`](#device) | 3 | 13 | 5 |
 | [`DiskSource`](#disksource) | 3 | 0 | 2 |
 | [`DramSource`](#dramsource) | 3 | 0 | 1 |
+| [`FanSource`](#fansource) | 3 | 1 | 3 |
+| [`GpuSource`](#gpusource) | 3 | 7 | 10 |
 | [`HotplugMonitor`](#hotplugmonitor) | 3 | 0 | 5 |
 | [`SendScheduler`](#sendscheduler) | 3 | 0 | 2 |
 | [`_SharedRotatingFileHandler`](#_sharedrotatingfilehandler) | 3 | 4 | 2 |
 | [`CloudCatalog`](#cloudcatalog) | 4 | 0 | 1 |
-| [`FanSource`](#fansource) | 4 | 0 | 3 |
 | [`MemorySource`](#memorysource) | 4 | 0 | 2 |
 | [`PackageManager`](#packagemanager) | 4 | 0 | 2 |
 | [`Paths`](#paths) | 4 | 9 | 5 |
 | [`SendTask`](#sendtask) | 4 | 0 | 3 |
 | [`BulkTransport`](#bulktransport) | 5 | 0 | 2 |
-| [`CpuSource`](#cpusource) | 5 | 0 | 10 |
 | [`ScsiTransport`](#scsitransport) | 5 | 0 | 3 |
 | [`AutostartManager`](#autostartmanager) | 6 | 0 | 4 |
 | [`Diagnostics`](#diagnostics) | 7 | 0 | 1 |
-| [`GpuSource`](#gpusource) | 10 | 0 | 10 |
 | [`SensorEnumerator`](#sensorenumerator) | 10 | 5 | 1 |
 | [`BaseOS`](#baseos) | 12 | 17 | 8 |
 | [`Renderer`](#renderer) | 15 | 6 | 1 |
@@ -82,6 +82,22 @@ execute(app: 'App') -> R_co
 ```
 
 **Implementations (144):** `AddOverlayElement` · `AdvanceSlideshow` · `ApplyMask` · `BuildPreview` · `CaptureScreencastFrame` · `CheckForUpdate` · `ConfigureSlideshow` · `ConnectDevice` · `ControlCenterSnapshot` · `CurrentFrame` · `DaemonStatus` · `DeleteOverlayElement` · `DeleteTheme` · `DeviceConnectionIssues` · `DeviceState` · `DisableAutostart` · `DisconnectDevice` · `DiscoverDevices` · `DownloadCloudTheme` · `EnableAutostart` · `EnableLedTestMode` · `EnableOverlay` · `EnsureConnected` · `EnsureDaemon` · `EnsureDataDownload` · `ExportConfig` · `ExportDcTheme` · `ExportOverlay` · `ExportTheme` · `ExportVideoClip` · `FlashOverlayElement` · `GenerateDebugReport` · `GetAutostartStatus` · `GetFirstRunStatus` · `GetPaths` · `GetPlatformInfo` · `GetSensorDashboard` · `ImportConfig` · `ImportTheme` · `InitializeLed` · `KeepAliveLoop` · `LcdSnapshot` · `LedSnapshot` · `ListCloudThemes` · `ListDevices` · `ListDiskSensors` · `ListDisks` · `ListFans` · `ListFonts` · `ListGpus` · `ListLanguages` · `ListLedModes` · `ListLedStyles` · `ListMasks` · `ListMemorySlots` · `ListSensors` · `ListThemes` · `ListWebThemes` · `LoadCloudTheme` · `LoadImage` · `LoadTheme` · `LoadVideo` · `LoopVideo` · `MarkFirstRunDone` · `OrientedThemeTarget` · `PauseVideo` · `PlayVideo` · `PreviewSize` · `ProbeVideoDuration` · `ReadSensors` · `RefreshAutostart` · `RenderAndSend` · `RenderDcStandalone` · `RenderLed` · `ResetDevice` · `ResolveOverlay` · `ResolveThemeDirectories` · `RestoreDeviceState` · `RestoreLastTheme` · `RunDoctor` · `RunHealthCheck` · `RunQuickstart` · `RunSetup` · `RunUpgrade` · `SaveTheme` · `SeekVideo` · `SelectZone` · `SendColor` · `SendFrame` · `SendImage` · `SendScreencastFrame` · `SetBackground` · `SetBackgroundMode` · `SetBrightness` · `SetClockFormat` · `SetDateFormat` · `SetDiskDevice` · `SetFitMode` · `SetGpuDevice` · `SetHddEnabled` · `SetLanguage` · `SetLedBrightness` · `SetLedColor` · `SetLedColors` · `SetLedLoadSource` · `SetLedMode` · `SetLedTempSource` · `SetLedZoneBrightness` · `SetLedZoneColor` · `SetLedZoneMode` · `SetLedZoneSync` · `SetLedZoneSyncInterval` · `SetLedZoneSyncZones` · `SetMaskPosition` · `SetMaskVisible` · `SetMediaPlayer` · `SetMemoryRatio` · `SetOrientation` · `SetOverlayBackground` · `SetOverlayConfig` · `SetRefreshInterval` · `SetSensorDashboard` · `SetSlideshow` · `SetSplitMode` · `SetTempUnit` · `SetTimeFormat` · `SetWeekStart` · `SleepDevice` · `StartScreencast` · `StartScreencastDriver` · `StartSlideshowDriver` · `StopDaemon` · `StopScreencast` · `StopScreencastDriver` · `StopSlideshowDriver` · `StopVideo` · `TickDisplay` · `ToggleLed` · `ToggleSegment` · `ToggleVideo` · `UpdateOverlayElement` · `UploadBootAnimation` · `UploadCustomMask` · `VideoStatus`
+
+## CpuSource
+
+`core/ports.py`
+
+Primary CPU.  usage/freq nearly always present; temp/power may be None.
+
+**You implement (1):**
+
+```python
+name() -> str
+```
+
+**You inherit (4):** `freq` · `power` · `temp` · `usage`
+
+**Implementations (10):** `CpuSourceChain` · `HwinfoCpu` · `HwmonCpu` · `LhmCpu` · `MacosHidCpu` · `PowermetricsCpu` · `PsutilCpu` · `SmcCpu` · `SysctlCpu` · `WmiAcpiCpu`
 
 ## DataInstaller
 
@@ -366,6 +382,42 @@ temp() -> float | None
 
 **Implementations (1):** `HwmonDram`
 
+## FanSource
+
+`core/ports.py`
+
+One fan — may be role-mapped (cpu/gpu/sys1) or anonymous.
+
+**You implement (3):**
+
+```python
+key() -> str
+name() -> str
+rpm() -> int | None
+```
+
+**You inherit (1):** `percent`
+
+**Implementations (3):** `HwmonFan` · `SmcFan` · `SysctlFan`
+
+## GpuSource
+
+`core/ports.py`
+
+One GPU — NVIDIA/AMD/Intel/Apple, discrete or integrated.
+
+**You implement (3):**
+
+```python
+is_discrete() -> bool
+key() -> str
+name() -> str
+```
+
+**You inherit (7):** `clock` · `fan` · `power` · `temp` · `usage` · `vram_total` · `vram_used`
+
+**Implementations (10):** `AmdGpu` · `GpuSourceChain` · `HwinfoGpu` · `IntelGpu` · `LhmGpu` · `MacosHidGpu` · `NvidiaGpu` · `PowermetricsGpu` · `SmcGpu` · `WmiVideoControllerGpu`
+
 ## HotplugMonitor
 
 `core/ports.py`
@@ -432,23 +484,6 @@ list_themes(category: 'str' = 'all') -> list[CloudThemeEntry]
 ```
 
 **Implementations (1):** `CzhordeCatalog`
-
-## FanSource
-
-`core/ports.py`
-
-One fan — may be role-mapped (cpu/gpu/sys1) or anonymous.
-
-**You implement (4):**
-
-```python
-key() -> str
-name() -> str
-percent() -> float | None
-rpm() -> int | None
-```
-
-**Implementations (3):** `HwmonFan` · `SmcFan` · `SysctlFan`
 
 ## MemorySource
 
@@ -540,24 +575,6 @@ write(endpoint: 'int', data: 'WriteBuffer', timeout_ms: 'int' = 100) -> int
 
 **Implementations (2):** `HidApiTransport` · `PyUsbBulkTransport`
 
-## CpuSource
-
-`core/ports.py`
-
-Primary CPU.  usage/freq nearly always present; temp/power may be None.
-
-**You implement (5):**
-
-```python
-freq() -> float | None
-name() -> str
-power() -> float | None
-temp() -> float | None
-usage() -> float | None
-```
-
-**Implementations (10):** `CpuSourceChain` · `HwinfoCpu` · `HwmonCpu` · `LhmCpu` · `MacosHidCpu` · `PowermetricsCpu` · `PsutilCpu` · `SmcCpu` · `SysctlCpu` · `WmiAcpiCpu`
-
 ## ScsiTransport
 
 `core/ports.py`
@@ -614,29 +631,6 @@ write_debug_report(rendered: 'str', path: 'Path') -> Path
 ```
 
 **Implementations (1):** `DiagnosticsAdapter`
-
-## GpuSource
-
-`core/ports.py`
-
-One GPU — NVIDIA/AMD/Intel/Apple, discrete or integrated.
-
-**You implement (10):**
-
-```python
-clock() -> float | None
-fan() -> float | None
-is_discrete() -> bool
-key() -> str
-name() -> str
-power() -> float | None
-temp() -> float | None
-usage() -> float | None
-vram_total() -> float | None
-vram_used() -> float | None
-```
-
-**Implementations (10):** `AmdGpu` · `GpuSourceChain` · `HwinfoGpu` · `IntelGpu` · `LhmGpu` · `MacosHidGpu` · `NvidiaGpu` · `PowermetricsGpu` · `SmcGpu` · `WmiVideoControllerGpu`
 
 ## SensorEnumerator
 

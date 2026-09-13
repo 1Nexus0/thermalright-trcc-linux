@@ -435,6 +435,25 @@ class Device(ABC, Generic[T]):
 #     fan:cpu:rpm  fan:gpu:percent
 
 
+# A quantity method below that carries a BODY instead of ``@abstractmethod`` is
+# optional: its default answers ``None``, and a backend that cannot read it
+# simply does not override it.  Each one is optional because a real backend
+# demonstrated it cannot answer — ``WmiVideoControllerGpu`` reads 1 of GpuSource's
+# 8, ``SmcCpu`` 1 of CpuSource's 4 — and before this the contract demanded all of
+# them, so 43 method bodies across 28 backends existed only to write
+# ``return None`` and say "I cannot".  That is not an implementation; it is the
+# contract being wrong, and it cost more than noise: a backend could satisfy the
+# ABC by stubbing a sensor it had simply never wired up, and nothing could tell
+# that apart from hardware that genuinely lacks it.
+#
+# The defaults are docstring-only on purpose.  They return ``None`` implicitly,
+# which is the whole behaviour, and nothing happens in them to log.
+#
+# ``key`` / ``name`` / ``is_discrete`` / ``rpm`` / ``DiskSource.temp`` /
+# ``DramSource.temp`` and every ``MemorySource`` reading stay ABSTRACT: no
+# backend has ever stubbed one, so there is no evidence they are optional, and
+# a source that cannot say what it IS should not be constructible.
+
 class CpuSource(ABC):
     """Primary CPU.  usage/freq nearly always present; temp/power may be None."""
 
@@ -442,21 +461,33 @@ class CpuSource(ABC):
     @abstractmethod
     def name(self) -> str: ...
 
-    @abstractmethod
     def temp(self) -> float | None:
-        """CPU package temperature in °C, or None."""
+        """CPU package temperature in °C.
 
-    @abstractmethod
+        ``None`` is the default and means this backend has no such
+        sensor.  A backend that can read it overrides this.
+        """
+
     def usage(self) -> float | None:
-        """CPU utilization 0-100, or None."""
+        """CPU utilization 0-100.
 
-    @abstractmethod
+        ``None`` is the default and means this backend has no such
+        sensor.  A backend that can read it overrides this.
+        """
+
     def freq(self) -> float | None:
-        """Current CPU frequency in MHz, or None."""
+        """Current CPU frequency in MHz.
 
-    @abstractmethod
+        ``None`` is the default and means this backend has no such
+        sensor.  A backend that can read it overrides this.
+        """
+
     def power(self) -> float | None:
-        """Package power draw in W, or None."""
+        """Package power draw in W.
+
+        ``None`` is the default and means this backend has no such
+        sensor.  A backend that can read it overrides this.
+        """
 
 
 class MemorySource(ABC):
@@ -540,33 +571,54 @@ class GpuSource(IdentifiedSource):
     def is_discrete(self) -> bool:
         """True for dedicated cards, False for iGPUs sharing CPU memory."""
 
-    @abstractmethod
     def temp(self) -> float | None:
-        """Core temperature in °C, or None."""
+        """Core temperature in °C.
 
-    @abstractmethod
+        ``None`` is the default and means this backend has no such
+        sensor.  A backend that can read it overrides this.
+        """
+
     def usage(self) -> float | None:
-        """Utilization 0-100, or None."""
+        """Utilization 0-100.
 
-    @abstractmethod
+        ``None`` is the default and means this backend has no such
+        sensor.  A backend that can read it overrides this.
+        """
+
     def clock(self) -> float | None:
-        """Core clock in MHz, or None."""
+        """Core clock in MHz.
 
-    @abstractmethod
+        ``None`` is the default and means this backend has no such
+        sensor.  A backend that can read it overrides this.
+        """
+
     def power(self) -> float | None:
-        """Board power draw in W, or None."""
+        """Board power draw in W.
 
-    @abstractmethod
+        ``None`` is the default and means this backend has no such
+        sensor.  A backend that can read it overrides this.
+        """
+
     def fan(self) -> float | None:
-        """Fan speed 0-100, or None."""
+        """Fan speed 0-100.
 
-    @abstractmethod
+        ``None`` is the default and means this backend has no such
+        sensor.  A backend that can read it overrides this.
+        """
+
     def vram_used(self) -> float | None:
-        """VRAM used in MB, or None."""
+        """VRAM used in MB.
 
-    @abstractmethod
+        ``None`` is the default and means this backend has no such
+        sensor.  A backend that can read it overrides this.
+        """
+
     def vram_total(self) -> float | None:
-        """VRAM total in MB, or None."""
+        """VRAM total in MB.
+
+        ``None`` is the default and means this backend has no such
+        sensor.  A backend that can read it overrides this.
+        """
 
 
 class FanSource(IdentifiedSource):
@@ -576,9 +628,12 @@ class FanSource(IdentifiedSource):
     def rpm(self) -> int | None:
         """Current RPM, or None."""
 
-    @abstractmethod
     def percent(self) -> float | None:
-        """Duty cycle 0-100, or None."""
+        """Duty cycle 0-100.
+
+        ``None`` is the default and means this backend has no such
+        sensor.  A backend that can read it overrides this.
+        """
 
 
 class DiskSource(IdentifiedSource):

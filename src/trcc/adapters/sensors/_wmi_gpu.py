@@ -71,15 +71,6 @@ class WmiVideoControllerGpu(GpuSource):
     # Win32_VideoController carries no live sensor data — every reading is
     # genuinely unavailable from this backend (AdapterRAM caps at 4 GiB and
     # is unreliable, so VRAM is omitted too).
-    def temp(self) -> float | None: return None
-    def usage(self) -> float | None: return None
-    def clock(self) -> float | None: return None
-    def power(self) -> float | None: return None
-    def fan(self) -> float | None: return None
-    def vram_used(self) -> float | None: return None
-    def vram_total(self) -> float | None: return None
-
-
 def discover_wmi_gpus(
     handle_factory: Callable[[], Any] = _default_handle_factory,
 ) -> list[GpuSource]:

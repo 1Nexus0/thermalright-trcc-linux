@@ -147,16 +147,6 @@ class SysctlCpu(CpuSource):
             log.debug("SysctlCpu.temp: no CPU readings parsed")
         return best
 
-    def usage(self) -> float | None:
-        return None
-
-    def freq(self) -> float | None:
-        return None
-
-    def power(self) -> float | None:
-        return None
-
-
 # ── OpenBSD hw.sensors fan parser ────────────────────────────────────
 
 
@@ -242,11 +232,6 @@ class SysctlFan(FanSource):
                 except (TypeError, ValueError):
                     return None
         return None
-
-    def percent(self) -> float | None:
-        # OpenBSD hw.sensors framework doesn't expose PWM duty cycle.
-        return None
-
 
 def discover_openbsd_fans(
     *,

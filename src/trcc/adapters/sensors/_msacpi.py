@@ -123,11 +123,3 @@ class WmiAcpiCpu(CpuSource):
     # ACPI thermal zones only expose temperature; everything else is None
     # and falls through to the next chain entry.
 
-    def usage(self) -> float | None:
-        return None
-
-    def freq(self) -> float | None:
-        return None
-
-    def power(self) -> float | None:
-        return None

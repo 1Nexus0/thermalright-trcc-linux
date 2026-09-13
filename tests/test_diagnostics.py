@@ -2068,7 +2068,7 @@ def _log_calls(fn: ast.AST) -> list[tuple[int, str, bool]]:
 
 
 def _role_port_members() -> frozenset[str]:
-    """The role ports' abstract member NAMES, read from ``core/ports.py``.
+    """The role ports' DECLARED member names, read from ``core/ports.py``.
 
     These and only these are per-tick BY CONSTRUCTION: ``_poll_once`` calls
     every one of them on every source, every tick.  A role implementation's
@@ -2077,6 +2077,16 @@ def _role_port_members() -> frozenset[str]:
     are exactly the one-shot diagnostics a reporter's log is read for.  An
     earlier draft of this gate scanned every method and failed on that line,
     which is how the over-reach was found before it shipped.
+
+    **Declared, not ABSTRACT.**  This collected only ``@abstractmethod`` names
+    until 2026-09-12, and that made the set a hostage to an unrelated design
+    choice: giving the optional quantities a default body -- so a backend with
+    no such sensor need not write ``return None`` -- dropped ``usage``,
+    ``freq``, ``power``, ``clock``, ``fan``, ``vram_used`` and ``vram_total``
+    out of it, silently narrowing every gate that filters on it.  Nothing
+    failed; the gates just stopped looking at twelve per-tick methods.  A
+    method is per-tick because the poll loop CALLS it, which has nothing to do
+    with whether the port left it abstract.
     """
     tree = ast.parse(
         (_SRC / "core" / "ports.py").read_text(encoding="utf-8"))
@@ -2085,14 +2095,10 @@ def _role_port_members() -> frozenset[str]:
     for node in ast.walk(tree):
         if not (isinstance(node, ast.ClassDef) and node.name in owners):
             continue
-        for fn in node.body:
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            if any((isinstance(d, ast.Name) and d.id == "abstractmethod")
-                   or (isinstance(d, ast.Attribute) and d.attr == "abstractmethod")
-                   for d in fn.decorator_list):
-                names.add(fn.name)
-    assert names, "no abstract role members found — ports.py shape changed"
+        names |= {fn.name for fn in node.body
+                  if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+                  and not fn.name.startswith("_")}
+    assert names, "no role members found — ports.py shape changed"
     return frozenset(names)
 
 
@@ -2133,6 +2139,94 @@ def test_role_port_reads_log_on_the_frame_family() -> None:
         "per-tick sensor reads logging through the ordinary logger -- each of "
         "these writes a record EVERY tick, and the file floor is DEBUG at every "
         "verbosity:\n  " + "\n  ".join(offenders)
+    )
+
+
+#: Every quantity the poll loop reads off a source each tick, measured
+#: 2026-09-12.  A RECORD, because the thing it protects cannot be derived from
+#: the thing it checks: ``_role_port_members`` is the SCOPE of three gates, and
+#: a scope that quietly shrinks disarms them all without failing anything.
+#: That is not hypothetical -- it happened the day this was written.  Giving the
+#: optional quantities a default body dropped seven names out of an
+#: abstract-only helper, and every gate filtering on it simply stopped looking
+#: at them.  Adding a genuinely new quantity to a role port is the one reason to
+#: edit this line, and then the port and this must be edited together.
+_PER_TICK_QUANTITIES = frozenset({
+    "temp", "usage", "freq", "power",                       # CpuSource
+    "clock", "fan", "vram_used", "vram_total", "is_discrete",  # GpuSource
+    "rpm", "percent",                                       # FanSource
+    "used", "available", "total",                           # MemorySource
+    "key", "name",                                          # IdentifiedSource
+})
+
+
+def test_the_role_gate_scope_cannot_silently_shrink() -> None:
+    """The three gates below are only as wide as ``_role_port_members``.
+
+    Nothing else checks that set, so narrowing it disarms them in silence --
+    which is strictly worse than a gate that fails, because a passing suite
+    reads as proof.  Pinning the measured membership means a change that
+    narrows the scope has to say so out loud.
+
+    MUTATION CHECK: restrict ``_role_port_members`` to ``@abstractmethod`` names
+    (as it was until 2026-09-12) and this fails, naming the seven quantities
+    that dropped out.
+    """
+    members = _role_port_members()
+    missing = sorted(_PER_TICK_QUANTITIES - members)
+    assert not missing, (
+        "_role_port_members no longer covers per-tick quantities, so every "
+        "gate filtering on it has silently stopped checking them:\n  "
+        + "\n  ".join(missing)
+    )
+
+
+def test_no_backend_writes_a_bare_return_none() -> None:
+    """A backend must not spell out "I cannot read this" — the port already does.
+
+    The optional quantity methods on ``CpuSource`` / ``GpuSource`` /
+    ``FanSource`` carry a default that answers ``None``, so a backend that has
+    no such sensor simply does not override them.  Before that, the contract
+    demanded every quantity from every backend and **43 method bodies across 28
+    backends existed only to write ``return None``** —
+    ``WmiVideoControllerGpu`` alone carried 7 of them while reading 1.
+
+    **This gate replaces the pressure that removal gave up.**  While the methods
+    were abstract, forgetting one failed at instantiation.  That pressure was
+    worth something and is now gone, so this takes its place — and it is
+    strictly better, because the old pressure was satisfied by typing
+    ``return None``, which is indistinguishable from hardware that genuinely
+    lacks the sensor.  A backend that has not wired a sensor up yet now leaves
+    the method absent, which reads the same way the port's default does and
+    keeps ``_role_implementations`` honest about what each backend truly reads.
+
+    MUTATION CHECK: add ``def usage(self): return None`` to any GpuSource
+    subclass in ``adapters/sensors`` and this fails, naming the class and method.
+    """
+    members = _role_port_members()
+    offenders = []
+    for path, classes in _role_implementations().items():
+        for cls in classes:
+            for fn in [n for n in cls.body
+                       if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                       and n.name in members]:
+                body = [b for b in fn.body
+                        if not (isinstance(b, ast.Expr)
+                                and isinstance(b.value, ast.Constant)
+                                and isinstance(b.value.value, str))]
+                if len(body) != 1 or not isinstance(body[0], ast.Return):
+                    continue
+                value = body[0].value
+                if value is None or (isinstance(value, ast.Constant)
+                                     and value.value is None):
+                    offenders.append(
+                        f"{path.relative_to(_SRC)}:{fn.lineno} "
+                        f"{cls.name}.{fn.name} is a bare `return None`"
+                    )
+    assert not offenders, (
+        "backends spelling out what the port's default already says -- delete "
+        "the method and let the default answer, or implement it:\n  "
+        + "\n  ".join(offenders)
     )
 
 

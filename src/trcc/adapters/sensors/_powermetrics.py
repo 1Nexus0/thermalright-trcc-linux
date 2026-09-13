@@ -345,12 +345,6 @@ class PowermetricsCpu(CpuSource):
     def name(self) -> str:
         return "powermetrics (CPU)"
 
-    def temp(self) -> float | None:
-        return None
-
-    def usage(self) -> float | None:
-        return None
-
     def freq(self) -> float | None:
         return self._snap.get("cpu_freq")
 
@@ -389,9 +383,6 @@ class PowermetricsGpu(GpuSource):
     def is_discrete(self) -> bool:
         return False
 
-    def temp(self) -> float | None:
-        return None
-
     def usage(self) -> float | None:
         return self._snap.get("gpu_busy")
 
@@ -401,11 +392,3 @@ class PowermetricsGpu(GpuSource):
     def power(self) -> float | None:
         return self._snap.get("gpu_power")
 
-    def fan(self) -> float | None:
-        return None
-
-    def vram_used(self) -> float | None:
-        return None
-
-    def vram_total(self) -> float | None:
-        return None

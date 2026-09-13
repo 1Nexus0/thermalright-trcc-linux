@@ -484,10 +484,6 @@ class HwinfoGpu(GpuSource):
             entry_name_contains="memory allocated",
         )
 
-    def vram_total(self) -> float | None:
-        return None  # HWiNFO doesn't publish total VRAM in a stable shape
-
-
 # =========================================================================
 # GPU discovery — one HwinfoGpu per GPU sensor row
 # =========================================================================
