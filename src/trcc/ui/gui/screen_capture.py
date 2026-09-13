@@ -1,7 +1,6 @@
 """
 Screen Capture Overlay — frozen-screen region selection tool.
 
-Matches Windows FormScreenshot functionality but adapted for Linux:
 - Captures full screen (X11 + Wayland compatible)
 - Shows frozen screenshot with dimmed overlay
 - User draws selection rectangle
@@ -9,11 +8,22 @@ Matches Windows FormScreenshot functionality but adapted for Linux:
 
 Works on both X11 and Wayland via fallback chain.
 
+This header used to claim it "matches Windows FormScreenshot".  It does
+not, and 2.1.6 says so: ``FormScreenshot`` is a borderless *viewfinder*
+you drag around — ``MouseMove`` moves the whole Form and ``MouseUp``
+reports only ``Left``/``Top``, which the caller writes into the screencast
+panel's X and Y boxes.  Its width and height come from the panel, locked
+to the LCD's aspect, so the Windows user chooses position and never size.
+Grabbing a screen region as an IMAGE has no counterpart there at all —
+2.1.6 loads images from file.  Only the gesture is shared with qtgui's
+region picker, which is why only the gesture lives in
+:class:`DragSelectOverlay`.
+
 The frozen-screen primitives this builds on — ``grab_full_screen``,
 ``is_wayland`` and ``BaseScreenOverlay`` — live in ``ui/screen_overlay``
 and are shared with the qtgui skin.  What stays here is region capture:
-``grab_screen_region`` (the screencast timer's per-tick grab) and the
-drag-a-rectangle ``ScreenCaptureOverlay``.
+``grab_screen_region`` (the screencast timer's per-tick grab) and
+``ScreenCaptureOverlay``, which says what a dragged rectangle means here.
 """
 from __future__ import annotations
 
@@ -22,11 +32,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRect, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
+from PySide6.QtCore import QRect, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
 
-from ..screen_overlay import BaseScreenOverlay, grab_full_screen
+from ..screen_overlay import DragSelectOverlay, grab_full_screen
 
 log = logging.getLogger(__name__)
 
@@ -87,127 +97,33 @@ def grab_screen_region(x: int, y: int, w: int, h: int) -> QPixmap:
     return QPixmap()
 
 
-class ScreenCaptureOverlay(BaseScreenOverlay):
-    """Full-screen overlay for selecting a screen region.
+class ScreenCaptureOverlay(DragSelectOverlay):
+    """Drag out a screen region; emits it as a cropped :class:`QPixmap`.
 
-    Shows a frozen screenshot. User draws a selection rectangle.
-    The selected region is emitted as a QPixmap.
+    Usage::
 
-    Usage:
         overlay = ScreenCaptureOverlay()
         overlay.captured.connect(on_captured)
         overlay.show()
+
+    The drag interaction itself lives in :class:`DragSelectOverlay`, shared
+    with the qtgui region picker — this class only says what the rectangle
+    means here: the pixels inside it.
     """
 
-    captured = Signal(object)  # QPixmap or None
+    captured = Signal(object)  # QPixmap, or None when cancelled
 
-    # Visual constants
-    _DIM_COLOR = QColor(0, 0, 0, 120)
-    _BORDER_COLOR = QColor(200, 200, 200)
-    _BORDER_WIDTH = 2
-    _SIZE_FONT = QFont("sans-serif", 11)
-    _SIZE_BG = QColor(0, 0, 0, 180)
-    _SIZE_TEXT = QColor(255, 255, 255)
-    _MIN_SELECTION = 10  # Minimum selection size in pixels
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._selecting = False
-        self._start = QPoint()
-        self._end = QPoint()
-
-    def _emit_cancel(self):
+    def _emit_cancel(self) -> None:
+        log.info("ScreenCaptureOverlay._emit_cancel: cancelled by user")
         self.captured.emit(None)
 
-    def paintEvent(self, event):
-        if self._screenshot.isNull():
-            return
-
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # Draw frozen screenshot
-        painter.drawPixmap(0, 0, self._screenshot)
-
-        # Dim the entire screen
-        painter.fillRect(self.rect(), self._DIM_COLOR)
-
-        if self._selecting and self._start != self._end:
-            sel = self._selection_rect()
-
-            # Undim selected region (draw screenshot region over dim)
-            painter.drawPixmap(sel, self._screenshot, sel)
-
-            # Draw selection border
-            pen = QPen(self._BORDER_COLOR, self._BORDER_WIDTH)
-            pen.setStyle(Qt.PenStyle.DashLine)
-            painter.setPen(pen)
-            painter.drawRect(sel)
-
-            # Draw size label
-            w, h = sel.width(), sel.height()
-            label = f"{w} × {h}"
-            painter.setFont(self._SIZE_FONT)
-            fm = painter.fontMetrics()
-            tw = fm.horizontalAdvance(label) + 12
-            th = fm.height() + 6
-
-            lx = sel.center().x() - tw // 2
-            ly = sel.bottom() + 8
-            if ly + th > self.height():
-                ly = sel.top() - th - 8
-
-            painter.fillRect(lx, ly, tw, th, self._SIZE_BG)
-            painter.setPen(self._SIZE_TEXT)
-            painter.drawText(lx + 6, ly + fm.ascent() + 3, label)
-
-        else:
-            # Draw hint text when not selecting
-            painter.setPen(self._SIZE_TEXT)
-            painter.setFont(QFont("sans-serif", 14))
-            painter.drawText(
-                self.rect(), Qt.AlignmentFlag.AlignCenter,
-                "Click and drag to select a region\nPress ESC to cancel"
-            )
-
-        painter.end()
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._selecting = True
-            self._start = event.pos()
-            self._end = event.pos()
-            self.update()
-        elif event.button() == Qt.MouseButton.RightButton:
-            self._cancel()
-
-    def mouseMoveEvent(self, event):
-        if self._selecting:
-            self._end = event.pos()
-            self.update()
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self._selecting:
-            self._end = event.pos()
-            self._selecting = False
-
-            sel = self._selection_rect()
-            if sel.width() >= self._MIN_SELECTION and sel.height() >= self._MIN_SELECTION:
-                self._confirm(sel)
-            else:
-                self.update()
-
-    def _selection_rect(self) -> QRect:
-        """Normalized rectangle from start/end points."""
-        return QRect(self._start, self._end).normalized()
-
-    def _confirm(self, rect: QRect):
-        """Crop the selected region and emit as QPixmap."""
+    def _confirm(self, sel: QRect) -> None:
+        log.info("ScreenCaptureOverlay._confirm: cropping %dx%d at (%d, %d)",
+                 sel.width(), sel.height(), sel.x(), sel.y())
         self.hide()
         try:
-            cropped = self._screenshot.copy(rect)
-            self.captured.emit(cropped)
+            self.captured.emit(self._screenshot.copy(sel))
         except Exception:
-            log.debug("Screen capture region crop/convert failed", exc_info=True)
+            log.exception("ScreenCaptureOverlay._confirm: crop failed")
             self.captured.emit(None)
         self.deleteLater()

@@ -66,7 +66,7 @@ class EyedropperOverlay(BaseScreenOverlay):
         painter.end()
 
     def mouseMoveEvent(self, event) -> None:
-        self._cursor_pos = event.pos()
+        self._cursor_pos = event.position().toPoint()
         self._sample_color_at_cursor()
         self.update()
 
