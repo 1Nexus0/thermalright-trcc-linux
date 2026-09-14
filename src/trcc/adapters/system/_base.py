@@ -272,11 +272,11 @@ class BaseOS(Platform):
         OS that has neither still captures.  Override when a native path
         beats it.
         """
-        from ..screencast import QtScreenCapture
+        from ..screencast import build_screen_capture
 
-        log.info("%s._build_screen_capture: QtScreenCapture (Qt native → "
-                 "grim → scrot → full-grab+crop)", type(self).__name__)
-        return QtScreenCapture()
+        log.info("%s._build_screen_capture: delegating to the shared backend "
+                 "chooser", type(self).__name__)
+        return build_screen_capture()
 
     # ── Shared transport / scan ──────────────────────────────────────────
 

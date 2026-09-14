@@ -1470,6 +1470,20 @@ KNOWN_UI_ADAPTER_IMPORTS: frozenset[tuple[str, str]] = frozenset({
     # stride handling would have scored BETTER here — this audit counts
     # imports, not duplication — and been worse code.
     ("trcc/ui/gui/lcd_handler.py", "trcc.adapters.render.qt"),
+    # 2026-09-14: the screencast CAPTURE source.  Same family and the same
+    # reason as the entry above — ``ui/gui`` IS the Qt adapter family — but
+    # the ownership argument is stronger: the screen being captured belongs
+    # to the session the WINDOW is displayed in, and under TRCC_DAEMON=1 the
+    # daemon that owns USB may be a different session with no display at all.
+    # So this is not the gui borrowing the App's capture source; it is the gui
+    # owning its own, which is the only correct answer.
+    #
+    # ``build_screen_capture`` rather than ``QtScreenCapture`` on purpose:
+    # ONE place picks the backend, shared with
+    # ``BaseOS._build_screen_capture``, so a PipeWire backend lands for every
+    # face at once.  Reaching ``app.platform.screen_capture()`` was the
+    # alternative and it is an AttributeError under TRCC_DAEMON=1.
+    ("trcc/ui/gui/trcc_app.py", "trcc.adapters.screencast"),
 })
 
 

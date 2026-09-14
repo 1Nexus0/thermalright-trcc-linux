@@ -22,79 +22,17 @@ region picker, which is why only the gesture lives in
 The frozen-screen primitives this builds on — ``grab_full_screen``,
 ``is_wayland`` and ``BaseScreenOverlay`` — live in ``ui/screen_overlay``
 and are shared with the qtgui skin.  What stays here is region capture:
-``grab_screen_region`` (the screencast timer's per-tick grab) and
 ``ScreenCaptureOverlay``, which says what a dragged rectangle means here.
 """
 from __future__ import annotations
 
 import logging
-import subprocess
-import tempfile
-from pathlib import Path
 
 from PySide6.QtCore import QRect, Signal
-from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QApplication
 
-from ..screen_overlay import DragSelectOverlay, grab_full_screen
+from ..screen_overlay import DragSelectOverlay
 
 log = logging.getLogger(__name__)
-
-
-def grab_screen_region(x: int, y: int, w: int, h: int) -> QPixmap:
-    """Capture a specific screen region. X11 + Wayland compatible.
-
-    Called repeatedly by the screencast timer (~150ms interval), so this
-    needs to be reasonably efficient.
-
-    X11: QScreen.grabWindow(0, x, y, w, h) captures the region directly.
-    Wayland: grim with -g geometry flag, or full capture + crop fallback.
-
-    Returns:
-        QPixmap of the region, or null pixmap on failure.
-    """
-    # Try Qt native capture with region (works on X11)
-    if (screen := QApplication.primaryScreen()):
-        pixmap = screen.grabWindow(0, x, y, w, h)  # type: ignore[arg-type]
-        if not pixmap.isNull() and pixmap.width() > 1:
-            return pixmap
-
-    # Wayland fallback: grim with -g region flag
-    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
-        tmp_path = f.name
-
-    try:
-        geometry = f"{x},{y} {w}x{h}"
-        for cmd in [
-            ['grim', '-g', geometry, tmp_path],            # Wayland (wlroots)
-            ['scrot', '-a', f'{x},{y},{w},{h}', tmp_path], # X11 fallback
-        ]:
-            tool = cmd[0]
-            try:
-                result = subprocess.run(cmd, capture_output=True, timeout=2)
-                if result.returncode == 0 and Path(tmp_path).stat().st_size > 0:
-                    pixmap = QPixmap(tmp_path)
-                    if not pixmap.isNull():
-                        log.debug("Region capture via %s", tool)
-                        return pixmap
-                else:
-                    log.debug("Region capture tool %s failed (exit %d)", tool, result.returncode)
-            except FileNotFoundError:
-                log.debug("Region capture tool %s not installed", tool)
-            except subprocess.TimeoutExpired:
-                log.warning("Region capture tool %s timed out", tool)
-
-        # Last resort: full screen capture + crop
-        full = grab_full_screen()
-        if not full.isNull():
-            return full.copy(x, y, w, h)
-    finally:
-        try:
-            Path(tmp_path).unlink()
-        except OSError:
-            pass
-
-    return QPixmap()
 
 
 class ScreenCaptureOverlay(DragSelectOverlay):

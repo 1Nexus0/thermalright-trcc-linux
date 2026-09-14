@@ -57,6 +57,7 @@ from ...core.commands import (
 )
 from ...core.logs import per_frame
 from ...core.models import HardwareMetrics, Kind, ThemeDir
+from ...core.ports import ScreenCapture
 from ...core.results import LanguageEntry
 from ..bus_bridge import BusBridge
 from ..presentation import presentation_for
@@ -114,8 +115,16 @@ class ScreencastHandler:
     a spectrum visualizer bar at the bottom of each screencast frame.
     """
 
-    def __init__(self, parent: QWidget, on_frame: Any):
+    def __init__(self, parent: QWidget, on_frame: Any,
+                 capture: ScreenCapture):
         self._on_frame = on_frame
+        # The desktop-capture PORT, injected.  This handler used to call
+        # ``ui/gui/screen_capture.grab_screen_region`` — a second copy of the
+        # adapter's own fallback chain, which had drifted: only the UI copy
+        # reached ``gnome-screenshot``, the one tool that works on GNOME and
+        # KDE Wayland.  One chain now, and the gui gets whatever backend the
+        # OS picked instead of its own.
+        self._capture = capture
         self._active = False
         self._x = self._y = self._w = self._h = 0
         self._border = True
@@ -234,9 +243,6 @@ class ScreencastHandler:
         self._active = False
         self._timer.stop()
         self._stop_pipewire()
-        if self._audio is not None:
-            self._audio.stop()
-            self._audio = None
 
     def _start_audio(self) -> None:
         from trcc.services.audio import AudioCapture
@@ -307,15 +313,21 @@ class ScreencastHandler:
                     frame_img = full.copy(QRect(x1, y1, x2 - x1, y2 - y1))
 
         if frame_img is None:
-            from .screen_capture import grab_screen_region
-            pixmap = grab_screen_region(self._x, self._y, self._w, self._h)
-            if pixmap.isNull():
+            # The port raises OSError when every backend failed; it has already
+            # logged which ones it tried and why each declined.
+            try:
+                raw = self._capture.grab_region(
+                    self._x, self._y, self._w, self._h)
+            except OSError as e:
                 if not self._capture_warn_logged:
-                    log.warning("Screencast: all capture methods failed")
+                    log.warning("Screencast: capture failed — %s", e)
                     self._capture_warn_logged = True
                 return
             self._capture_warn_logged = False
-            frame_img = pixmap.toImage()
+            # RawFrame is RGB24 with no row padding (the port strips Qt's),
+            # so width*3 is the true stride.
+            frame_img = QImage(raw.data, raw.width, raw.height,
+                               raw.width * 3, QImage.Format.Format_RGB888)
 
         frame_img = frame_img.scaled(
             self._lcd_w, self._lcd_h,
@@ -435,7 +447,13 @@ class TRCCApp(QMainWindow):
         self._setup_ui()
 
         # Screencast handler
-        self._screencast = ScreencastHandler(self, self._on_screencast_frame)
+        # Built HERE, not fetched from ``app.platform`` — that raises under
+        # TRCC_DAEMON=1, and the screen being captured belongs to THIS
+        # session, not to whichever one owns USB.
+        from ...adapters.screencast import build_screen_capture
+        self._screencast = ScreencastHandler(
+            self, self._on_screencast_frame,
+            capture=build_screen_capture())
 
         # Connect widget signals
         self._connect_view_signals()
