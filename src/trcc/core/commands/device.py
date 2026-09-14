@@ -1013,7 +1013,14 @@ class RenderDcStandalone(Command[RenderDcResult]):
                          "(both dimensions must be > 0)"),
             )
         try:
-            readings = {r.sensor_id: r.value for r in app.platform.sensors().discover()}
+            # ``read_all()``, like every other render site — ``RenderAndSend``,
+            # ``SendFrame``, ``LoadTheme``, ``MetricsLoop`` and the LED effects
+            # all source frames from it, and this was the one that did not.
+            # ``discover()`` coalesces a missing reading to ``0.0`` to fill
+            # ``SensorReading.value``, so a metric with no value was DRAWN as 0
+            # here while the live path omitted the key and ``_draw_metric``
+            # skipped it with a warning.  Same theme, same host, two answers.
+            readings = app.platform.sensors().read_all()
         except Exception:
             log.debug("RenderDcStandalone: sensor read failed", exc_info=True)
             readings = {}

@@ -574,3 +574,51 @@ def test_autostart_result_round_trips_the_new_field() -> None:
 
     assert back == original
     assert back.target == "daemon", "target was dropped crossing the wire"
+
+
+def test_render_dc_standalone_sees_only_readings_that_exist(
+    fake_platform, monkeypatch, tmp_path,
+) -> None:
+    """The standalone render must source sensors the way every other one does.
+
+    Five render sites (``RenderAndSend``, ``SendFrame``, ``LoadTheme``,
+    ``MetricsLoop``, the LED effects) read from ``read_all()``, which OMITS a
+    key with no reading so ``_draw_metric`` skips it and warns.  This one read
+    from ``discover()``, whose ``SensorReading.value`` is a plain ``float`` and
+    so coalesces a missing reading to ``0.0`` — the same theme on the same host
+    drew ``0`` here and nothing there.
+    """
+    from PySide6.QtGui import QImage
+
+    from trcc.core.commands import RenderDcStandalone
+    from trcc.services.overlay import OverlayService
+
+    captured: dict[str, dict[str, float]] = {}
+
+    def _capture(*, renderer, dc_path, width, height, sensors=None, **kw):
+        captured["sensors"] = dict(sensors or {})
+        return QImage(width, height, QImage.Format.Format_RGB32), 0, {}
+
+    monkeypatch.setattr(OverlayService, "render_dc_standalone", _capture)
+
+    from trcc.adapters.render.qt import QtRenderer
+
+    app = App(fake_platform)
+    app.set_renderer(QtRenderer())
+    enum = app.platform.sensors()
+    coalesced = {r.sensor_id for r in enum.discover()} - set(enum.read_all())
+    assert coalesced, (
+        "fixture must advertise at least one key with no current reading, "
+        "or this proves nothing"
+    )
+
+    dc = tmp_path / "config1.dc"
+    dc.write_bytes(b"")
+    app.dispatch(RenderDcStandalone(
+        dc_path=dc, output_path=tmp_path / "out.png", width=320, height=320,
+    ))
+
+    assert not (coalesced & set(captured["sensors"])), (
+        "a metric with no reading reached the renderer as 0.0 and will be "
+        f"DRAWN as 0: {sorted(coalesced & set(captured['sensors']))}"
+    )
