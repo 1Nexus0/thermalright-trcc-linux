@@ -211,3 +211,106 @@ def test_memory_chain_first_non_none_per_method() -> None:
     assert chain.total() == 32768.0
     assert chain.percent() == 12.5
     assert chain.available() is None
+
+
+# ── provides(): which quantities a chain actually reads ─────────────
+#
+# A chain overrides every quantity in order to FORWARD it, so the inherited
+# ``QuantitySource.provides`` default — "did this class override the port?" —
+# answers ``True`` for a chain no matter what its members can do.  These drive
+# that directly, because every platform that chains (Windows / macOS / BSD) is
+# a platform where unreadable quantities actually occur, while Linux (which the
+# suite runs on) neither chains nor has any.  Without these the bug is invisible
+# here and wrong everywhere else.
+
+
+class _PartialCpu(CpuSource):
+    """Reads temp ONLY — the other three are left to the port's default.
+
+    Shaped after the real thing: ``SmcCpu`` / ``SysctlCpu`` / ``WmiAcpiCpu``
+    each read 1 of CpuSource's 4.
+    """
+
+    @property
+    def name(self) -> str:
+        return "partial"
+
+    def temp(self) -> float | None:
+        return 41.0
+
+
+class _BareGpu(GpuSource):
+    """Reads NONE of the 7 optional quantities — shaped after
+    ``WmiVideoControllerGpu``, which carried 7 ``return None`` stubs."""
+
+    @property
+    def key(self) -> str:
+        return "bare:0"
+
+    @property
+    def name(self) -> str:
+        return "bare gpu"
+
+    @property
+    def is_discrete(self) -> bool:
+        return False
+
+
+def test_a_source_reports_only_the_quantities_it_overrides() -> None:
+    partial = _PartialCpu()
+    assert partial.provides("temp") is True
+    assert [q for q in ("usage", "freq", "power") if partial.provides(q)] == []
+
+
+def test_an_abstract_quantity_always_reports_provided() -> None:
+    """``rpm`` / ``key`` / ``name`` are abstract, so they cannot be unwritten."""
+    assert _StubGpu().provides("is_discrete") is True
+
+
+def test_provides_rejects_a_quantity_the_port_never_declared() -> None:
+    """A typo must not read as a real "unsupported" — it would drop a sensor."""
+    assert _StubGpu().provides("vram_totl") is False
+
+
+def test_cpu_chain_provides_what_any_member_provides() -> None:
+    """THE regression this pair exists for.
+
+    Measured before the override existed: a chain around sources that read
+    nothing reported every quantity as provided.
+    """
+    chain = CpuSourceChain([_PartialCpu(), _PartialCpu()])
+    assert chain.provides("temp") is True
+    assert [q for q in ("usage", "freq", "power") if chain.provides(q)] == []
+
+    mixed = CpuSourceChain([_PartialCpu(), _StubCpu(usage=12.0)])
+    assert [q for q in ("temp", "usage", "freq", "power")
+            if mixed.provides(q)] == ["temp", "usage", "freq", "power"]
+
+
+def test_gpu_chain_provides_what_any_member_provides() -> None:
+    bare = GpuSourceChain([_BareGpu(), _BareGpu()])
+    assert [q for q in ("temp", "usage", "clock", "power", "fan",
+                        "vram_used", "vram_total") if bare.provides(q)] == []
+
+    rescued = GpuSourceChain([_BareGpu(), _StubGpu()])
+    assert rescued.provides("temp") is True
+
+
+def test_every_delegating_chain_overrides_provides() -> None:
+    """A future ``FanSourceChain`` must not inherit the wrong answer.
+
+    Structural on purpose: the two behavioural tests above cover the chains
+    that exist, and this covers the one somebody adds next.
+    """
+    from trcc.core.ports import QuantitySource
+
+    forgot = [
+        cls.__name__
+        for cls in (CpuSourceChain, GpuSourceChain, MemorySourceChain)
+        if issubclass(cls, QuantitySource) and "provides" not in vars(cls)
+    ]
+    assert not forgot, (
+        "a delegating source that does not override `provides` reports its "
+        "OWN overrides, so it claims to read every quantity its members "
+        f"cannot: {forgot}"
+    )

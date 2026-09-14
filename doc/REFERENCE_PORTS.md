@@ -45,7 +45,7 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | [`ScsiTransport`](#scsitransport) | 5 | 0 | 3 |
 | [`AutostartManager`](#autostartmanager) | 6 | 0 | 4 |
 | [`Diagnostics`](#diagnostics) | 7 | 0 | 1 |
-| [`SensorEnumerator`](#sensorenumerator) | 10 | 5 | 1 |
+| [`SensorEnumerator`](#sensorenumerator) | 11 | 5 | 1 |
 | [`BaseOS`](#baseos) | 12 | 17 | 8 |
 | [`Renderer`](#renderer) | 15 | 6 | 1 |
 | [`Platform`](#platform) | 24 | 0 | 8 |
@@ -638,7 +638,7 @@ write_debug_report(rendered: 'str', path: 'Path') -> Path
 
 OS-level sensor root.  Each OS has one implementation.
 
-**You implement (10):**
+**You implement (11):**
 
 ```python
 cpu() -> CpuSource
@@ -651,6 +651,7 @@ read_all() -> dict[str, float]
 read_one(sensor_id: 'str') -> float | None
 start_polling(interval_s: 'float' = 2.0) -> None
 stop_polling() -> None
+unsupported() -> frozenset[str]
 ```
 
 **You inherit (5):** `preferred_disk` · `primary_gpu` · `set_preferred_disk` · `set_preferred_gpu` · `snapshot`

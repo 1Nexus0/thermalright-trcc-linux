@@ -329,17 +329,31 @@ def _collect_sensors(
         enum = platform.sensors()
         descriptors = enum.discover()
         readings = enum.read_all()
+        # STATIC — which keys no backend here can read at all.  This is the
+        # whole reason a bare "—" was not enough: it read the same whether the
+        # host has no such sensor, the read came back empty this tick, or the
+        # read raised.  Only the first is a permanent property of the machine,
+        # and it is the one a reporter needs us to stop investigating.
+        unsupported = enum.unsupported()
     except (OSError, RuntimeError) as e:
         return [], f"{type(e).__name__}: {e}"
     rows: list[dict[str, str]] = []
     for desc in descriptors:
         value = readings.get(desc.sensor_id)
+        if value is not None:
+            shown = f"{value:.2f} {desc.unit}"
+        elif desc.sensor_id in unsupported:
+            shown = "— (no such sensor on this host)"
+        else:
+            shown = "—"
         rows.append({
             "sensor_id": desc.sensor_id,
             "label": desc.label,
             "category": desc.category,
-            "value": f"{value:.2f} {desc.unit}" if value is not None else "—",
+            "value": shown,
         })
+    log.debug("_collect_sensors: %d row(s), %d unsupported",
+              len(rows), len(unsupported))
     return rows, ""
 
 

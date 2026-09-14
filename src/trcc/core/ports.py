@@ -454,7 +454,81 @@ class Device(ABC, Generic[T]):
 # backend has ever stubbed one, so there is no evidence they are optional, and
 # a source that cannot say what it IS should not be constructible.
 
-class CpuSource(ABC):
+class QuantitySource:
+    """A sensor source whose individual quantity readings are OPTIONAL.
+
+    **Deliberately NOT an ``ABC``** — it is shared behaviour, not a contract.
+    It declares nothing a subclass must write, so ``ABC`` would buy none of the
+    three things ABCs are here for: it would not enforce anything, it would
+    make the class instantiable-looking while claiming otherwise, and
+    ``doc/REFERENCE_PORTS.md`` skips it either way (the generator selects on
+    ``inspect.isabstract``, which is false without abstract members).  Ruff's
+    B024 says the same thing, and it is right; the answer is to be honest about
+    what this is, not to silence it.  The ports that mix it in keep their own
+    ``ABC``.
+
+    The three ports below declare quantities a backend may simply not have —
+    :class:`CpuSource` 4, :class:`GpuSource` 7, :class:`FanSource` 1 — and
+    answer ``None`` by default so a backend that cannot read one does not have
+    to say so in code.  That default is what makes this ABC possible: "the
+    subclass never overrode it" IS "this backend has no such sensor", and
+    :meth:`provides` reads it back.
+
+    **It spans THREE ports, not five, and that is measured.**
+    ``MemorySource``, ``DiskSource`` and ``DramSource`` declare every reading
+    ``@abstractmethod`` — they have no optional quantity at all — so they are
+    not here and would gain nothing by it.
+
+    **This is NOT the forbidden ``SensorSource``.**
+    ``feedback_one_shared_sensorsource_abc`` prohibits a supertype over all
+    FIVE role ports because their intersection is EMPTY.  That reasoning is
+    untouched and still stands.  This is a different, non-empty intersection —
+    *"has optional quantity readings"* — carrying a real method with a real
+    body, so it is not a marker interface.  Like :class:`IdentifiedSource`, it
+    is deliberately named for what it contracts rather than for the family.
+
+    **Why it exists at all**: the ``None`` a consumer sees has three causes and
+    they need different answers — this backend has no such sensor (``-1``), the
+    read found nothing this tick (``0``), or the read raised.  Only the first is
+    static, and only the first is safe to act on: the other two change between
+    ticks.  Everything that omits, unbinds or explains a missing sensor keys off
+    :meth:`provides` for exactly that reason.
+    """
+
+    def provides(self, quantity: str) -> bool:
+        """True when this source actually reads *quantity*.
+
+        Derived, never listed: the port declares the default, a backend that
+        can read the quantity overrides it, so the answer is simply whether the
+        class that DEFINES *quantity* is the one that DECLARED it.  There is no
+        table to drift out of date, and an abstract quantity answers ``True``
+        because it could not have been left unimplemented.
+
+        **A delegating source MUST override this.**  The default asks about the
+        class in hand, and a chain overrides every quantity in order to forward
+        it — so an un-overridden chain of backends that read nothing would
+        answer "reads everything".  See ``CpuSourceChain.provides``.
+
+        One-shot by contract, so it logs on the ordinary logger: the whole
+        point is that a reporter's file keeps the line saying which quantities
+        this host can never read.  Callers that need it per tick cache it —
+        ``SensorEnumerator.unsupported()`` does.
+        """
+        owners = [k for k in type(self).__mro__ if quantity in vars(k)]
+        if not owners:
+            log.warning(
+                "provides: %s declares no quantity %r — a typo here reads as "
+                "'unsupported' and would silently drop a real sensor",
+                type(self).__name__, quantity,
+            )
+            return False
+        answer = owners[0] is not owners[-1]
+        log.debug("provides: %s.%s declared by %s -> %s",
+                  type(self).__name__, quantity, owners[0].__name__, answer)
+        return answer
+
+
+class CpuSource(QuantitySource, ABC):
     """Primary CPU.  usage/freq nearly always present; temp/power may be None."""
 
     @property
@@ -563,7 +637,7 @@ class IdentifiedSource(ABC):
         """Human-readable label."""
 
 
-class GpuSource(IdentifiedSource):
+class GpuSource(IdentifiedSource, QuantitySource):
     """One GPU — NVIDIA/AMD/Intel/Apple, discrete or integrated."""
 
     @property
@@ -621,7 +695,7 @@ class GpuSource(IdentifiedSource):
         """
 
 
-class FanSource(IdentifiedSource):
+class FanSource(IdentifiedSource, QuantitySource):
     """One fan — may be role-mapped (cpu/gpu/sys1) or anonymous."""
 
     @abstractmethod
@@ -949,6 +1023,29 @@ class SensorEnumerator(ABC):
     @abstractmethod
     def read_one(self, sensor_id: str) -> float | None:
         """Read a single normalized key."""
+
+    @abstractmethod
+    def unsupported(self) -> frozenset[str]:
+        """Normalized keys NO backend on this host can read.  STATIC.
+
+        The third state, made answerable: a key here is absent from
+        :meth:`read_all` because the backend has no such sensor
+        (:meth:`QuantitySource.provides` is ``False``), not because this
+        tick's read came back empty.
+
+        **Static is the whole contract, and the reason this is a separate
+        method rather than a diff against ``read_all()``.**  That diff is
+        derived from ONE tick and is transient — rate-derived keys
+        (``disk:read``, ``net:up``, ``cpu:power`` where power comes from an
+        energy counter) need two samples and are legitimately missing from the
+        first poll.  Anything that OMITS, UNBINDS or explains away a sensor
+        must key off this set instead, or a cold start would persist a
+        decision made before the sensor had a chance to report.
+
+        Abstract rather than derived here on purpose: the normalized key
+        vocabulary is spelled by the enumerator that builds it, and core
+        cannot import an adapter to reach it.
+        """
 
     @abstractmethod
     def start_polling(self, interval_s: float = 2.0) -> None: ...

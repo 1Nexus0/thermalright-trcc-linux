@@ -8,7 +8,7 @@ import pytest
 
 from trcc.adapters.sensors import hwmon
 from trcc.adapters.sensors.aggregator import BaselineSensors
-from trcc.core.ports import DiskSource, DramSource, FanSource
+from trcc.core.ports import CpuSource, DiskSource, DramSource, FanSource, GpuSource
 
 from .conftest import FakeCpu, FakeGpu, FakeMemory
 
@@ -1036,3 +1036,103 @@ def test_every_disk_is_still_polled_when_one_is_pinned() -> None:
     assert a.reads >= 1 and b.reads >= 1, (
         f"both drives must be polled; got nvme0={a.reads} nvme1={b.reads}"
     )
+
+
+# ── unsupported(): the third kind of nothing ────────────────────────
+#
+# ``read_all()`` omits a key for three different reasons and the consumer could
+# not tell them apart: the host has no such sensor, the read found nothing this
+# tick, or the read raised.  Only the FIRST is static, and these pin that
+# distinction — including the trap that makes it dangerous to get wrong.
+
+
+class _TempOnlyCpu(CpuSource):
+    """Reads temp only — shaped after ``SmcCpu`` / ``SysctlCpu`` (1 of 4)."""
+
+    @property
+    def name(self) -> str:
+        return "temp-only"
+
+    def temp(self) -> float | None:
+        return 44.0
+
+
+class _NoReadingsGpu(GpuSource):
+    """Reads none of the 7 — shaped after ``WmiVideoControllerGpu``."""
+
+    def __init__(self, key: str = "wmi:0") -> None:
+        self._key = key
+
+    @property
+    def key(self) -> str:
+        return self._key
+
+    @property
+    def name(self) -> str:
+        return "no-readings gpu"
+
+    @property
+    def is_discrete(self) -> bool:
+        return True
+
+
+def test_unsupported_is_empty_when_every_backend_reads_everything() -> None:
+    """The Linux shape, and the reason this needs non-Linux fixtures at all."""
+    s = BaselineSensors(cpu=FakeCpu(), memory=FakeMemory(),
+                        gpus=[FakeGpu(0, discrete=True, vendor="nvidia")],
+                        fans=[])
+    assert s.unsupported() == frozenset()
+
+
+def test_unsupported_names_every_key_no_backend_can_read() -> None:
+    s = BaselineSensors(cpu=_TempOnlyCpu(), memory=FakeMemory(),
+                        gpus=[_NoReadingsGpu()], fans=[])
+    missing = s.unsupported()
+
+    assert {"cpu:usage", "cpu:freq", "cpu:power"} <= missing
+    assert "cpu:temp" not in missing, "the one quantity it DOES read"
+
+    # Every alias the catalog advertises for that GPU, not just the indexed one
+    # — a theme references `gpu:primary:temp`, the picker offers `gpu:0:temp`,
+    # and the vendor alias `gpu:wmi:0:temp` is what a saved binding holds.
+    for prefix in ("gpu:0", "gpu:wmi:0", "gpu:primary"):
+        assert f"{prefix}:temp" in missing, prefix
+        assert f"{prefix}:vram_total" in missing, prefix
+
+
+def test_unsupported_excludes_ports_with_no_optional_quantity() -> None:
+    """``memory:*`` / ``disk:temp`` are abstract everywhere, so they can never
+    be unsupported — a backend cannot decline them and still be constructible."""
+    s = BaselineSensors(cpu=_TempOnlyCpu(), memory=FakeMemory(),
+                        gpus=[], fans=[],
+                        disks=[FakeDisk("nvme0", 40.0)])
+    assert not {k for k in s.unsupported()
+                if k.startswith(("memory:", "disk:"))}
+
+
+def test_unsupported_is_computed_once_and_kept() -> None:
+    """It is asked per ``discover()`` — every 2 s from qtgui's picker — and the
+    answer is a property of the CLASSES, so recomputing it is pure waste."""
+    s = BaselineSensors(cpu=_TempOnlyCpu(), memory=FakeMemory(), gpus=[], fans=[])
+    assert s.unsupported() is s.unsupported()
+
+
+def test_unsupported_never_reports_a_key_that_is_merely_absent_this_tick() -> None:
+    """THE trap, and the reason this is not a diff against ``read_all()``.
+
+    A source that IMPLEMENTS a quantity but answers ``None`` right now is the
+    ``0`` state, not the ``-1`` state.  Anything that omits or unbinds a sensor
+    keys off this set, so folding a transient miss into it would let one cold
+    poll persist a decision — the rate-derived keys (``disk:read``, ``net:up``,
+    energy-counter ``cpu:power``) are legitimately missing from the FIRST poll
+    and present from the second.
+    """
+    cpu = FakeCpu()
+    cpu.values["power"] = None          # implemented, but reads nothing now
+    s = BaselineSensors(cpu=cpu, memory=FakeMemory(), gpus=[], fans=[])
+    assert s.read_all().get("cpu:power") is None, "absent from the readings"
+    assert "cpu:power" not in s.unsupported(), (
+        "a quantity the backend implements is never unsupported, however "
+        "often it answers None"
+    )
+

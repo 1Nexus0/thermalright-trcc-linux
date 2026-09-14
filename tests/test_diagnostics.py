@@ -2281,6 +2281,15 @@ _ENUMERATOR_LOGGERS: dict[str, frozenset[str]] = {
     # first-failure warning is the diagnostic a reporter needs (ordinary).
     "_read": frozenset({"frame_log", "log"}),
     "_poll_once": frozenset({"frame_log", "log"}),
+    # One-shot, and that is a DESIGN CONSTRAINT, not an observation: these
+    # answer a STATIC question (which quantities no backend here can read) and
+    # ``unsupported()`` caches the answer, so they run once per process.  They
+    # must stay on the ordinary logger — the frame family sits at INFO, so a
+    # ``frame_log.debug`` here would be discarded from the very file a reporter
+    # sends us, which is the one place this line exists to appear.  If either
+    # ever becomes per-tick, the cache is what broke, not this record.
+    "unsupported": frozenset({"log"}),
+    "_optional_reads": frozenset({"log"}),
     # Lifecycle: fires once per start/stop, so it belongs in the file always.
     "__init__": frozenset({"log"}),
     "start_polling": frozenset({"log"}),

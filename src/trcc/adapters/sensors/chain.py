@@ -49,6 +49,32 @@ class CpuSourceChain(CpuSource):
                 return source.name
         return self._sources[0].name
 
+    def provides(self, quantity: str) -> bool:
+        """A chain reads *quantity* when ANY member does.
+
+        **Without this override the answer is backwards.**  The inherited
+        default asks whether THIS class overrode the port — and a chain
+        overrides every quantity precisely in order to forward it — so a chain
+        wrapped around backends that read nothing answers "reads everything".
+        Measured: a bare ``WmiVideoControllerGpu`` reports ``False`` for all 7
+        optional quantities, and the SAME object inside a chain reported
+        ``True`` for all 7.
+
+        That is not a corner case.  Every platform that chains is a platform
+        where the -1 state actually occurs — Windows, macOS and BSD chain their
+        CPU, Windows and macOS chain GPUs — while Linux does not chain and has
+        no unreadable quantity to report.  So the un-overridden default would
+        have been wrong on every host that needs it and right only on the one
+        host the suite runs on.
+
+        Ordinary logger, not ``frame_log``: this is one-shot (the enumerator
+        caches it), and the frame family sits at INFO, so a ``frame_log.debug``
+        here would be discarded from the very file a reporter sends us.
+        """
+        log.debug("CpuSourceChain.provides: quantity=%s members=%d",
+                  quantity, len(self._sources))
+        return any(source.provides(quantity) for source in self._sources)
+
     def temp(self) -> float | None:
         frame_log.debug("CpuSourceChain.temp: called")
         return _first_not_none(self._sources, "temp")
@@ -92,6 +118,32 @@ class GpuSourceChain(GpuSource):
     @property
     def is_discrete(self) -> bool:
         return self._sources[0].is_discrete
+
+    def provides(self, quantity: str) -> bool:
+        """A chain reads *quantity* when ANY member does.
+
+        **Without this override the answer is backwards.**  The inherited
+        default asks whether THIS class overrode the port — and a chain
+        overrides every quantity precisely in order to forward it — so a chain
+        wrapped around backends that read nothing answers "reads everything".
+        Measured: a bare ``WmiVideoControllerGpu`` reports ``False`` for all 7
+        optional quantities, and the SAME object inside a chain reported
+        ``True`` for all 7.
+
+        That is not a corner case.  Every platform that chains is a platform
+        where the -1 state actually occurs — Windows, macOS and BSD chain their
+        CPU, Windows and macOS chain GPUs — while Linux does not chain and has
+        no unreadable quantity to report.  So the un-overridden default would
+        have been wrong on every host that needs it and right only on the one
+        host the suite runs on.
+
+        Ordinary logger, not ``frame_log``: this is one-shot (the enumerator
+        caches it), and the frame family sits at INFO, so a ``frame_log.debug``
+        here would be discarded from the very file a reporter sends us.
+        """
+        log.debug("GpuSourceChain.provides: quantity=%s members=%d",
+                  quantity, len(self._sources))
+        return any(source.provides(quantity) for source in self._sources)
 
     def temp(self) -> float | None:
         frame_log.debug("GpuSourceChain.temp: key=%s", self._sources[0].key)

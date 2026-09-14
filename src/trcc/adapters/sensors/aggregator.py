@@ -23,7 +23,7 @@ import datetime
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
 
 from ...core.logs import per_frame
@@ -35,6 +35,7 @@ from ...core.ports import (
     FanSource,
     GpuSource,
     MemorySource,
+    QuantitySource,
     SensorEnumerator,
 )
 from .hwmon import (
@@ -180,6 +181,10 @@ class BaselineSensors(SensorEnumerator):
         # Labels whose read has already raised — warn once, then DEBUG, so a
         # persistently-broken sensor doesn't spam a line every poll interval.
         self._read_failures: set[str] = set()
+        # Which normalized keys no backend here can read.  A STATIC fact about
+        # the classes in hand, so it is computed once on demand and kept —
+        # ``discover()`` would otherwise recompute it on every 2-second poll.
+        self._unsupported: frozenset[str] | None = None
         self._gpus.sort(key=_gpu_order)
         if self._gpus:
             log.info("GPU order: %s (primary auto-pick = first discrete)",
@@ -237,6 +242,57 @@ class BaselineSensors(SensorEnumerator):
         return list(self._disks)
 
     # ── Flat dict view ─────────────────────────────────────────────
+
+    def _optional_reads(self) -> Iterator[tuple[str, QuantitySource, str]]:
+        """``(normalized key, source, quantity)`` for every OPTIONAL reading.
+
+        Only the three ports that HAVE optional quantities appear —
+        ``memory:*``, ``disk:temp`` and ``memory:temp`` come from ports whose
+        every reading is abstract, so no backend can decline them and they can
+        never be unsupported.
+
+        The key spellings come from the same catalog helpers ``discover()``
+        uses, so the format lives in one place; only the per-source prefix is
+        rebuilt, exactly as ``discover()`` rebuilds it.
+        """
+        log.debug("_optional_reads: gpus=%d fans=%d",
+                  len(self._gpus), len(self._fans))
+        for key, _, _ in _cpu_keys():
+            yield key, self._cpu, key.rsplit(":", 1)[1]
+        for idx, gpu in enumerate(self._gpus):
+            for prefix in (f"gpu:{idx}", f"gpu:{gpu.key}"):
+                for key, _, _ in _gpu_reading_keys(prefix):
+                    yield key, gpu, key.rsplit(":", 1)[1]
+        if (primary := self.primary_gpu()) is not None:
+            for key, _, _ in _gpu_reading_keys("gpu:primary"):
+                yield key, primary, key.rsplit(":", 1)[1]
+        for fan in self._fans:
+            yield f"fan:{fan.key}:percent", fan, "percent"
+
+    def unsupported(self) -> frozenset[str]:
+        """Normalized keys no backend here can read.  Computed once, kept.
+
+        The INFO line is the point of the whole exercise: on a host where a
+        metric can never have a value, a reporter's log now names it and says
+        which backend declined it, instead of leaving an overlay warning that
+        reads the same as a sensor that merely failed this tick.
+        """
+        if self._unsupported is None:
+            declined: dict[str, str] = {}
+            for key, source, quantity in self._optional_reads():
+                if not source.provides(quantity):
+                    declined[key] = type(source).__name__
+            self._unsupported = frozenset(declined)
+            if declined:
+                log.info(
+                    "unsupported: %d key(s) no backend on this host can read "
+                    "— %s", len(declined),
+                    ", ".join(f"{k} ({v})" for k, v in sorted(declined.items())),
+                )
+            else:
+                log.info("unsupported: every advertised quantity has a backend "
+                         "that reads it")
+        return self._unsupported
 
     def discover(self) -> list[SensorReading]:
         """Return one SensorReading per normalized key with current values."""
