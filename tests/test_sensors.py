@@ -1136,3 +1136,36 @@ def test_unsupported_never_reports_a_key_that_is_merely_absent_this_tick() -> No
         "often it answers None"
     )
 
+
+# ── discover() must not advertise what the host cannot read ─────────
+
+
+def test_discover_withholds_unsupported_keys() -> None:
+    """A sensor that can never hold a value must not reach any face.
+
+    ``SensorReading.value`` is a plain ``float``, so an unreadable key could
+    only be advertised as ``0.0`` — indistinguishable from a real zero.
+    """
+    s = BaselineSensors(cpu=_TempOnlyCpu(), memory=FakeMemory(),
+                        gpus=[_NoReadingsGpu()], fans=[])
+    ids = {r.sensor_id for r in s.discover()}
+
+    assert "cpu:temp" in ids
+    assert not ids & {"cpu:usage", "cpu:freq", "cpu:power"}
+    assert not {i for i in ids if i.startswith("gpu:")}
+
+
+def test_discover_still_advertises_a_key_that_is_merely_absent_now() -> None:
+    """The transient case must survive, or a cold poll would hide a sensor.
+
+    ``disk:read`` / ``net:up`` / energy-counter ``cpu:power`` are rate-derived
+    and legitimately missing from the FIRST poll.  They are implemented, so
+    they stay advertised and simply read ``0.0`` until the second sample.
+    """
+    cpu = FakeCpu()
+    cpu.values["power"] = None
+    s = BaselineSensors(cpu=cpu, memory=FakeMemory(), gpus=[], fans=[])
+
+    ids = {r.sensor_id for r in s.discover()}
+    assert "cpu:power" in ids, "implemented but empty right now — still offered"
+    assert {"disk:read", "net:up"} <= ids

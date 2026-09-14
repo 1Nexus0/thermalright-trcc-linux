@@ -295,7 +295,28 @@ class BaselineSensors(SensorEnumerator):
         return self._unsupported
 
     def discover(self) -> list[SensorReading]:
-        """Return one SensorReading per normalized key with current values."""
+        """One SensorReading per normalized key this host CAN read.
+
+        The catalog is static — the same 25 CPU / memory / IO / time keys are
+        built on every machine — so advertising it verbatim offered sensors that
+        can never hold a value, at ``value=0.0`` because ``SensorReading.value``
+        is a plain ``float`` and cannot say "no reading".  Three consumers
+        believed it: ``ListSensors`` (and so the API and the pickers) offered
+        them, ``auto_map`` bound dashboard rows to them — 16 of its 20 exact-id
+        targets are static catalog keys, so its documented "target not available
+        on this host stays unbound, the panel renders ``--``" could not fire —
+        and a bound row then shows ``0`` forever.
+
+        Withholding the UNSUPPORTED ones fixes all three at once, and does it
+        without a DTO change: the bus simply stops offering a sensor that cannot
+        exist, and every face is correct for free.
+
+        **It filters on ``unsupported()``, never on "missing from
+        ``read_all()``".**  That second set is derived from ONE tick and is
+        transient — the rate-derived keys need two samples — while ``auto_map``
+        PERSISTS what it binds.  Filtering on a tick would let a cold start
+        write an unbound row into the saved config for a sensor that works fine.
+        """
         # Entry line, no content — and `discover` is NOT one-shot: qtgui's
         # SensorPickerWidget dispatches ReadSensors() on a 2-second QTimer.
         # DEBUG, not INFO: the frame family sits at INFO by default, so an
@@ -355,7 +376,11 @@ class BaselineSensors(SensorEnumerator):
                 value=current.get(key, 0.0), unit=unit,
             ))
 
-        return readings
+        withheld = self.unsupported()
+        advertised = [r for r in readings if r.sensor_id not in withheld]
+        frame_log.debug("discover: %d reading(s), %d withheld as unsupported",
+                        len(advertised), len(readings) - len(advertised))
+        return advertised
 
     def read_all(self) -> dict[str, float]:
         """Every current reading, refreshing the cache first if it is stale."""

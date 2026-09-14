@@ -156,3 +156,41 @@ def test_the_result_survives_the_daemon_socket(fake_platform) -> None:
 
     assert restored.panels == result.panels
     assert restored.auto_mapped == result.auto_mapped
+
+
+def test_auto_map_leaves_a_row_unbound_when_the_host_cannot_read_it() -> None:
+    """The documented ``--`` path, which could not fire until now.
+
+    ``auto_map``'s contract is "non-fan rows whose target id is not available
+    on this host stay unbound — the panel renders ``--``".  Measured on
+    2026-09-14 it never happened for 16 of its 20 exact-id targets: they are
+    STATIC catalog keys that ``discover()`` advertised on every machine, so
+    every row bound and a macOS host showed ``0`` for CPU Usage / Clock / Power
+    instead of ``--`` — and ``auto_map`` PERSISTS what it binds.
+    """
+    from trcc.adapters.infra.sysinfo_config import SysInfoConfig
+    from trcc.adapters.sensors.aggregator import BaselineSensors
+    from trcc.core.ports import CpuSource
+
+    from .conftest import FakeMemory
+
+    class _TempOnlyCpu(CpuSource):
+        @property
+        def name(self) -> str:
+            return "temp-only"
+
+        def temp(self) -> float | None:
+            return 47.5
+
+    enum = BaselineSensors(cpu=_TempOnlyCpu(), memory=FakeMemory(),
+                           gpus=[], fans=[])
+    cfg = SysInfoConfig.__new__(SysInfoConfig)
+    cfg.panels = SysInfoConfig.defaults()
+    cfg.auto_map(enum.discover())
+
+    cpu_panel = next(p for p in cfg.panels if p.category_id == 1)
+    bound = {b.label: b.sensor_id for b in cpu_panel.sensors}
+    assert bound["TEMP"] == "cpu:temp"
+    assert [lbl for lbl in ("Usage", "Clock", "Power") if bound[lbl]] == [], (
+        "a row bound to a sensor this host can never read renders 0, not --"
+    )
