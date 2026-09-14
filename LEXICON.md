@@ -55,6 +55,9 @@ Shared terminology so everyone uses the same names.
 | **Web archive** | `{W}{H}.7z` — cloud theme preview PNGs |
 | **Mask archive** | `zt{W}{H}.7z` — cloud mask overlay templates |
 | **RGB565** | 16-bit pixel format (5R/6G/5B) sent to LCD via SCSI |
+| **User content** | An asset the USER authored, under `user_content_dir()` (`~/.trcc-user/`) — arrives at NATIVE resolution, so the compositor scales it by `DeviceSettings.fit_mode`. `Paths.is_user_content(path)` is the ONE place this is decided |
+| **Program content** | Shipped or cloud-downloaded, under `data_dir()` (`~/.trcc/data/`) — pre-authored AT the device canvas, so it takes the C# native-or-black width test (`Renderer.bg_fit`), never a letterbox |
+| **Origin** | Which of the two a given surface is. It travels WITH the surface (`RenderContent.background_is_user`, `Playback.is_user_content`), decided by whoever resolved it — never re-derived downstream |
 
 ## Settings Tab
 | Term | Meaning |

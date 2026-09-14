@@ -39,7 +39,7 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | [`CloudCatalog`](#cloudcatalog) | 4 | 0 | 1 |
 | [`MemorySource`](#memorysource) | 4 | 0 | 2 |
 | [`PackageManager`](#packagemanager) | 4 | 0 | 2 |
-| [`Paths`](#paths) | 4 | 9 | 5 |
+| [`Paths`](#paths) | 4 | 10 | 5 |
 | [`SendTask`](#sendtask) | 4 | 0 | 3 |
 | [`BulkTransport`](#bulktransport) | 5 | 0 | 2 |
 | [`ScsiTransport`](#scsitransport) | 5 | 0 | 3 |
@@ -536,7 +536,7 @@ log_file() -> Path
 user_content_dir() -> Path
 ```
 
-**You inherit (9):** `cloud_mask_dir` · `cloud_theme_dir` · `theme_dir` · `user_background_dir` · `user_data_dir` · `user_mask_dir` · `user_media_player_dir` · `user_screencast_dir` · `user_theme_dir`
+**You inherit (10):** `cloud_mask_dir` · `cloud_theme_dir` · `is_user_content` · `theme_dir` · `user_background_dir` · `user_data_dir` · `user_mask_dir` · `user_media_player_dir` · `user_screencast_dir` · `user_theme_dir`
 
 **Implementations (5):** `BSDPaths` · `BasePaths` · `LinuxPaths` · `MacOSPaths` · `WindowsPaths`
 

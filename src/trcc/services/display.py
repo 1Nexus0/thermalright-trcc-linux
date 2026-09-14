@@ -24,7 +24,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ..core._safe import is_under
 from ..core.geometry import content_is_portrait, plan_orientation
 from ..core.logs import per_frame
 from ..core.models import (
@@ -64,6 +63,12 @@ _WIDESCREEN_SPLIT_RESOLUTIONS: frozenset[tuple[int, int]] = frozenset({
     (1600, 720),
     (720, 1600),    # rotated portrait of the same panel
 })
+
+
+#: What :meth:`DisplayService._resolve_background` returns when nothing
+#: resolved.  A frozen value rather than ``None`` so every caller asks one
+#: question -- ``content.background is None`` -- instead of two.
+_NO_BACKGROUND = RenderContent(None, None)
 
 
 def _is_widescreen_split(visual_size: tuple[int, int]) -> bool:
@@ -989,15 +994,11 @@ class DisplayService:
         # 'color' has already painted; 'transparent' is intentionally
         # left at solid black so the overlay draws on a clean canvas.
         if mode == "theme":
-            source = self._resolve_background(info, theme, visual_size)
-            if source is not None:
-                src_w, src_h = self._r.surface_size(source)
+            content = self._resolve_background(info, theme, visual_size)
+            if content.background is not None:
+                src_w, src_h = self._r.surface_size(content.background)
                 dst_w, dst_h = visual_size
-                is_user = (
-                    theme.path is not None
-                    and is_under(Path(theme.path), self._paths.user_content_dir())
-                )
-                if is_user:
+                if content.background_is_user:
                     # User upload — native resolution; honor the user's chosen
                     # fit_mode (scale/letterbox as selected).
                     fit_w, fit_h, off_x, off_y = _fit(
@@ -1011,7 +1012,7 @@ class DisplayService:
                         else s.fit_mode,
                         fit_w, fit_h, off_x, off_y,
                     )
-                    fitted = self._r.resize(source, fit_w, fit_h)
+                    fitted = self._r.resize(content.background, fit_w, fit_h)
                     canvas = self._r.composite(
                         canvas, fitted, position=(off_x, off_y),
                     )
@@ -1020,10 +1021,7 @@ class DisplayService:
                     # shared with Renderer.build_frame (increment 2c): native at
                     # (0,0) when it fits the canvas width, else solid black.
                     # bg_fit logs the native/black branch (incl. the drop warn).
-                    canvas = self._r.bg_fit(
-                        canvas,
-                        RenderContent(source, None, background_is_user=False),
-                    )
+                    canvas = self._r.bg_fit(canvas, content)
             else:
                 log.warning(
                     "build_bg_mask %s: no background source resolved for theme %r — "
@@ -1127,13 +1125,23 @@ class DisplayService:
         info: ProductInfo,
         theme: Theme,
         visual_size: tuple[int, int],
-    ) -> Any | None:
-        """Return a Renderer surface for the current background frame.
+    ) -> RenderContent:
+        """Return the current background frame AND where it came from.
 
         Playback (set by ``PlayVideo`` or by a prior video-theme render)
         takes precedence — lets users play arbitrary videos without
         replacing the active theme. When no playback exists, fall back
         to the theme's bundled background image or video.
+
+        **The origin rides with the surface.**  Every branch below reaches a
+        DIFFERENT tree — a playback decoded at native, a ``background_path``
+        override, a reference theme's library asset resolved user-root-first,
+        the theme's own ``00.png`` — and only the branch that resolved it
+        knows which.  The caller used to ask the active THEME's directory
+        instead, which answers for none of the first three: a user upload
+        under a program theme took the canvas-sized native-or-black rule and
+        the panel went black, while the same file under a user theme
+        rendered.  ``Paths.is_user_content`` decides; nobody re-derives it.
         """
         # Playback override: PlayVideo Command pre-loads a video into
         # MediaService; StopVideo clears it. While a playback exists,
@@ -1157,7 +1165,13 @@ class DisplayService:
             # Frames are held ENCODED and exactly one is decoded per tick —
             # the C#'s ByteToBitmap(imageArray[gifCount]) (FormCZTV.cs:2176).
             # Holding them raw cost 3.1 GB on a 897-frame 1600x720 video.
-            return self._r.decode_image(payload) if payload else None
+            # The playback carries its own origin: ``PlayVideo`` decided it
+            # once when it picked a decode size, and that answer travels
+            # rather than being guessed again from the active theme.
+            return RenderContent(
+                self._r.decode_image(payload) if payload else None, None,
+                background_is_user=playback.is_user_content,
+            )
 
         # Cloud-background override (DeviceSettings.background_path) —
         # takes precedence over the active theme's own bg.  Set by
@@ -1184,9 +1198,12 @@ class DisplayService:
                         "skipping background this frame",
                         info.key, path.name,
                     )
-                    return None
+                    return _NO_BACKGROUND
                 if MEDIA.kind_of(ext) is MediaKind.IMAGE:
-                    return self._r.open_image(path)
+                    return RenderContent(
+                        self._r.open_image(path), None,
+                        background_is_user=self._paths.is_user_content(path),
+                    )
             else:
                 log.warning(
                     "resolve_background %s: override %s does not exist — "
@@ -1201,7 +1218,7 @@ class DisplayService:
                 "(no 00.png or Theme.{mp4,mov,webm,zt} in %s)",
                 info.key, theme.name, theme.path,
             )
-            return None
+            return _NO_BACKGROUND
         ext = path.suffix.lower()
         log.debug("resolve_background %s: theme %r → %s",
                   info.key, theme.name, path)
@@ -1225,17 +1242,23 @@ class DisplayService:
                 "skipping background this frame",
                 info.key, theme.name, path.name,
             )
-            return None
+            return _NO_BACKGROUND
 
         if MEDIA.kind_of(ext) is MediaKind.IMAGE:
-            return self._r.open_image(path)
+            # A reference theme's ``background`` key resolves user-root FIRST
+            # (``FileContentStore._resolve_asset_ref``), so even the theme's
+            # own background can live outside its directory, in either tree.
+            return RenderContent(
+                self._r.open_image(path), None,
+                background_is_user=self._paths.is_user_content(path),
+            )
 
         log.warning(
             "resolve_background %s: unrecognised background extension %r "
             "at %s — skipping",
             info.key, ext, path,
         )
-        return None
+        return _NO_BACKGROUND
 
     # ── Layer 2: metric overlay ───────────────────────────────────────
 

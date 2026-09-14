@@ -14,6 +14,7 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from ._safe import is_under
 from .errors import DeviceDisconnectedError, UnsupportedOperationError
 from .logs import per_frame
 from .models import VideoExportRequest
@@ -1103,6 +1104,32 @@ class Paths(ABC):
         """
         frame_log.debug("user_data_dir: called")
         return self.user_content_dir() / "data"
+
+    def is_user_content(self, path: Path) -> bool:
+        """True when *path* is an asset the USER authored, not a shipped one.
+
+        **The one place this question is answered.**  It decides how a
+        background is fitted: user content arrives at its NATIVE resolution
+        and honours ``DeviceSettings.fit_mode``; program/cloud content is
+        pre-authored at the device canvas and takes the C# native-or-black
+        width test (``Renderer.bg_fit``).  ``PlayVideo`` asks the same
+        question to pick a decode size, and the two answers have to agree or
+        a natively-decoded upload meets the canvas-sized rule.
+
+        They did not agree.  ``DisplayService`` used to ask it of the active
+        THEME's directory, which says nothing about where the background
+        came from -- a ``background_path`` override and a reference theme's
+        asset both resolve outside the theme dir -- so the same file rendered
+        or went black depending on which theme happened to be selected.
+
+        Rooted at :meth:`user_content_dir`, not :meth:`user_data_dir`, so
+        staged one-off content (``single-image/``, ``uploads/``) counts too.
+        Concrete on the ABC for the same reason :meth:`user_data_dir` is:
+        every OS roots user content the same way, only the root differs.
+        """
+        under = is_under(path, self.user_content_dir())
+        frame_log.debug("is_user_content: %s → %s", path, under)
+        return under
 
     def theme_dir(self, width: int, height: int, variant: str = "") -> Path:
         """Themes shipped with the app or downloaded from GitHub releases.

@@ -809,7 +809,7 @@ _FS_MODULES = frozenset({"shutil", "zipfile", "tarfile", "tempfile"})
 KNOWN_FS_IO: dict[str, int] = {
     "trcc/core/_safe.py": 3,
     "trcc/core/commands/_helpers.py": 7,
-    "trcc/core/commands/device.py": 13,
+    "trcc/core/commands/device.py": 12,
     # 32 -> 23.  The file was half-migrated in place: 23 calls already went
     # through ``app.themes`` while 32 went around it.  What moved answered a
     # STORAGE question — writing a theme's manifest and grid tile

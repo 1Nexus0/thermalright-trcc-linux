@@ -6,7 +6,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from .._safe import is_under
 from ..errors import (
     DeviceNotConnectedError,
     DeviceNotFoundError,
@@ -1132,11 +1131,16 @@ class PlayVideo(Command[VideoResult]):
         # by format).  Anything outside both trees (ad-hoc playback of
         # an arbitrary file) defaults to canvas-size too — the user
         # would need to save it as a theme first to get fit-mode.
+        #
+        # ``Paths.is_user_content`` is the ONE place that question is
+        # answered — the render path asks it too, to choose between
+        # fit_mode and the canvas-sized native-or-black rule, and the two
+        # have to agree about the same file.  ``.zt`` is excluded here and
+        # only here: it is authored at canvas and rejects a native decode.
         is_user_asset = False
         if self.path.suffix.lower() != ".zt":
             try:
-                user_root = app.platform.paths().user_content_dir().resolve()
-                is_user_asset = is_under(self.path, user_root)
+                is_user_asset = app.platform.paths().is_user_content(self.path)
             except (OSError, AttributeError):
                 # ``user_content_dir`` lookup or resolve failed (broken
                 # platform paths, missing dir).  Default to canvas-size

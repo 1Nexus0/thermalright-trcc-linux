@@ -360,6 +360,14 @@ class Playback:
     cursor: int = 0
     paused: bool = False
     loop: bool = True
+    #: Whether these frames were decoded at their NATIVE size, so the
+    #: compositor still has to fit them (``DeviceSettings.fit_mode``).  The
+    #: decode size IS the origin -- ``load_video`` is told ``None`` for user
+    #: uploads and a canvas size for program/cloud assets -- so carrying the
+    #: answer here means nobody downstream re-derives it from something else
+    #: and gets a different one.  ``Paths.is_user_content`` is where the
+    #: question is decided.
+    is_user_content: bool = False
 
     @property
     def frame_count(self) -> int:
@@ -486,6 +494,8 @@ class MediaService:
             zt = ZtDecoder(path=path, size=size)
             zt.decode()
             effective_fps = fps if fps != _DEFAULT_FPS else zt.fps
+            # ``.zt`` is authored AT canvas by ``UCVideoCut`` and rejects a
+            # native decode above, so it is never user-fitted content.
             playback = Playback(frames=zt.frames, fps=effective_fps)
             log.info("load_video: .zt decoded — %d frames @ %d fps",
                      len(zt.frames), effective_fps)
@@ -496,7 +506,8 @@ class MediaService:
                 duration_s=duration_s,
             )
             decoder.decode()
-            playback = Playback(frames=decoder.frames, fps=fps)
+            playback = Playback(frames=decoder.frames, fps=fps,
+                                is_user_content=size is None)
             log.info(
                 "load_video: ffmpeg decoded %s — %d frames @ %d fps",
                 path.suffix, len(decoder.frames), fps,
