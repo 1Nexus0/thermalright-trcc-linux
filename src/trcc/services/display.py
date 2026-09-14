@@ -20,6 +20,7 @@ Device.send.  Order mirrors the C# ground truth
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -625,6 +626,7 @@ class DisplayService:
         frame: RawFrame,
         theme: Theme | None = None,
         sensors: dict[str, float] | None = None,
+        spectrum: Sequence[float] = (),
         profile: DeviceProfile | None = None,
     ) -> bytes:
         """Encode one captured screen region, with mask + metrics on top.
@@ -681,6 +683,15 @@ class DisplayService:
             overlay = self._build_overlay(
                 info, theme, sensors or {}, (target_w, target_h), clock)
             surface = self._r.composite(surface, overlay, position=(0, 0))
+
+        # Audio spectrum LAST, over everything, because it is a live meter
+        # rather than part of the picture — the same order the gui's tick drew
+        # it in.  Empty when the session asked for no audio or ``sounddevice``
+        # is absent, and then this is a no-op.
+        if len(spectrum):
+            frame_log.debug("build_screencast_frame: %d spectrum bands",
+                            len(spectrum))
+            surface = self._r.draw_spectrum(surface, spectrum)
 
         # PREVIEW = the composite, captured BEFORE the wire rotation, which is
         # the same point and the same rule ``build_frame`` uses: the display

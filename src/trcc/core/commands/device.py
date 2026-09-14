@@ -1348,6 +1348,15 @@ class StartScreencast(Command[ScreencastResult]):
         app.settings.set_screencast_region(
             self.key, (self.x, self.y, self.w, self.h, self.audio),
         )
+        # The spectrum is drawn into the wire frame by every face now, so the
+        # microphone belongs to the Command, not to whichever UI happened to
+        # subscribe.  ``start()`` answers False when ``sounddevice`` is absent
+        # and that is not an error — the cast runs without bars.
+        if self.audio and not app.audio.running:
+            started = app.audio.start()
+            log.info("StartScreencast.execute: audio capture started=%s "
+                     "(sounddevice present=%s)", started, started)
+
         app.events.publish(ScreencastStarted(
             key=self.key,
             x=self.x, y=self.y, w=self.w, h=self.h,
@@ -1495,9 +1504,16 @@ class SendScreencastFrame(Command[ScreencastResult]):
                         "— compositing this frame without metrics", self.key, e)
             sensors = {}
         try:
+            # The spectrum is resolved HERE, the same way sensors are three
+            # lines up: one live input per frame, handed to a compositor that
+            # stays ignorant of where either came from.  ``get_spectrum`` is
+            # lock-guarded and returns zeros when nothing is captured.
+            spectrum = (
+                tuple(app.audio.get_spectrum()) if app.audio.running else ()
+            )
             data = app.display.build_screencast_frame(
                 info=device.info, frame=self.frame,
-                theme=theme, sensors=sensors,
+                theme=theme, sensors=sensors, spectrum=spectrum,
             )
         except Exception as e:
             # A screencast outlives device churn and desktop-session churn; a
@@ -1596,6 +1612,22 @@ class CaptureScreencastFrame(Command[ScreencastResult]):
         )
 
 
+def _any_audio_session(app: App) -> bool:
+    """True while any device still has a screencast session wanting audio.
+
+    ``screencast_region`` carries the audio flag as its fifth element, so the
+    answer is already persisted per device — there is no second piece of state
+    to keep in step with it.
+    """
+    for key in app.devices:
+        region = app.settings.for_device(key).screencast_region
+        if region is not None and region[4]:
+            log.debug("_any_audio_session: %s still wants audio", key)
+            return True
+    log.debug("_any_audio_session: no device wants audio")
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class StopScreencast(Command[ScreencastResult]):
     """End the screen-capture session for a device.
@@ -1610,6 +1642,13 @@ class StopScreencast(Command[ScreencastResult]):
     def execute(self, app: App) -> ScreencastResult:
         log.info("StopScreencast.execute: key=%s", self.key)
         app.settings.set_screencast_region(self.key, None)
+        # One microphone, many possible panels: release it only once no OTHER
+        # device is still casting with audio, or stopping one screen would
+        # silence the bars on another.
+        if app.audio.running and not _any_audio_session(app):
+            log.info("StopScreencast.execute: last audio session — "
+                     "stopping capture")
+            app.audio.stop()
         app.events.publish(ScreencastStopped(key=self.key))
         return ScreencastResult(
             ok=True, key=self.key, active=False,

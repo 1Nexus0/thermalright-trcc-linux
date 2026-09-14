@@ -1568,6 +1568,76 @@ class Renderer(ABC):
                   color: str, size: int, bold: bool = False,
                   italic: bool = False, family: str = "") -> None: ...
 
+    def fill_rect(self, surface: Any, x: int, y: int, width: int, height: int,
+                  color: tuple[int, int, int, int]) -> Any:
+        """Draw an RGBA rectangle onto *surface*; returns the result.
+
+        **Concrete, and built only from primitives every Renderer already
+        implements** — ``create_surface`` makes the patch, ``composite`` lays
+        it over with alpha.  Adding this as an ABSTRACT method instead broke
+        every implementation at once: nine test doubles subclass this port and
+        none could be instantiated, 553 tests failed, and the cost of a new
+        primitive landed on files that have nothing to do with drawing.
+
+        It returns the surface because the default cannot mutate in place —
+        ``composite`` yields a new one.  A backend with a real painter should
+        OVERRIDE this, mutate, and return the same object: the default copies
+        the whole frame per call, which is fine for a one-shot and wrong for a
+        16-bar meter at 7 fps.  ``QtRenderer`` does exactly that.
+        """
+        frame_log.debug("fill_rect: (%d,%d) %dx%d rgba=%s (default: compose)",
+                        x, y, width, height, color)
+        patch = self.create_surface(width, height, color=color)
+        return self.composite(surface, patch, position=(x, y))
+
+    def draw_spectrum(self, surface: Any,
+                      levels: Sequence[float]) -> Any:
+        """Paint an audio spectrum analyser across the bottom of *surface*.
+
+        Concrete on the port, deliberately: the layout and the colour ramp
+        are the SAME picture on every backend, so only the rectangle fill is
+        abstract.  A new Renderer inherits the visualiser by implementing
+        :meth:`fill_rect` and nothing else.
+
+        It lived in ``ui/gui``'s screencast tick as a ``QPainter`` block, so
+        the bars existed for exactly one of the four faces — the CLI, the API
+        and qtgui asked for ``audio=True``, the flag was persisted in
+        ``screencast_region``, and nothing ever drew them.  Moving it here is
+        what makes the flag mean the same thing everywhere.
+
+        *levels* are per-band magnitudes in [0, 1] from
+        ``AudioCapture.get_spectrum()``; an empty sequence draws nothing,
+        which is what "no ``sounddevice`` installed" looks like.
+
+        Geometry is the ported original: bars fill the bottom quarter,
+        centred, 2 px apart, green through yellow to red with the level, at
+        alpha 200 so the picture underneath still reads.
+        """
+        if not len(levels):
+            frame_log.debug("draw_spectrum: no bands — nothing to draw")
+            return surface
+        width, height = self.surface_size(surface)
+        bar_area = int(height * 0.25)
+        gap = 2
+        count = len(levels)
+        bar_w = max(1, (width - gap * (count + 1)) // count)
+        x0 = (width - (bar_w + gap) * count) // 2
+        frame_log.debug("draw_spectrum: %d bands, bar=%dpx, area=%dpx",
+                        count, bar_w, bar_area)
+        for i, level in enumerate(levels):
+            clamped = 0.0 if level < 0.0 else 1.0 if level > 1.0 else float(level)
+            bar_h = max(1, int(clamped * bar_area))
+            # Green (quiet) -> yellow (half) -> red (loud).
+            # Alpha 200 (78%) so the picture underneath still reads through.
+            rgba: tuple[int, int, int, int] = (
+                (int(clamped * 2 * 255), 255, 0, 200) if clamped < 0.5
+                else (255, int((1 - clamped) * 2 * 255), 0, 200)
+            )
+            surface = self.fill_rect(
+                surface, x0 + i * (bar_w + gap), height - bar_h,
+                bar_w, bar_h, rgba)
+        return surface
+
     # ── Encoding ──────────────────────────────────────────────────────
     @abstractmethod
     def encode_rgb565(self, surface: Any, byte_order: str = ">") -> bytes: ...

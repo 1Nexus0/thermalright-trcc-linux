@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -221,6 +221,26 @@ class QtRenderer(Renderer):
         return result
 
     # ── Text ──────────────────────────────────────────────────────────
+
+    def fill_rect(self, surface: Any, x: int, y: int, width: int, height: int,
+                  color: tuple[int, int, int, int]) -> Any:
+        """Alpha-blended rectangle fill, IN PLACE — returns the same surface.
+
+        Overrides the port's default, which composes a patch and yields a new
+        surface: correct, but it copies the whole frame per call, and the
+        spectrum draws 16 of them per frame at capture rate.  One painter over
+        the existing image instead.
+
+        Antialiasing is on because the gui's ``_draw_spectrum`` drew it that
+        way — this is a port of that picture, not a new one.
+        """
+        frame_log.debug("fill_rect: (%d,%d) %dx%d rgba=%s",
+                        x, y, width, height, color)
+        painter = QPainter(surface)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(QRectF(x, y, width, height), QColor(*color))
+        painter.end()
+        return surface
 
     def draw_text(self, surface: Any, x: int, y: int, text: str,
                   color: str, size: int, bold: bool = False,

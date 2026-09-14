@@ -90,7 +90,7 @@ import logging_coverage  # noqa: E402  # pyright: ignore[reportMissingImports]
 #: branch log THE RULE asks for (it now says when there is no device yet).
 _SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "trcc"
 
-MAX_SILENT = 1262
+MAX_SILENT = 1260
 
 
 def test_logging_coverage_only_improves() -> None:

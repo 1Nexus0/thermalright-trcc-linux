@@ -132,8 +132,11 @@ class ScreencastHandler:
         self._lcd_w = 0
         self._lcd_h = 0
         self._capture_warn_logged = False
+        # The FLAG only.  The microphone itself belongs to the App now
+        # (``StartScreencast`` / ``StopScreencast``), because the spectrum is
+        # drawn into the wire frame for every face instead of into this
+        # window's capture.
         self._audio_enabled = False
-        self._audio: Any = None  # AudioCapture instance
 
         self._timer = QTimer(parent)
         self._timer.timeout.connect(self._tick)
@@ -182,11 +185,6 @@ class ScreencastHandler:
         """Enable/disable microphone audio visualization on screencast."""
         log.info("ScreencastHandler.set_audio_enabled: enabled=%s", enabled)
         self._audio_enabled = enabled
-        if self._active and enabled and self._audio is None:
-            self._start_audio()
-        elif not enabled and self._audio is not None:
-            self._audio.stop()
-            self._audio = None
 
     def stop(self) -> None:
         """Emergency stop — used by system-suspend / window-close paths
@@ -205,9 +203,6 @@ class ScreencastHandler:
     def cleanup(self) -> None:
         self._timer.stop()
         self._stop_pipewire()
-        if self._audio is not None:
-            self._audio.stop()
-            self._audio = None
 
     def _on_bus_screencast_started(self, event: Any) -> None:
         """Bus subscriber — start the Qt capture timer for ``event.key``.
@@ -228,8 +223,6 @@ class ScreencastHandler:
         from ..screen_overlay import is_wayland
         if is_wayland() and self._pipewire_cast is None:
             self._try_start_pipewire()
-        if self._audio_enabled and self._audio is None:
-            self._start_audio()
         self._timer.start(150)
 
     def _on_bus_screencast_stopped(self, event: Any) -> None:
@@ -243,39 +236,6 @@ class ScreencastHandler:
         self._active = False
         self._timer.stop()
         self._stop_pipewire()
-
-    def _start_audio(self) -> None:
-        from trcc.services.audio import AudioCapture
-        self._audio = AudioCapture()
-        if not self._audio.start():
-            self._audio = None
-
-    def _draw_spectrum(self, image: Any) -> None:
-        """Draw spectrum analyzer bars at the bottom of a QImage."""
-        from PySide6.QtCore import QRectF
-        from PySide6.QtGui import QColor, QPainter
-        spectrum = self._audio.get_spectrum()  # type: ignore[union-attr]
-        w, h = image.width(), image.height()
-        bar_area_h = int(h * 0.25)  # bottom 25% of frame
-        num_bars = len(spectrum)
-        gap = 2
-        bar_w = max(1, (w - gap * (num_bars + 1)) // num_bars)
-        x_offset = (w - (bar_w + gap) * num_bars) // 2
-
-        painter = QPainter(image)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        for i, level in enumerate(spectrum):
-            bar_h = max(1, int(level * bar_area_h))
-            x = x_offset + i * (bar_w + gap)
-            y = h - bar_h
-            # Gradient: green at bottom → yellow → red at top
-            ratio = level
-            if ratio < 0.5:
-                r, g, b = int(ratio * 2 * 255), 255, 0
-            else:
-                r, g, b = 255, int((1 - ratio) * 2 * 255), 0
-            painter.fillRect(QRectF(x, y, bar_w, bar_h), QColor(r, g, b, 200))
-        painter.end()
 
     def _try_start_pipewire(self) -> None:
         from .pipewire_capture import PIPEWIRE_AVAILABLE, PipeWireScreenCast
@@ -334,10 +294,10 @@ class ScreencastHandler:
             QtGui_Qt.AspectRatioMode.IgnoreAspectRatio,
             QtGui_Qt.TransformationMode.SmoothTransformation)
 
-        # Draw audio spectrum bars at the bottom of the frame
-        if self._audio is not None and self._audio.running:
-            self._draw_spectrum(frame_img)
-
+        # NO spectrum here.  ``SendScreencastFrame`` resolves the levels and
+        # ``build_screencast_frame`` draws them into the WIRE frame, so the
+        # bars reach the CLI, the API and qtgui too instead of only this
+        # window's capture.
         self._on_frame(frame_img)
 
 
@@ -1607,7 +1567,8 @@ class TRCCApp(QMainWindow):
         self.uc_theme_setting.overlay_grid.element_selected.connect(self._on_element_flash)
         self.uc_theme_setting.screencast_params_changed.connect(self._screencast.set_params)
         self.uc_theme_setting.screencast_panel.border_toggled.connect(self._screencast.set_border)
-        self.uc_theme_setting.screencast_panel.audio_toggled.connect(self._screencast.set_audio_enabled)
+        self.uc_theme_setting.screencast_panel.audio_toggled.connect(
+            self._on_screencast_audio_toggled)
         self.uc_theme_setting.capture_requested.connect(self._on_capture_requested)
         self.uc_theme_setting.eyedropper_requested.connect(self._on_eyedropper_requested)
 
@@ -1905,6 +1866,35 @@ class TRCCApp(QMainWindow):
         else:
             self._app.dispatch(StopScreencast(key=h.device_key))
         self.uc_preview.set_status(f"Screencast: {'On' if enabled else 'Off'}")
+
+    def _on_screencast_audio_toggled(self, enabled: bool) -> None:
+        """Audio on/off, mid-session included.
+
+        The flag lives in ``screencast_region``'s fifth element — the one
+        persisted truth — so changing it is re-issuing the session with the
+        new flag rather than a second piece of state to keep in step.  That
+        also puts the microphone's lifecycle on the Command bus, where every
+        face reaches it: this used to start and stop a local ``AudioCapture``
+        that only this window could see, which is why a CLI or API screencast
+        with ``audio=True`` never produced a bar.
+
+        Off-session it is just a flag; ``_on_screencast_toggle`` reads it when
+        the cast starts.
+        """
+        log.info("_on_screencast_audio_toggled: enabled=%s", enabled)
+        self._screencast.set_audio_enabled(enabled)
+        h = self._active_lcd()
+        if not (h and self._screencast.active):
+            log.debug("_on_screencast_audio_toggled: no live session — "
+                      "flag stored for the next start")
+            return
+        x, y, w, sh = self._screencast.params
+        result = self._app.dispatch(StartScreencast(
+            key=h.device_key, x=x, y=y, w=w, h=sh, audio=enabled,
+        ))
+        if not result.ok:
+            log.warning("_on_screencast_audio_toggled: re-issue failed: %s",
+                        result.message)
 
     def _on_video_display_toggle(self, enabled: bool) -> None:
         log.debug("_on_video_display_toggle: enabled=%s", enabled)

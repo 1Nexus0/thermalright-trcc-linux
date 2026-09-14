@@ -67,6 +67,7 @@ from .core.ports import (
 from .core.protocol import artwork_variant, mask_variant
 from .core.registry import find_product
 from .core.results import ConnectResult, Result
+from .services.audio import AudioCapture
 from .services.cloud_theme import CloudThemeService
 from .services.device_sender import DeviceSender
 from .services.display import DisplayService
@@ -198,6 +199,14 @@ class App:
         self.video_export_runner: VideoExportRunner = video_export_runner
         # Per-device slideshow cursor — tick-driven, no background thread.
         self.slideshow = SlideshowService()
+        # ONE microphone for the whole box, so one capture serves however many
+        # panels are casting with audio.  Owned here rather than by the window
+        # because the spectrum is drawn into the WIRE frame now: it belonged to
+        # ``ui/gui``'s tick, which is why the CLI, the API and qtgui could set
+        # ``audio=True``, persist it in ``screencast_region``, and never see a
+        # bar.  Started by ``StartScreencast``, stopped by ``StopScreencast``
+        # once no device still wants it.
+        self.audio = AudioCapture()
         # Per-device send workers (actors) — one owns each device's wire,
         # serializing every write + keepalive-resending volatile (Bulk/LY)
         # firmware (absorbing the former KeepaliveService cache).  Created on
