@@ -87,7 +87,7 @@ from typing import Any
 import pytest
 
 from trcc.core.models import RawFrame
-from trcc.core.protocol import FBL_PROFILES
+from trcc.core.protocol import FBL_PROFILES, get_profile
 from trcc.services.display import DisplayService
 
 from .test_display_rotation import RecordingRenderer
@@ -180,4 +180,143 @@ def test_wire_frame_matches_the_rendered_frame_shape(
         f"rendered frame is {rendered[0]}x{rendered[1]}.  Both ship under the "
         f"same header, so the panel paints only the overlap (#262) — the "
         f"shutdown blank leaves part of the glass lit."
+    )
+
+
+# ── the screencast composites mask + metrics, and its geometry did NOT move ──
+#
+# Reported 2026-09-14: "it does capture the screen but it blinks the metrics
+# mask".  Two defects compounded.  ``build_screencast_frame`` skipped the
+# theme/overlay pipeline entirely -- its own docstring said the layering was
+# still to come -- so a screencast showed the bare desktop; and nothing gated
+# ``_DeviceRenderObserver``, so every ``SensorsUpdated`` dispatched a full
+# theme render to the same panel.  At ~7 fps capture (``SCREENCAST_TICK_S``)
+# against a 2 s sensor tick the panel showed ~13 bare frames then one frame of
+# mask+metrics, forever.
+#
+# The C# has one producer and composites every frame: ``CopyFromScreen`` writes
+# the region into ``bitmapBGK`` (FormCZTV.cs:3550) -- the same slot a GIF
+# (:3007) and the video player (:3057) write -- and ``GenerateImage`` draws
+# background -> mask -> a ``DrawString`` per metric.
+
+def _screencast_bytes(display, info, profile, theme, renderer):
+    renderer.calls.clear()
+    return display.build_screencast_frame(
+        info=info, frame=RawFrame(b"", 64, 64), theme=theme, profile=profile,
+    )
+
+
+def _geometry_ops(renderer) -> list[tuple]:
+    """The resize/rotate calls, by their NUMBERS only.
+
+    The recorded args carry the surface object too, and that is a fresh
+    instance per build -- comparing it compares identity, not geometry.
+    """
+    return [
+        (name, *[a for a in args if isinstance(a, (int, float))])
+        for name, args in renderer.calls
+        if name in ("resize", "rotate")
+    ]
+
+
+@pytest.mark.parametrize("fbl", sorted(FBL_PROFILES))
+@pytest.mark.parametrize("angle", ANGLES)
+def test_screencast_geometry_is_unchanged_by_the_overlay(
+    fbl: int, angle: int, tmp_path: Path,
+) -> None:
+    """Adding the layers must not move the canvas or the rotation.
+
+    The composite is inserted BEFORE ``_apply_post_processing`` /
+    ``_orient_for_wire``, so the tail sees the same surface shape it always
+    did.  Asserted over every panel the catalog can produce, at every angle,
+    because the divergence this protects is panel-specific: the oracle
+    composes screencasts on the ORIENTED canvas (``GIFSize`` transposes at
+    90/270 for non-square panels) where we compose on the native one, and
+    moving to that is a separate, coupled change -- it needs the region
+    picker's aspect lock to transpose too, which it does not yet do.
+
+    MUTATION CHECK: see the ordering test below -- a call-count comparison
+    alone does NOT catch a mis-ordered composite, which is why that test
+    exists separately.
+    """
+    profile = get_profile(fbl, 0)
+    info = _info(fbl, profile.resolution)
+    renderer = RecordingRenderer()
+    display = _display(renderer, tmp_path)
+    display._settings.set_orientation(info.key, angle)
+
+    _screencast_bytes(display, info, profile, None, renderer)
+    without = _geometry_ops(renderer)
+
+    _screencast_bytes(display, info, profile, _theme(), renderer)
+    with_theme = _geometry_ops(renderer)
+
+    assert without == with_theme, (
+        f"fbl={fbl} {profile.resolution} @{angle}: compositing the mask and "
+        f"metrics changed the geometry of the screencast frame"
+    )
+
+
+@pytest.mark.parametrize("fbl", sorted(FBL_PROFILES))
+def test_screencast_composites_the_mask_and_the_metrics(
+    fbl: int, tmp_path: Path,
+) -> None:
+    """The layers are actually drawn -- the defect was that they were not.
+
+    Checks the COMPOSITE calls, not the bytes: a fake renderer's bytes are
+    inert, but which layers reached ``composite`` is exactly what was missing.
+    """
+    profile = get_profile(fbl, 0)
+    info = _info(fbl, profile.resolution)
+    renderer = RecordingRenderer()
+    display = _display(renderer, tmp_path)
+
+    _screencast_bytes(display, info, profile, None, renderer)
+    bare = sum(1 for n, _ in renderer.calls if n == "composite")
+
+    _screencast_bytes(display, info, profile, _theme(), renderer)
+    composed = sum(1 for n, _ in renderer.calls if n == "composite")
+
+    assert composed > bare, (
+        f"fbl={fbl}: a screencast with an active theme composited no extra "
+        f"layer -- the mask and metric elements are missing from the frame"
+    )
+
+
+@pytest.mark.parametrize("fbl", sorted(FBL_PROFILES))
+@pytest.mark.parametrize("angle", ANGLES)
+def test_screencast_composites_before_it_rotates(
+    fbl: int, angle: int, tmp_path: Path,
+) -> None:
+    """Mask and metrics go on BEFORE the wire rotation, never after.
+
+    The layers are composed at the un-rotated canvas size, so compositing them
+    after ``_orient_for_wire`` would paint an upright overlay onto a rotated
+    background -- metrics lying sideways across the picture, at the wrong
+    size on any panel whose rotation transposes the axes.
+
+    It also matches the C#, where rotation happens ONLY in the encoders
+    (``ImageTo565`` / ``ImageToJpg``) and ``GenerateImage`` composes upright.
+
+    MUTATION CHECK: move the composite block below ``_orient_for_wire`` in
+    ``build_screencast_frame`` and every rotating (fbl, angle) pair fails.
+    A call-COUNT gate cannot see this -- compositing adds no resize or
+    rotate -- so the order is asserted directly.
+    """
+    profile = get_profile(fbl, 0)
+    info = _info(fbl, profile.resolution)
+    renderer = RecordingRenderer()
+    display = _display(renderer, tmp_path)
+    display._settings.set_orientation(info.key, angle)
+
+    _screencast_bytes(display, info, profile, _theme(), renderer)
+    names = [n for n, _ in renderer.calls]
+    if "rotate" not in names:
+        pytest.skip(f"fbl={fbl} @{angle} does not rotate — nothing to order")
+
+    assert "composite" in names, "the overlay never reached the frame"
+    assert names.index("composite") < names.index("rotate"), (
+        f"fbl={fbl} {profile.resolution} @{angle}: the overlay is composited "
+        f"AFTER the wire rotation, so it paints upright onto a rotated "
+        f"background — call order was {names}"
     )

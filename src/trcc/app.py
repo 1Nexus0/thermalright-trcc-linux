@@ -1133,6 +1133,25 @@ class _DeviceRenderObserver:
                     type(event).__name__, key,
                 )
                 continue
+            # A screencast OWNS the panel while it runs: its tick already
+            # composes background + mask + metrics at capture rate, so a
+            # reactive theme render here is a SECOND producer writing the same
+            # device.  It is not a harmless extra frame -- the two composites
+            # differ (the screencast's background is the captured region, this
+            # one's is the theme), so at ~7 fps capture against a 2 s sensor
+            # tick the panel alternated ~13 screen frames with one theme frame:
+            # the reported "blinking metrics mask" (2026-09-14).
+            #
+            # Gating the PRODUCER, not the send: the metrics still refresh,
+            # sooner in fact, because the capture tick composes them at 7 fps
+            # instead of 0.5 Hz.
+            if self._app.settings.for_device(key).screencast_region is not None:
+                log.debug(
+                    "DeviceRenderObserver: skip %s for %s (screencast owns "
+                    "the panel; its tick renders at capture rate)",
+                    type(event).__name__, key,
+                )
+                continue
             log.debug(
                 "DeviceRenderObserver: %s for %s → RenderAndSend",
                 type(event).__name__, key,

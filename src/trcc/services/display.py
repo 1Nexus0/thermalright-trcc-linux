@@ -618,25 +618,47 @@ class DisplayService:
         *,
         info: ProductInfo,
         frame: RawFrame,
+        theme: Theme | None = None,
+        sensors: dict[str, float] | None = None,
         profile: DeviceProfile | None = None,
     ) -> bytes:
-        """Encode a single captured screen region for the device wire.
+        """Encode one captured screen region, with mask + metrics on top.
 
-        Used by the screencast tick: GUI grabs a region, hands the raw
-        RGB24 to this method, gets back ready-to-send bytes.  Skips the
-        theme/overlay pipeline entirely — screencasts replace the
-        background and (usually) the user runs them with
-        ``background_mode = "transparent"`` so overlay elements still
-        paint on top once we layer them in.
+        **The capture is the BACKGROUND, not a replacement for the frame.**
+        That is the C# model exactly: ``CopyFromScreen`` writes the captured
+        region into ``bitmapBGK`` (FormCZTV.cs:3550) — the same slot a GIF
+        (:3007) and the video player (:3057) write — and ``GenerateImage``
+        then draws background -> ``bitmapMB`` (the mask) -> a ``DrawString``
+        per metric element, every frame.  It holds in the threaded path too:
+        ``StartPipeline``'s first stage assigns the same ``bitmapBGK`` and
+        calls the same compositor.
 
-        Honors per-device brightness + device-side rotation so the
-        live capture matches the rest of the device's behaviour.
+        Until 2026-09-14 this method skipped both layers ("once we layer them
+        in", it said), so a screencast showed the bare desktop while
+        ``RenderAndSend`` — which nothing gated — overwrote it with a full
+        theme frame on every ``SensorsUpdated``.  At ~7 fps capture against a
+        2 s sensor tick the panel showed ~13 bare frames, then one frame of
+        mask+metrics, forever: the reported "blinking metrics mask".
+
+        ``theme`` is optional because a caller mid-teardown may have none; the
+        capture is then sent bare, which is the old behaviour and still beats
+        dropping the frame.
+
+        **Geometry is deliberately untouched.**  The canvas stays
+        ``plan_orientation(..., False).canvas`` and rotation stays
+        ``_orient_for_wire``, so the wire bytes are unchanged on every panel
+        at every orientation.  The oracle composes on the ORIENTED canvas
+        instead (``GIFSize`` transposes at 90/270 for non-square panels,
+        FormCZTV.cs:3430-3512), which is a real divergence on 6 FBLs — but it
+        is coupled to the capture aspect, which the region picker does not yet
+        transpose, and changing both belongs in its own verified step.
         """
-        log.debug("build_screencast_frame: key=%s", info.key)
+        log.debug("build_screencast_frame: key=%s theme=%s",
+                  info.key, theme.name if theme else None)
         resolved = self._resolve_profile(info, profile)
-        s0 = self._settings.for_device(info.key)
+        s = self._settings.for_device(info.key)
         target_w, target_h = plan_orientation(
-            resolved, s0.orientation, False).canvas
+            resolved, s.orientation, False).canvas
 
         surface = self._r.from_raw_rgb24(frame)
         if (
@@ -644,7 +666,18 @@ class DisplayService:
         ):
             surface = self._r.resize(surface, target_w, target_h)
 
-        s = self._settings.for_device(info.key)
+        if theme is not None:
+            surface = self._composite_mask(info, s, theme, surface)
+            clock = compute_clock(
+                time_format=s.time_format,
+                date_format=s.date_format,
+                language=self._settings.app.language,
+            )
+            overlay = self._build_overlay(
+                info, theme, sensors or {}, (target_w, target_h), clock)
+            surface = self._r.composite(surface, overlay, position=(0, 0))
+
+
         surface = self._apply_post_processing(surface, s, resolved)
         surface = self._orient_for_wire(surface, s, resolved, info)
         return self._encode_for_wire(surface, resolved)
@@ -977,32 +1010,51 @@ class DisplayService:
         # Mask layer: per-device override (ApplyMask Command) takes
         # precedence over the theme's bundled mask; mask_visible=False
         # skips the layer entirely. Position defaults to (0, 0).
+        return self._composite_mask(info, s, theme, canvas)
+
+    def _composite_mask(
+        self,
+        info: ProductInfo,
+        s: DeviceSettings,
+        theme: Theme,
+        canvas: Any,
+    ) -> Any:
+        """Lay the mask over *canvas*, or return it untouched.
+
+        Extracted so the SCREENCAST path composites the identical layer: the
+        C# has exactly ONE mask draw per compose half and both are gated the
+        same way (``UCScreenImage.cs:1118`` and ``:1511``,
+        ``if (isDrawMbImage && bitmapMB != null)``), so a screencast that
+        merely skipped the mask would not be a different mode — it would be
+        a missing layer.
+
+        A user-picked mask (``DeviceSettings.mask_path``) takes precedence
+        over the theme's bundled one; ``mask_visible=False`` skips the layer
+        entirely.  Position defaults to (0, 0).
+        """
         mask_source = self._resolve_mask_source(s, theme)
         if mask_source is not None:
             mask = self._r.open_image(mask_source)
             mw, mh = self._r.surface_size(mask)
             position = s.mask_position or (0, 0)
             frame_log.debug(
-                "build_bg_mask %s: mask %s (%dx%d) at top-left (%d, %d) "
+                "composite_mask %s: mask %s (%dx%d) at top-left (%d, %d) "
                 "[visible=%s]",
                 info.key, mask_source, mw, mh, position[0], position[1],
                 s.mask_visible,
             )
-            canvas = self._r.composite(canvas, mask, position=position)
-        else:
-            # NB: no ``self._themes.mask_path(theme)`` here.  Arguments are
-            # evaluated eagerly, so naming it in a DEBUG call did real
-            # filesystem work on EVERY frame to build a string that is
-            # usually discarded — and when mask_visible is False it did the
-            # very lookup ``_resolve_mask_source`` had just decided to skip.
-            # It adds nothing either: reaching this branch with a visible
-            # mask means the theme mask resolved to None. (#264)
-            frame_log.debug(
-                "build_bg_mask %s: no mask composited (visible=%s, "
-                "override=%r)",
-                info.key, s.mask_visible, s.mask_path,
-            )
-
+            return self._r.composite(canvas, mask, position=position)
+        # NB: no ``self._themes.mask_path(theme)`` here.  Arguments are
+        # evaluated eagerly, so naming it in a DEBUG call did real
+        # filesystem work on EVERY frame to build a string that is
+        # usually discarded — and when mask_visible is False it did the
+        # very lookup ``_resolve_mask_source`` had just decided to skip.
+        # It adds nothing either: reaching this branch with a visible
+        # mask means the theme mask resolved to None. (#264)
+        frame_log.debug(
+            "composite_mask %s: no mask composited (visible=%s, override=%r)",
+            info.key, s.mask_visible, s.mask_path,
+        )
         return canvas
 
     def _resolve_mask_source(

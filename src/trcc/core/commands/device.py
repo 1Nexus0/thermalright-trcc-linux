@@ -1469,9 +1469,31 @@ class SendScreencastFrame(Command[ScreencastResult]):
                         self.key, e)
             return ScreencastResult(ok=False, key=self.key, message=str(e))
 
+        # The capture is the BACKGROUND; the active theme's mask and metric
+        # elements compose on top of it, which is what the C# does for every
+        # background source it has (FormCZTV.cs:3550 -> bitmapBGK ->
+        # GenerateImage).  Sensors are personalised here for the same reason
+        # ``RenderAndSend`` personalises them: the renderer must receive the
+        # already-converted, already-filtered dict that every other metrics
+        # consumer sees, or a screencast would show °C while the theme shows °F.
+        from ...services.metrics_personalize import personalize_readings
+        theme = app.active_themes.get(self.key)
+        app_s = app.settings.app
+        try:
+            sensors = personalize_readings(
+                app.platform.sensors().read_all(),
+                temp_unit=app_s.temp_unit,
+                hdd_enabled=app_s.hdd_enabled,
+            )
+        except Exception as e:
+            # A sensor fault costs the METRICS on one frame, never the frame.
+            log.warning("SendScreencastFrame: sensor read failed for %s (%s) "
+                        "— compositing this frame without metrics", self.key, e)
+            sensors = {}
         try:
             data = app.display.build_screencast_frame(
                 info=device.info, frame=self.frame,
+                theme=theme, sensors=sensors,
             )
         except Exception as e:
             # A screencast outlives device churn and desktop-session churn; a
