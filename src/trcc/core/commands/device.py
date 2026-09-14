@@ -1508,6 +1508,14 @@ class SendScreencastFrame(Command[ScreencastResult]):
         app.send(self.key, data)
         frame_log.debug("SendScreencastFrame: %s sent %d bytes",
                         self.key, len(data))
+        # Same publish ``RenderAndSend`` makes, for the same reason: the UI
+        # must show the frame that was SENT, not one it composed for itself.
+        # The gui used to paint its preview from the raw grab, so the panel
+        # showed the mask and the metrics and the preview showed neither.
+        app.events.publish(FrameSent(
+            key=self.key, bytes_sent=len(data),
+            surface=app.display.rendered_surface(self.key),
+        ))
         return ScreencastResult(
             ok=True, key=self.key,
             message=f"sent {self.frame.width}x{self.frame.height} to {self.key}",

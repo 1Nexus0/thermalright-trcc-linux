@@ -1227,7 +1227,7 @@ class LCDHandler(BaseHandler):
         )
 
     def on_screencast_frame(self, image: Any) -> None:
-        """Handle captured screencast frame — preview + send to LCD.
+        """Handle a captured screencast frame — encode + send to the LCD.
 
         Encoding to wire bytes runs through ``app.display.build_screencast_frame``
         before the SendFrame dispatch.  Best-effort: if the device isn't
@@ -1235,8 +1235,18 @@ class LCDHandler(BaseHandler):
         churn.
         """
         # Per-tick path; entry stays DEBUG.
-        if self._pm.ui_active:
-            self._w['preview'].set_image(image)
+        #
+        # The preview is NOT painted here.  It used to be, straight from this
+        # raw grab — which is a DIFFERENT PICTURE from the one the panel gets:
+        # the wire frame carries the theme's mask and metric elements
+        # composited over the capture, and this image carries neither.  The
+        # panel showed them, the preview did not.
+        #
+        # ``SendScreencastFrame`` publishes ``FrameSent`` with the composited
+        # surface, exactly as ``RenderAndSend`` does, and the bus bridge hands
+        # it to ``handle_frame``.  One producer, one picture, and the preview
+        # agrees with the glass by construction rather than by two call sites
+        # being kept in step.
         # The capture tick hands over a renderer SURFACE; the wire speaks
         # ``RawFrame``.  Passing the surface straight through is what made
         # every frame die on ``.data`` — the preview updated and the panel

@@ -20,7 +20,7 @@ Device.send.  Order mirrors the C# ground truth
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -677,10 +677,40 @@ class DisplayService:
                 info, theme, sensors or {}, (target_w, target_h), clock)
             surface = self._r.composite(surface, overlay, position=(0, 0))
 
+        # PREVIEW = the composite, captured BEFORE the wire rotation, which is
+        # the same point and the same rule ``build_frame`` uses: the display
+        # angle is a MOUNT CORRECTION, so an upright preview is what lets an
+        # owner turn the dial until the glass reads right, and it is what keeps
+        # the surface editable (overlay drag maps widget->LCD by scale alone,
+        # with no angle term).
+        #
+        # It has to be published or the preview shows a DIFFERENT PICTURE from
+        # the panel: the gui painted its preview straight from the raw grab
+        # (``lcd_handler.on_screencast_frame``), so once the wire frame gained
+        # the mask and the metrics, the LCD had them and the preview did not.
+        self._remember_preview(info.key, surface)
 
         surface = self._apply_post_processing(surface, s, resolved)
         surface = self._orient_for_wire(surface, s, resolved, info)
         return self._encode_for_wire(surface, resolved)
+
+    def _remember_preview(self, key: str, surface: Any) -> None:
+        """Park *surface* where :meth:`rendered_surface` will find it.
+
+        Updates the existing scene rather than replacing it: the scene also
+        holds ``build_frame``'s overlay and wire-byte caches, and dropping
+        those would make the next theme render recompose from nothing.  When
+        there is no scene yet, the entry carries ``frame_key=None``, which the
+        full-pipeline cache treats as a miss — a preview must never be able to
+        satisfy a request for wire bytes.
+        """
+        frame_log.debug("_remember_preview: key=%s", key)
+        scene = self._scenes.get(key)
+        self._scenes[key] = (
+            replace(scene, preview_surface=surface) if scene is not None
+            else SceneCache(overlay_surface=None, overlay_key=(),
+                            preview_surface=surface)
+        )
 
     def build_image_frame(
         self,

@@ -321,3 +321,59 @@ def test_the_metrics_actually_reach_the_screencast_pixels(tmp_home: Path) -> Non
         "reaching the panel, which is the reported defect"
     )
 
+
+def test_the_preview_shows_the_same_picture_as_the_panel(tmp_home: Path) -> None:
+    """The preview surface must be the COMPOSITED frame, not the raw grab.
+
+    Reported 2026-09-14, immediately after the mask/metrics fix landed: "it
+    does not show the metrics mask in preview just on the lcd screen".  The
+    gui painted its preview directly from the captured image
+    (``lcd_handler.on_screencast_frame``) while the wire frame went through
+    the compositor, so the two diverged the moment the wire frame gained a
+    layer.
+
+    ``SendScreencastFrame`` now publishes ``FrameSent`` carrying the composited
+    surface, the same way ``RenderAndSend`` does, so both faces read one
+    picture.  Asserted on the SURFACE the event would carry, because that is
+    the thing the gui paints.
+
+    MUTATION CHECK: drop the ``_remember_preview`` call in
+    ``build_screencast_frame`` and ``rendered_surface`` answers None — the
+    preview would go blank rather than stale, which is why None is asserted
+    against explicitly.
+    """
+    from trcc.adapters.render.qt import QtRenderer
+    from trcc.core.models import OverlayElement, RawFrame, Theme
+
+    app = App(platform=FakePlatform(tmp_home), renderer=QtRenderer())
+    resp = bytearray(0xE100)
+    resp[0] = 100
+    app.platform.scsi.read_script.append(bytes(resp))   # type: ignore[attr-defined]
+    assert app.dispatch(ConnectDevice(key=_KEY)).ok
+
+    info = app.get(_KEY).info
+    theme = Theme(name="T", path=tmp_home, resolution=(320, 320))
+    app.active_themes[_KEY] = theme
+    app.settings.for_device(_KEY).overlay_enabled = True
+    app.settings.add_user_overlay_element(_KEY, OverlayElement(
+        id="e0", type="text", text="CPU", x=40, y=40, size=36, color="#ff0000"))
+
+    grab = RawFrame(data=bytes([128, 128, 128]) * (320 * 320),
+                    width=320, height=320)
+    app.display.build_screencast_frame(
+        info=info, frame=grab, theme=theme, sensors={})
+
+    preview = app.display.rendered_surface(_KEY)
+    assert preview is not None, (
+        "no preview surface was recorded — the gui would show a blank panel"
+    )
+
+    # The composited preview must differ from the flat grey grab: if it does
+    # not, the preview is the raw capture again and the defect is back.
+    bare = app.display.build_screencast_frame(info=info, frame=grab, theme=None)
+    composited = app.display.build_screencast_frame(
+        info=info, frame=grab, theme=theme, sensors={})
+    assert bare != composited, (
+        "the preview path is showing an uncomposited frame — the mask and "
+        "metrics reach the panel but not the preview"
+    )
