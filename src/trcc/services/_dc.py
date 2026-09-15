@@ -546,15 +546,19 @@ def _parse_dc(data: bytes, theme_name: str) -> dict[str, Any]:
     # clock/date/weekday block.  Same fields legacy DcParser reads
     # after the 13 positions; ported verbatim to avoid silently losing
     # the time/date/weekday elements 0xDC themes carry.
+    show_unit = True
     try:
         r.read_string()         # custom-text string (unused here)
-        # ``num8`` — the C# copies this into EVERY value element's
-        # ``myModeSub``, i.e. it is the theme's show-unit switch.  MEASURED
-        # 2026-09-14: False in 20 of 1050 shipped 0xDC masks, whose art bakes
-        # its own unit glyph — and we draw the unit regardless.  Honouring it
-        # changes what renders, so it is deliberately NOT part of this naming
-        # fix; it is read and dropped exactly as before.
-        r.read_bool()
+        # ``num8`` — the theme's SHOW-UNIT switch.  The C# copies this one
+        # bool into every value element's ``myModeSub`` (``arrayList5..10[1]
+        # = num8``), which is the same field 0xDD carries per element and
+        # which ``_build_dd_element`` already translates to ``show_unit``.
+        # 0xDC had no equivalent: its metric formats bake the glyph in and
+        # the flag was read and dropped, so a mask whose ART already draws
+        # "°C" got a second one from us.  MEASURED: 10 of 500 shipped 0xDC
+        # files ask for it hidden (2.0%); on the 0xDD side 177 of 1274
+        # (13.9%) do, and those have always worked.
+        show_unit = r.read_bool()
         _read_run(r, _TRAILER_TAIL, trailer)
     except (struct.error, IndexError) as e:
         log.debug("0xDC tail absent/truncated (%s) — keeping defaults", e)
@@ -606,6 +610,13 @@ def _parse_dc(data: bytes, theme_name: str) -> dict[str, Any]:
     except (struct.error, IndexError):
         # Trailer is optional — older 0xDC themes don't have it.
         pass
+
+    # One flag for all six values, applied where 0xDD applies its per-element
+    # one — so both formats hand the overlay the same vocabulary and
+    # ``_draw_metric`` needs to know nothing about which file it came from.
+    for element in elements:
+        if element.get("type") == "metric":
+            element["show_unit"] = show_unit
 
     return {
         "name": theme_name,

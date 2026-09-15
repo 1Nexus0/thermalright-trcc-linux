@@ -408,3 +408,72 @@ def test_legacy_overlay_custom_text(tmp_path: Path) -> None:
     assert list(cfg.keys()) == ["custom_text"]
     assert cfg["custom_text"]["text"] == "GPU"
     assert cfg["custom_text"]["x"] == 5
+
+
+def _build_dc_with_trailer(*, show_unit: bool) -> bytes:
+    """A 0xDC buffer carrying the trailer, so ``num8`` is reachable.
+
+    ``_build_dc`` above stops after the 13 positions, which is a valid older
+    0xDC and exactly why the show-unit flag went unnoticed: every test theme
+    took the default.
+    """
+    buf = bytearray(_build_dc())
+    buf.append(0)                                  # custom-text string (empty)
+    buf.append(1 if show_unit else 0)              # num8 — THE SHOW-UNIT FLAG
+    buf.extend(struct.pack("<i", 0))               # myMode
+    buf.append(0)                                  # myYcbk
+    buf.extend(struct.pack("<4i", 0, 0, 0, 0))     # JpX JpY JpW JpH
+    buf.append(1)                                  # myMbxs
+    buf.extend(struct.pack("<2i", 0, 0))           # XvalMB YvalMB
+    return bytes(buf)
+
+
+def test_a_0xdc_mask_that_bakes_its_unit_is_drawn_bare(tmp_path: Path) -> None:
+    """``num8`` False → every metric VALUE draws the number without a unit.
+
+    The mask art already carries "°C"; drawing ours over it double-prints.
+    The 0xDD side has honoured the same field per element all along
+    (``myModeSub``), so this is one format catching up with the other rather
+    than a new behaviour — 10 of 500 shipped 0xDC files ask for it, against
+    177 of 1274 on the 0xDD side that already worked.
+    """
+    f = tmp_path / "Baked" / "config1.dc"
+    f.parent.mkdir()
+    f.write_bytes(_build_dc_with_trailer(show_unit=False))
+
+    cfg = load_dc_as_theme_config(f)
+
+    metrics = [e for e in cfg["elements"] if e["type"] == "metric"]
+    assert metrics, "no metric elements parsed — this pin proves nothing"
+    assert all(e["show_unit"] is False for e in metrics), (
+        "a 0xDC mask asked for the bare number and we kept the unit"
+    )
+
+
+def test_a_0xdc_mask_that_wants_the_unit_keeps_it(tmp_path: Path) -> None:
+    """The mirror — the common case must not regress to bare numbers."""
+    f = tmp_path / "Unit" / "config1.dc"
+    f.parent.mkdir()
+    f.write_bytes(_build_dc_with_trailer(show_unit=True))
+
+    cfg = load_dc_as_theme_config(f)
+
+    metrics = [e for e in cfg["elements"] if e["type"] == "metric"]
+    assert metrics and all(e["show_unit"] is True for e in metrics)
+
+
+def test_a_0xdc_label_is_not_given_a_show_unit(tmp_path: Path) -> None:
+    """``num8`` drives the six VALUE slots, not the labels beside them.
+
+    The C# assigns it to ``arrayList5..10`` — the value elements — and a label
+    is static text with no unit to strip.
+    """
+    f = tmp_path / "Labels" / "config1.dc"
+    f.parent.mkdir()
+    f.write_bytes(_build_dc_with_trailer(show_unit=False))
+
+    cfg = load_dc_as_theme_config(f)
+
+    texts = [e for e in cfg["elements"] if e["type"] == "text"]
+    assert texts, "no text elements parsed — this pin proves nothing"
+    assert all("show_unit" not in e for e in texts)
