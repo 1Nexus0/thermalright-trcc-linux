@@ -396,9 +396,16 @@ class TRCCApp(QMainWindow):
         # TRCC_DAEMON=1, and the screen being captured belongs to THIS
         # session, not to whichever one owns USB.
         from ...adapters.screencast import build_screen_capture
+        # The config dir comes off the BUS, not off ``app.platform`` — the
+        # latter is an AttributeError under TRCC_DAEMON=1.  It is only used to
+        # keep the portal's restore token, so a denied Query costs a consent
+        # prompt next launch and nothing else.
+        paths = self._app.dispatch(GetPaths())
         self._screencast = ScreencastHandler(
             self, self._on_screencast_frame,
-            capture=build_screen_capture())
+            capture=build_screen_capture(
+                Path(paths.config_dir) if paths.ok and paths.config_dir
+                else None))
 
         # Connect widget signals
         self._connect_view_signals()

@@ -215,12 +215,29 @@ def test_one_place_chooses_the_backend() -> None:
 
 
 def test_the_os_delegates_to_that_chooser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """And hands it the config dir, which is where the portal token is kept.
+
+    Without it the backend has nowhere to store what the portal returns, so
+    the consent dialog reappears on every launch — a silent downgrade, since
+    capture still works.
+    """
     from trcc.adapters.system.linux import LinuxOS
 
     sentinel = QtScreenCapture()
+    seen: list[object] = []
+
+    def chooser(config_dir=None):
+        seen.append(config_dir)
+        return sentinel
+
     monkeypatch.setattr("trcc.adapters.screencast.build_screen_capture",
-                        lambda: sentinel)
-    assert LinuxOS()._build_screen_capture() is sentinel
+                        chooser)
+    os_ = LinuxOS()
+
+    assert os_._build_screen_capture() is sentinel
+    assert seen == [os_.paths().config_dir()], (
+        f"the OS did not forward its config dir: {seen}"
+    )
 
 
 # ── the blank-grab trap ───────────────────────────────────────────────

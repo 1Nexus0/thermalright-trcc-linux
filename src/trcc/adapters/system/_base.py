@@ -276,7 +276,7 @@ class BaseOS(Platform):
 
         log.info("%s._build_screen_capture: delegating to the shared backend "
                  "chooser", type(self).__name__)
-        return build_screen_capture()
+        return build_screen_capture(self.paths().config_dir())
 
     # ── Shared transport / scan ──────────────────────────────────────────
 

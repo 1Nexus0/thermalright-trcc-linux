@@ -64,8 +64,11 @@ class _Session:
 
 
 def _capture(session: _Session, fallback: _Fallback) -> PipeWireScreenCapture:
-    cap = PipeWireScreenCapture(fallback, session_factory=lambda: session)
-    return cap
+    """The factory takes the stored token and a sink for a fresh one."""
+    def factory(restore_token=None, on_restore_token=None) -> _Session:
+        return session
+
+    return PipeWireScreenCapture(fallback, session_factory=factory)
 
 
 # ── the stride bug ────────────────────────────────────────────────────
@@ -201,7 +204,7 @@ def test_the_session_starts_once_across_many_grabs(
     monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
     made: list[_Session] = []
 
-    def factory() -> _Session:
+    def factory(restore_token=None, on_restore_token=None) -> _Session:
         made.append(_Session(running=False))
         return made[-1]
 
@@ -223,7 +226,7 @@ def test_construction_alone_raises_no_dialog(
     monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
     made: list[_Session] = []
 
-    def factory() -> _Session:
+    def factory(restore_token=None, on_restore_token=None) -> _Session:
         made.append(_Session())
         return made[-1]
 
@@ -238,7 +241,7 @@ def test_stop_lets_the_next_grab_start_a_fresh_session(
     monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
     made: list[_Session] = []
 
-    def factory() -> _Session:
+    def factory(restore_token=None, on_restore_token=None) -> _Session:
         made.append(_Session(running=False))
         return made[-1]
 
@@ -265,3 +268,190 @@ def test_the_shared_chooser_puts_the_portal_in_front_of_qt() -> None:
 
     assert isinstance(cap, PipeWireScreenCapture)
     assert isinstance(cap._fallback, QtScreenCapture)
+
+
+# ── the restore token ─────────────────────────────────────────────────
+
+
+class _TokenSession(_Session):
+    """Records the token it was handed, and can issue a new one."""
+
+    def __init__(self, issues: str | None = None, **kw: Any) -> None:
+        super().__init__(**kw)
+        self.received: str | None = kw.get("restore_token")
+        self._issues = issues
+
+    def start(self, timeout: float = 30.0) -> bool:
+        if self._issues is not None and self._on_token is not None:
+            self._on_token(self._issues)
+        return super().start(timeout)
+
+
+def _token_capture(tmp_path, **session_kw):
+    made: dict[str, Any] = {}
+
+    def factory(restore_token=None, on_restore_token=None):
+        s = _TokenSession(**session_kw)
+        s.received = restore_token
+        s._on_token = on_restore_token
+        made["session"] = s
+        return s
+
+    cap = PipeWireScreenCapture(_Fallback(), config_dir=tmp_path,
+                                session_factory=factory)
+    return cap, made
+
+
+def test_a_fresh_install_has_no_token_to_replay(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
+    cap, made = _token_capture(tmp_path)
+
+    cap.grab_region(0, 0, 4, 4)
+
+    assert made["session"].received is None
+
+
+def test_the_token_the_portal_issues_is_kept(tmp_path, monkeypatch) -> None:
+    """Half the contract, and the half that was missing.
+
+    ``persist_mode: 2`` asks the portal to remember the grant; the portal
+    answers with a ``restore_token`` on Start.  We asked and then dropped the
+    answer, so every launch prompted however many times the user had already
+    said yes.
+    """
+    monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
+    cap, made = _token_capture(tmp_path, issues="tok-abc")
+
+    cap.grab_region(0, 0, 4, 4)
+    made["session"].started.wait(2.0)
+
+    stored = tmp_path / PipeWireScreenCapture.TOKEN_FILE
+    assert stored.exists(), "the portal issued a token and it was dropped"
+    assert stored.read_text() == "tok-abc"
+
+
+def test_a_stored_token_is_replayed_on_the_next_run(
+    tmp_path, monkeypatch,
+) -> None:
+    """The next launch must not ask again."""
+    monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
+    (tmp_path / PipeWireScreenCapture.TOKEN_FILE).write_text("tok-xyz")
+
+    cap, made = _token_capture(tmp_path)
+    cap.grab_region(0, 0, 4, 4)
+
+    assert made["session"].received == "tok-xyz", (
+        "the stored token was not handed to the portal — the user is asked "
+        "for consent they already gave"
+    )
+
+
+def test_the_token_file_is_owner_only(tmp_path, monkeypatch) -> None:
+    """It is a capability: whoever reads it can re-grant our screen access."""
+    monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
+    cap, made = _token_capture(tmp_path, issues="tok-secret")
+
+    cap.grab_region(0, 0, 4, 4)
+    made["session"].started.wait(2.0)
+
+    mode = (tmp_path / PipeWireScreenCapture.TOKEN_FILE).stat().st_mode & 0o777
+    assert mode == 0o600, f"token file is {mode:o}, not owner-only"
+
+
+def test_without_a_config_dir_the_token_is_not_written(
+    tmp_path, monkeypatch,
+) -> None:
+    """No directory → the run keeps it, nothing is persisted, nothing crashes."""
+    monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
+    made: dict[str, Any] = {}
+
+    def factory(restore_token=None, on_restore_token=None):
+        s = _TokenSession()
+        s._on_token = on_restore_token
+        made["session"] = s
+        if on_restore_token is not None:
+            on_restore_token("tok-nowhere")
+        return s
+
+    cap = PipeWireScreenCapture(_Fallback(), config_dir=None,
+                                session_factory=factory)
+    cap.grab_region(0, 0, 4, 4)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_an_unreadable_token_costs_a_prompt_not_a_capture(
+    tmp_path, monkeypatch,
+) -> None:
+    """A broken token file must never stop the screencast."""
+    monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
+    bad = tmp_path / PipeWireScreenCapture.TOKEN_FILE
+    bad.mkdir()          # a directory where a file belongs
+
+    cap, made = _token_capture(tmp_path)
+    frame = cap.grab_region(0, 0, 4, 4)
+
+    assert frame.width == 4, "a bad token file broke the capture"
+    assert made["session"].received is None
+
+
+# ── the SESSION's own token logic ─────────────────────────────────────
+#
+# The tests above drive a FAKE session, so they pin the adapter's file
+# handling and nothing else — verified by mutation: deleting the token
+# capture and disabling the replay both left them green.  These reach the
+# real ``PipeWireScreenCast`` methods instead.
+
+
+def test_the_session_keeps_the_token_the_portal_returns() -> None:
+    """``_remember_restore_token`` is the half that was missing entirely."""
+    from trcc.adapters.screencast.pipewire import PipeWireScreenCast
+
+    seen: list[str] = []
+    session = PipeWireScreenCast(on_restore_token=seen.append)
+
+    session._remember_restore_token({"restore_token": "tok-from-portal"})
+
+    assert session._restore_token == "tok-from-portal"
+    assert seen == ["tok-from-portal"], "the token was not handed to the store"
+
+
+def test_a_portal_that_issues_no_token_is_not_an_error() -> None:
+    """"This time only", or a backend without persistence — just re-prompt."""
+    from trcc.adapters.screencast.pipewire import PipeWireScreenCast
+
+    seen: list[str] = []
+    session = PipeWireScreenCast(on_restore_token=seen.append)
+
+    session._remember_restore_token({"streams": [(42, {})]})
+
+    assert session._restore_token is None
+    assert seen == []
+
+
+@pytest.mark.skipif(not pw.PIPEWIRE_AVAILABLE,
+                    reason="needs dbus for the option types")
+def test_select_options_replays_a_stored_token() -> None:
+    """The request half: the token must reach ``SelectSources``.
+
+    ``persist_mode`` alone is what we shipped, and it does nothing on its own
+    — the portal remembers the grant and then cannot match it to us.
+    """
+    from trcc.adapters.screencast.pipewire import PipeWireScreenCast
+
+    opts = PipeWireScreenCast(restore_token="tok-stored")._select_options("h")
+
+    assert str(opts["restore_token"]) == "tok-stored"
+    assert int(opts["persist_mode"]) == 2, "persistence was not requested"
+
+
+@pytest.mark.skipif(not pw.PIPEWIRE_AVAILABLE,
+                    reason="needs dbus for the option types")
+def test_select_options_omits_the_token_when_there_is_none() -> None:
+    """A fresh install must not send an empty token and confuse the portal."""
+    from trcc.adapters.screencast.pipewire import PipeWireScreenCast
+
+    opts = PipeWireScreenCast()._select_options("h")
+
+    assert "restore_token" not in opts
+    assert int(opts["types"]) == 1, "monitor capture was not requested"

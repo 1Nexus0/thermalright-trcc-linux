@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from pathlib import Path
 from typing import Any
 
 from ...core.logs import per_frame
@@ -134,7 +135,13 @@ class PipeWireScreenCast:
         - start()/stop() should be called from the main thread
     """
 
-    def __init__(self):
+    def __init__(self, restore_token: str | None = None,
+                 on_restore_token: Any = None):
+        # The portal's half of ``persist_mode``.  Hand back the token it gave
+        # us last time and it re-grants silently; omit it and the user is
+        # asked again, however many times they have already said yes.
+        self._restore_token = restore_token
+        self._on_restore_token = on_restore_token
         self._session_path = None
         self._pipewire_fd = None
         self._node_id = None
@@ -279,12 +286,7 @@ class PipeWireScreenCast:
 
         request_path = screencast.SelectSources(
             dbus.ObjectPath(self._session_path),
-            dbus.Dictionary({
-                'handle_token': dbus.String(token),
-                'types': dbus.UInt32(1),       # 1 = MONITOR (not window)
-                'multiple': dbus.Boolean(False),
-                'persist_mode': dbus.UInt32(2),  # 2 = persist until revoked
-            }, signature='sv')
+            dbus.Dictionary(self._select_options(token), signature='sv')
         )
 
         bus.add_signal_receiver(
@@ -293,6 +295,47 @@ class PipeWireScreenCast:
             dbus_interface=_REQUEST_IFACE,
             path=request_path,
         )
+
+    def _select_options(self, token: str) -> dict:
+        """Options for ``SelectSources``, replaying a stored token if we have one.
+
+        ``persist_mode: 2`` asks the portal to remember the grant, and the
+        portal answers with a ``restore_token`` on Start.  Both halves are
+        required and only the first was here: we requested persistence and
+        then dropped the token, so every launch asked again -- for a
+        screencast theme meant to resume on boot, the difference between "it
+        comes back" and "it asks permission every time you log in".
+        """
+        options: dict = {
+            'handle_token': dbus.String(token),
+            'types': dbus.UInt32(1),       # 1 = MONITOR (not window)
+            'multiple': dbus.Boolean(False),
+            'persist_mode': dbus.UInt32(2),  # 2 = persist until revoked
+        }
+        if self._restore_token:
+            log.info("_select_options: replaying a stored restore token — the "
+                     "portal should re-grant without asking")
+            options['restore_token'] = dbus.String(self._restore_token)
+        else:
+            log.info("_select_options: no stored token — the portal will ask")
+        return options
+
+    def _remember_restore_token(self, results) -> None:
+        """Keep the token the portal issued, so the next run is not asked.
+
+        The portal may decline to issue one (the user chose "this time only",
+        or the backend does not implement persistence), and that is not an
+        error -- it simply means the next start prompts.
+        """
+        token = results.get('restore_token')
+        if not token:
+            log.info("_remember_restore_token: portal issued none — the next "
+                     "start will ask again")
+            return
+        log.info("_remember_restore_token: storing a fresh restore token")
+        self._restore_token = str(token)
+        if self._on_restore_token is not None:
+            self._on_restore_token(self._restore_token)
 
     def _on_select_sources_response(self, response, results):
         """Handle SelectSources response."""
@@ -337,6 +380,8 @@ class PipeWireScreenCast:
                          response)
             self._session_failed.set()
             return
+
+        self._remember_restore_token(results)
 
         streams = results.get('streams', [])
         if not streams:
@@ -514,18 +559,28 @@ class PipeWireScreenCapture(ScreenCapture):
     for a screencast.
     """
 
+    #: Where the portal's restore token is kept, under the caller's config dir.
+    TOKEN_FILE = "portal-restore-token"
+
     def __init__(
         self,
         fallback: ScreenCapture,
         *,
+        config_dir: Path | None = None,
         session_factory: Any = None,
         start_timeout: float = 30.0,
     ) -> None:
-        log.info("PipeWireScreenCapture: available=%s fallback=%s",
-                 PIPEWIRE_AVAILABLE, type(fallback).__name__)
+        log.info("PipeWireScreenCapture: available=%s fallback=%s config_dir=%s",
+                 PIPEWIRE_AVAILABLE, type(fallback).__name__, config_dir)
         self._fallback = fallback
         self._factory = session_factory or PipeWireScreenCast
         self._start_timeout = start_timeout
+        # The directory is passed in rather than resolved here: this adapter
+        # must not import the system package (which imports this one back),
+        # and both callers already hold a ``Paths``.  Without one the token
+        # lives for the run only, which is the old behaviour.
+        self._token_path = (config_dir / self.TOKEN_FILE
+                            if config_dir is not None else None)
         self._session: Any = None
         self._started = False
         self._lock = threading.Lock()
@@ -558,7 +613,10 @@ class PipeWireScreenCapture(ScreenCapture):
             if self._started:
                 return self._session
             self._started = True
-            self._session = self._factory()
+            self._session = self._factory(
+                restore_token=self._read_token(),
+                on_restore_token=self._write_token,
+            )
             log.info("PipeWireScreenCapture: starting the portal session in "
                      "the background; the fallback answers until it is up")
             threading.Thread(
@@ -575,6 +633,39 @@ class PipeWireScreenCapture(ScreenCapture):
             log.warning("PipeWireScreenCapture: portal session did not start "
                         "— staying on the fallback for this run")
             self._session = None
+
+    def _read_token(self) -> str | None:
+        """The token from a previous run, if one was kept."""
+        if self._token_path is None or not self._token_path.exists():
+            return None
+        try:
+            token = self._token_path.read_text(encoding="utf-8").strip()
+        except OSError as e:
+            log.warning("_read_token: could not read %s (%s) — the portal "
+                        "will ask again", self._token_path, e)
+            return None
+        log.info("_read_token: restore token found at %s", self._token_path)
+        return token or None
+
+    def _write_token(self, token: str) -> None:
+        """Keep *token* for the next run.
+
+        Owner-only, because it is a capability: anyone who can read it can ask
+        the portal to re-grant this app's screen access without a prompt.  A
+        failure here costs a prompt next time, never a capture.
+        """
+        if self._token_path is None:
+            log.info("_write_token: no config dir — the token lives for this "
+                     "run only, so the next start will ask again")
+            return
+        try:
+            self._token_path.parent.mkdir(parents=True, exist_ok=True)
+            self._token_path.write_text(token, encoding="utf-8")
+            self._token_path.chmod(0o600)
+            log.info("_write_token: stored at %s", self._token_path)
+        except OSError as e:
+            log.warning("_write_token: could not store at %s (%s) — the "
+                        "portal will ask again next run", self._token_path, e)
 
     def stop(self) -> None:
         """Tear the session down; the next grab starts a fresh one."""

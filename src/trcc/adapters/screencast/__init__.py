@@ -21,6 +21,7 @@ building its own local capture source is the correct ownership, and sharing
 this function is what keeps "which backend" a single decision.
 """
 import logging
+from pathlib import Path
 
 from ...core.ports import ScreenCapture
 from .pipewire import PIPEWIRE_AVAILABLE, PipeWireScreenCapture
@@ -32,7 +33,7 @@ __all__ = ("PipeWireScreenCapture", "QtScreenCapture",
            "build_screen_capture")
 
 
-def build_screen_capture() -> ScreenCapture:
+def build_screen_capture(config_dir: Path | None = None) -> ScreenCapture:
     """The desktop-capture backend for this session.
 
     ``QtScreenCapture`` degrades internally — Qt native, then ``grim`` /
@@ -49,5 +50,6 @@ def build_screen_capture() -> ScreenCapture:
     """
     log.info("build_screen_capture: PipeWireScreenCapture(available=%s) over "
              "QtScreenCapture (Qt native → grim → scrot → maim → import → "
-             "gnome-screenshot+crop → full-grab+crop)", PIPEWIRE_AVAILABLE)
-    return PipeWireScreenCapture(QtScreenCapture())
+             "gnome-screenshot+crop → full-grab+crop) config_dir=%s",
+             PIPEWIRE_AVAILABLE, config_dir)
+    return PipeWireScreenCapture(QtScreenCapture(), config_dir=config_dir)
