@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
+from ...core.geometry import lock_region_to_panel
 from ...core.i18n import tr
 from ...core.models import ACTION_ICON_IMAGES, DATE_FORMAT_IMAGES, OverlayMode
 from .assets import Assets
@@ -623,7 +624,9 @@ class ScreenCastPanel(DisplayModePanel):
             # ``ratio != 1.0`` guard, so they never locked at all.
             self._updating = True
             if which == 'w':
-                self.entry_h.setText(str(round(val * ratio)))
+                # ONE derivation, shared with qtgui — core.geometry.
+                *_, locked = lock_region_to_panel(self._resolution, 0, 0, val, 0)
+                self.entry_h.setText(str(locked))
             else:
                 self.entry_w.setText(str(round(val / ratio)))
             log.debug("_on_coord_changed: aspect lock %s=%d ratio=%.4f -> %sx%s",

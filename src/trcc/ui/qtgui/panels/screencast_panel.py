@@ -43,11 +43,13 @@ from PySide6.QtWidgets import (
 )
 
 from ....core.commands import (
+    DeviceState,
     StartScreencast,
     StartScreencastDriver,
     StopScreencast,
     StopScreencastDriver,
 )
+from ....core.geometry import lock_region_to_panel
 from ..base import BasePanel
 from ..device_picker import DevicePickerWidget
 
@@ -171,9 +173,21 @@ class ScreencastPanel(BasePanel):
         self, x: int, y: int, w: int, h: int,
     ) -> None:
         log.info("_on_region_selected: x=%s y=%s w=%s h=%s", x, y, w, h)
+        # Fit the drag to the panel's shape.  The C# oracle's viewfinder is
+        # PRE-SIZED from the panel and the user picks position only, so a
+        # free-form rectangle loses the guarantee the original gave: what you
+        # framed is what appears.  Before this, qtgui dragged unconstrained and
+        # the render pipeline squashed the result.
+        key = self._picker.current_key()
+        resolution = None
+        if key:
+            state = self.dispatch(DeviceState(key=key))
+            resolution = state.resolution if state.ok else None
+        x, y, w, h = lock_region_to_panel(resolution, x, y, w, h)
         self._region = (x, y, w, h)
+        suffix = "" if resolution else "  (no device picked — not fitted)"
         self._region_label.setText(
-            f"{w} × {h} at ({x}, {y})",
+            f"{w} × {h} at ({x}, {y}){suffix}",
         )
 
     def _on_region_cancelled(self) -> None:

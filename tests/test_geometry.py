@@ -15,6 +15,7 @@ import pytest
 from trcc.core.geometry import (
     OrientationPlan,
     content_is_portrait,
+    lock_region_to_panel,
     plan_orientation,
 )
 from trcc.core.models import Theme
@@ -188,3 +189,81 @@ def test_content_portrait_square_never_portrait() -> None:
     # Every signal points portrait, but a square panel never composes portrait.
     t = _theme("/x/theme240320/T", rotation=90)
     assert not content_is_portrait(t, _SQUARE, "/x/web/zt320320/m/01.png", True)
+
+
+# =========================================================================
+# lock_region_to_panel — TASK 4: the fit constraint, made universal
+# =========================================================================
+
+
+def test_a_dragged_region_takes_the_panel_shape() -> None:
+    """854x480 is 0.562 high per wide, so 200 across is 112 down.
+
+    Anchored to the number the gui panel's own comment records: on an 854x480
+    panel a width of 201 gives 113, and 200 gives 112.  The ratio is
+    height/width and height follows WIDTH — the width the user dragged is the
+    intent, so the gesture's horizontal extent is what survives.
+    """
+    assert lock_region_to_panel((854, 480), 10, 20, 200, 999) == (10, 20, 200, 112)
+
+
+def test_a_square_panel_locks_too() -> None:
+    """The old hardcoded table skipped squares behind a ``ratio != 1.0`` guard,
+    so a 320x320 device never locked at all."""
+    assert lock_region_to_panel((320, 320), 0, 0, 200, 999) == (0, 0, 200, 200)
+
+
+def test_the_panel_the_old_table_forgot() -> None:
+    """640x172 was missing from the tabulated ratios entirely and fell back to
+    0.75 — 2.8x wrong.  Derived, it is 0.269."""
+    assert lock_region_to_panel((640, 172), 0, 0, 200, 999) == (0, 0, 200, 54)
+
+
+def test_an_unknown_panel_leaves_the_region_alone() -> None:
+    """``None`` means "nobody has told us which panel yet".
+
+    Constraining to a panel we have not met would silently shrink the user's
+    region to a guess.
+    """
+    assert lock_region_to_panel(None, 10, 20, 200, 999) == (10, 20, 200, 999)
+
+
+@pytest.mark.parametrize("bad", [(0, 480), (854, 0), (-1, -1)])
+def test_a_degenerate_panel_leaves_the_region_alone(bad) -> None:
+    """A zero or negative dimension must not divide by zero or invert."""
+    assert lock_region_to_panel(bad, 5, 6, 100, 200) == (5, 6, 100, 200)
+
+
+def test_every_panel_in_the_catalog_gives_a_usable_height() -> None:
+    """Parametrized over the REAL catalog, not invented sizes.
+
+    ``FBL_PROFILES`` is the single source of truth for panel geometry, so a
+    panel added there cannot silently produce a zero-height region.
+    """
+    from trcc.core.protocol import FBL_PROFILES
+
+    seen = 0
+    for profile in FBL_PROFILES.values():
+        res = getattr(profile, "resolution", None)
+        if not res or res[0] <= 0 or res[1] <= 0:
+            continue
+        seen += 1
+        _, _, w, h = lock_region_to_panel(res, 0, 0, 200, 999)
+        assert w == 200, "the dragged width is the intent and must survive"
+        assert h >= 1, f"{res} produced a zero-height region"
+    assert seen > 5, f"only {seen} panels checked — is FBL_PROFILES wired?"
+
+
+def test_a_narrow_drag_on_a_wide_panel_never_collapses_to_zero() -> None:
+    """A 640x172 panel is 0.269 high per wide, so a 1px drag rounds to 0.
+
+    A zero-height region is not a small capture, it is a capture of nothing —
+    and it reaches the wire as a degenerate rectangle.  The ``max(1, ...)``
+    floor exists for this, and the catalog sweep at width 200 never reaches
+    it, so nothing tested it until a mutation removed the floor and every
+    test stayed green.
+    """
+    for width in (1, 2, 3):
+        _, _, w, h = lock_region_to_panel((640, 172), 0, 0, width, 999)
+        assert w == width
+        assert h >= 1, f"a {width}px drag collapsed to {h}px high"

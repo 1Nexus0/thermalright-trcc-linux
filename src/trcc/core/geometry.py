@@ -164,3 +164,46 @@ def save_folder_resolution(
     if rotate_panel:
         return (w, h)                       # landscape content at a portrait angle
     return oriented_resolution((w, h), orientation)
+
+
+def lock_region_to_panel(
+    resolution: tuple[int, int] | None,
+    x: int, y: int, width: int, height: int,
+) -> tuple[int, int, int, int]:
+    """Fit a screen region to the panel's aspect, keeping its top-left.
+
+    **The constraint is part of the FUNCTION, not the mechanism.**  The C#
+    oracle's ``FormScreenshot`` is a borderless *viewfinder*: ``MouseMove``
+    moves the whole form and ``MouseUp`` reports only ``Left``/``Top``, its
+    width and height coming from the panel.  The Windows user picks POSITION
+    and never size, so a region that does not match the panel's shape is not a
+    thing that release can express.  Capturing a free-form rectangle and
+    letting the render pipeline squash it loses the guarantee the original
+    gave: what you framed is what appears.
+
+    Ratio is ``height / width``.  Height follows width -- the width the user
+    dragged is the intent, and honouring it keeps the gesture's horizontal
+    extent, which is what a viewfinder's edges are read against.
+
+    ``resolution`` of ``None`` means "nobody has told us which panel yet" --
+    the same meaning it carries on ``DeviceStateResult.resolution`` -- and the
+    region is returned UNCHANGED.  Constraining to a panel we have not met
+    would shrink a user's region to a guess; a UI that answered with a default
+    ratio would be wrong by 2.8x on a 640x172.
+
+    Lives here rather than in a panel because all four faces want it: the gui
+    locked it, qtgui dragged free-form, and cli/api could not express it at
+    all.  One derivation, four callers.
+    """
+    if resolution is None:
+        log.debug("lock_region_to_panel: no panel known — region unchanged")
+        return x, y, width, height
+    pw, ph = resolution
+    if pw <= 0 or ph <= 0 or width <= 0:
+        log.debug("lock_region_to_panel: degenerate panel %sx%s or width %s — "
+                  "region unchanged", pw, ph, width)
+        return x, y, width, height
+    locked = max(1, round(width * (ph / pw)))
+    log.debug("lock_region_to_panel: %sx%s on a %sx%s panel -> %sx%s",
+              width, height, pw, ph, width, locked)
+    return x, y, width, locked
