@@ -385,7 +385,43 @@ sudo apt install python3-gi python3-dbus python3-gst-1.0
 sudo pacman -S python-gobject python-dbus python-gst
 ```
 
-> Screen cast works automatically on X11 and wlroots-based compositors (Sway, Hyprland). PipeWire portal is only needed for GNOME and KDE Wayland.
+> On X11 no portal is involved — capture goes through `grim`/`scrot`/`maim`/`import`.
+> On **every** Wayland compositor, including wlroots ones, capture goes through the
+> PipeWire portal, so you also need your compositor's portal backend:
+> `xdg-desktop-portal-gnome`, `xdg-desktop-portal-kde` or `xdg-desktop-portal-wlr`.
+
+The first launch asks permission to share your screen. Tick **"Remember this
+selection"** and TRCC stores the grant, so later launches start without asking.
+
+### Screen cast freezes on one image (Sway, Hyprland, river, Wayfire)
+
+**This is an upstream bug in `xdg-desktop-portal-wlr`, not in TRCC.**
+
+The panel shows the first captured frame and then never updates. Measured on
+`xdg-desktop-portal-wlr` 0.8.4 with sway 1.11: three identical runs delivered
+**211 frames, then 1, then 1** — so it is intermittent rather than constant.
+(Three runs is a small sample; treat it as "sometimes works", not as a rate.)
+The compositor itself is healthy throughout (`grim`, which uses
+the older `wlr-screencopy` protocol, captures normally); the fault is in the
+portal's newer `ext-image-copy-capture-v1` path.
+
+TRCC says so in the log when it happens:
+
+```
+screencast: the portal session is running but has produced no new frame for 5.0s
+— the panel is showing a frozen image.
+```
+
+**What you can do:**
+
+- Restart the screen cast — a fresh session often streams normally.
+- Try a newer `xdg-desktop-portal-wlr` if your distro has one. (We have not
+  confirmed which version fixes it — only that 0.8.4 is affected.)
+- `force_mod_linear=1` in `~/.config/xdg-desktop-portal-wlr/config` does **not**
+  help this particular problem (tested).
+
+Please don't file this against TRCC — but **do** file it if the log line above
+is absent while your panel is frozen, because that means something else.
 
 ---
 
