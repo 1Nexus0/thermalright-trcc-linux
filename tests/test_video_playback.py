@@ -872,7 +872,7 @@ def test_tick_display_advances_the_cursor(
 
 
 def test_render_and_send_never_advances_the_cursor(
-    connected_app: App, stub_media: Any, video_file: Path,
+    rendering_app: App, stub_media: Any, tmp_home: Path,
 ) -> None:
     """ROLE PIN: the re-render tick must NOT advance.
 
@@ -881,12 +881,21 @@ def test_render_and_send_never_advances_the_cursor(
     either to advance, a playing video would speed up whenever the sensors
     moved — erratic playback with no obvious cause.  If this test ever fails,
     someone has merged the two roles.
+
+    It needs a RENDERER and an ACTIVE THEME, and it asserts ``ok`` on every
+    dispatch.  Without those, all five RenderAndSends returned
+    ``ok=False, 'No active theme — dispatch LoadTheme first'`` and the pin
+    passed because nothing had rendered — the strongest-labelled guard in
+    the suite, unable to fail.  A guard that cannot fail is not a guard.
     """
-    playback = _playback_for(connected_app, video_file)
+    theme = _write_video_theme(tmp_home, "pinned")
+    rendering_app.active_themes[_KEY] = FileContentStore().load(theme)
+    playback = _playback_for(rendering_app, theme / "Theme.mp4")
     start = playback.cursor
 
-    for _ in range(5):
-        connected_app.dispatch(RenderAndSend(key=_KEY))
+    for attempt in range(1, 6):
+        result = rendering_app.dispatch(RenderAndSend(key=_KEY))
+        assert result.ok, f"render #{attempt} did not happen: {result.message}"
 
     assert playback.cursor == start, (
         "RenderAndSend advanced the cursor — the animation and re-render "
