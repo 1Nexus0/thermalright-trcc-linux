@@ -2160,3 +2160,34 @@ def test_the_confirmation_quotes_the_command_that_will_run(
         assert " ".join(preview.command) in preview.message
     else:
         assert preview.message, "a refusal must say why, it is shown to the user"
+
+
+def test_the_date_format_reaches_the_bus(gui_app: App, qtbot) -> None:
+    """qtgui could set the CLOCK format but not the DATE pattern.
+
+    Editable on purpose: the vocabulary is four tokens (``yyyy`` ``yy`` ``MM``
+    ``dd`` -- ``services/_clock._PATTERN_RULES``) with any separator passed
+    through, so a fixed list would cap what the CLI already accepts.  The gate
+    therefore drives a TYPED pattern, not a preset, because ``currentData()``
+    is ``None`` for anything the user types.
+    """
+    from trcc.ui.qtgui.panels.configuration_panel import ConfigurationPanel
+
+    panel = ConfigurationPanel(gui_app, _bus(gui_app))
+    qtbot.addWidget(panel)
+    panel._date.setCurrentText("dd.MM.yyyy")
+
+    sent: list[tuple[str, str]] = []
+    real = panel.dispatch
+
+    def spy(cmd):
+        if type(cmd).__name__ == "SetDateFormat":
+            sent.append((type(cmd).__name__, cmd.fmt))
+        return real(cmd)
+
+    panel.dispatch = spy                      # pyright: ignore[reportAttributeAccessIssue]
+    panel._apply_app_settings()
+
+    assert sent == [("SetDateFormat", "dd.MM.yyyy")], (
+        f"the typed pattern did not reach the bus intact: {sent}"
+    )

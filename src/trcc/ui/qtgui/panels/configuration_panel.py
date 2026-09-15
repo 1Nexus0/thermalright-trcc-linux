@@ -39,6 +39,7 @@ from ....core.commands import (
     LcdSnapshot,
     ListLanguages,
     SetBackgroundMode,
+    SetDateFormat,
     SetFitMode,
     SetLanguage,
     SetOverlayBackground,
@@ -170,6 +171,18 @@ class ConfigurationPanel(BasePanel):
         app_form.addRow("Language:", self._language)
         app_form.addRow("Refresh interval:", self._refresh)
         app_form.addRow("LCD clock format:", self._clock)
+
+        # EDITABLE, because the pattern language is open: four tokens
+        # (``yyyy`` ``yy`` ``MM`` ``dd``, see ``services/_clock._PATTERN_RULES``)
+        # with any separator passed through, so a fixed list would cap what the
+        # CLI already accepts.  The presets are the two the C# oracle ships
+        # plus the common European and ISO orders.
+        self._date = QComboBox(app_box)
+        self._date.setEditable(True)
+        for pattern in ("yyyy/MM/dd", "dd/MM/yyyy", "MM/dd/yyyy",
+                        "dd.MM.yyyy", "yyyy-MM-dd"):
+            self._date.addItem(pattern, userData=pattern)
+        app_form.addRow("LCD date format:", self._date)
         app_form.addRow("", self._app_apply_btn)
 
         self._populate_languages()
@@ -229,6 +242,10 @@ class ConfigurationPanel(BasePanel):
                 seconds=float(self._refresh.value()))).message,
             self.dispatch(SetTimeFormat(
                 fmt=str(self._clock.currentData()))).message,
+            # currentText, not currentData: the box is editable, so a pattern
+            # the user typed has no userData behind it.
+            self.dispatch(SetDateFormat(
+                fmt=self._date.currentText().strip())).message,
         ]
         if lang is not None:
             messages.append(
