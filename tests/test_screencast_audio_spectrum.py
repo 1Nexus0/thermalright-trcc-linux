@@ -26,6 +26,7 @@ from trcc.adapters.render.qt import QtRenderer
 from trcc.adapters.theme.filesystem import FileContentStore
 from trcc.core.models import Kind, ProductInfo, RawFrame, Theme, Wire
 from trcc.core.protocol import DeviceProfile
+from trcc.services.background import BackgroundSlot
 from trcc.services.display import DisplayService
 from trcc.services.media import MediaService
 from trcc.services.overlay import OverlayService
@@ -58,7 +59,7 @@ def display(renderer: QtRenderer, tmp_home: Path) -> DisplayService:
     return DisplayService(
         renderer=renderer, themes=FileContentStore(paths),
         overlay=OverlayService(renderer), settings=Settings(paths),
-        media=MediaService(), paths=paths,
+        media=MediaService(), backgrounds=BackgroundSlot(), paths=paths,
     )
 
 

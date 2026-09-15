@@ -25,6 +25,7 @@ from trcc.core.events import FrameSent
 from trcc.core.models import Kind, ProductInfo, RawFrame, Wire
 from trcc.core.ports import Renderer
 from trcc.core.protocol import get_profile
+from trcc.services.background import BackgroundSlot
 from trcc.services.display import DisplayService
 from trcc.services.media import MediaService
 from trcc.services.overlay import OverlayService
@@ -136,7 +137,7 @@ def display(renderer: RecordingRenderer, tmp_home: Path) -> DisplayService:
         themes=FileContentStore(),
         overlay=_StubOverlay(renderer),
         settings=Settings(FakePaths(tmp_home)),
-        media=MediaService(),
+        media=MediaService(), backgrounds=BackgroundSlot(),
         paths=FakePaths(tmp_home),
     )
 

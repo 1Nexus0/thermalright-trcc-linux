@@ -68,6 +68,7 @@ from .core.protocol import artwork_variant, mask_variant
 from .core.registry import find_product
 from .core.results import ConnectResult, Result
 from .services.audio import AudioCapture
+from .services.background import BackgroundSlot
 from .services.cloud_theme import CloudThemeService
 from .services.device_sender import DeviceSender
 from .services.display import DisplayService
@@ -126,6 +127,11 @@ class App:
         self.settings = Settings(platform.paths())
         self.themes = FileContentStore(platform.paths())
         self.media = MediaService()
+        # The current background per device.  Here rather than on
+        # DisplayService because ``_wire_display`` rebuilds that service
+        # whenever a renderer is attached, and a background that vanished on
+        # renderer attach would be a blank panel with no error.
+        self.backgrounds = BackgroundSlot()
         # Currently-loaded Theme per device — set by LoadTheme, read by
         # RenderAndSend ticker, cleared on DisconnectDevice.
         self.active_themes: dict[str, Theme] = {}
@@ -559,6 +565,7 @@ class App:
             overlay=OverlayService(renderer),
             settings=self.settings,
             media=self.media,
+            backgrounds=self.backgrounds,
             paths=self.platform.paths(),
         )
 
@@ -730,6 +737,7 @@ class App:
         self.active_themes.pop(key, None)
         self.led_runtime.pop(key, None)
         self.media.unload(key)
+        self.backgrounds.clear(key)
         self.slideshow.reset(key)
         if self._display is not None:
             self._display.invalidate(key)

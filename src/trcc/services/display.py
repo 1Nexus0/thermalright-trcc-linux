@@ -46,6 +46,7 @@ from ..core.protocol import (
     wire_angle,
 )
 from ._clock import compute_clock
+from .background import Background, BackgroundSlot
 from .bg_cache import BgMaskCache
 from .media import MediaService
 from .overlay import OverlayService, overlay_source, resolve_overlay_elements
@@ -152,6 +153,7 @@ class DisplayService:
         overlay: OverlayService,
         settings: Settings,
         media: MediaService,
+        backgrounds: BackgroundSlot,
         paths: Paths,
     ) -> None:
         self._r = renderer
@@ -159,6 +161,9 @@ class DisplayService:
         self._overlay = overlay
         self._settings = settings
         self._media = media
+        # What this device is currently showing, behind mask and metrics.
+        # Owned by App so it survives a renderer swap -- see BackgroundSlot.
+        self._backgrounds = backgrounds
         # Content origin (program/cloud vs user upload) drives the theme-bg
         # fill rule: program content is authored-for-canvas → the C# native-
         # or-black width test (no letterbox); user content keeps fit_mode
@@ -1005,7 +1010,20 @@ class DisplayService:
         # 'color' has already painted; 'transparent' is intentionally
         # left at solid black so the overlay draws on a clean canvas.
         if mode == "theme":
-            content = self._resolve_background(info, theme, visual_size)
+            # The slot answers first.  On a match nothing is resolved and no
+            # file is re-opened; on a miss -- a new theme, a new override, the
+            # next video frame -- the theme source resolves itself and pushes,
+            # which is what makes ``_resolve_background`` a producer rather
+            # than something the renderer asks every tick.
+            token = self._background_token(info, theme)
+            held = self._backgrounds.current(info.key, token)
+            if held is None:
+                resolved = self._resolve_background(info, theme, visual_size)
+                held = Background(resolved.background,
+                                  resolved.background_is_user)
+                self._backgrounds.push(info.key, token, held)
+            content = RenderContent(held.surface, None,
+                                    background_is_user=held.is_user_content)
             if content.background is not None:
                 src_w, src_h = self._r.surface_size(content.background)
                 dst_w, dst_h = visual_size
@@ -1326,63 +1344,69 @@ class DisplayService:
 
     # ── Cache keys ────────────────────────────────────────────────────
 
+    def _background_token(
+        self, info: ProductInfo, theme: Theme,
+    ) -> tuple[Any, ...]:
+        """WHICH background this device should be showing, and which frame.
+
+        The one derivation of background IDENTITY.  It answers the same
+        question ``_resolve_background`` answers with pixels, in the same
+        precedence -- playback, then the ``background_path`` override, then
+        the theme -- and both the slot and the bg+mask cache key are built
+        from it, so identity is stated once.
+
+        It used to be stated twice.  ``_bg_mask_key`` carried its own copy of
+        the precedence with a comment saying it "mirrors
+        ``_resolve_background``", which is a rule kept by hand across two
+        functions: get them out of step and the key stops moving while the
+        picture does, every tick HITs, and the panel freezes on one frame
+        while the cursor runs on underneath.
+
+        What is deliberately NOT here: the canvas size and the mask.  Those
+        are the CONSUMER's context -- they change how the background is
+        drawn, not which background it is -- so they stay with the cache key
+        and the slot holds one surface per source rather than one per canvas.
+        """
+        s = self._settings.for_device(info.key)
+        # A live playback IS the background, whatever the theme bundles --
+        # ``PlayVideo`` loads it and the cursor names the frame.
+        pb = self._media.playback(info.key)
+        if pb is not None and pb.frames:
+            source: tuple[Any, ...] = ("playback", s.background_path, pb.cursor)
+        elif s.background_path:
+            # A cloud / user override beats the theme's own background.
+            source = ("override", s.background_path)
+        else:
+            path = self._themes.background_path(theme)
+            animated = (path is not None
+                        and MEDIA.kind_of(path) is MediaKind.ANIMATED)
+            # A video-backed theme with no playback loaded should not happen
+            # (LoadTheme dispatches PlayVideo), but it must not share a token
+            # with a static theme if it does.
+            source = ("theme", str(theme.path), str(path), animated)
+        # ``background_mode`` decides whether the source is painted at all:
+        # 'color' paints a fill instead and 'transparent' paints nothing, so
+        # they are different backgrounds, not different renderings of one.
+        token = (*source, s.background_mode, s.overlay_background)
+        frame_log.debug("_background_token: key=%s → %s", info.key, token)
+        return token
+
     def _bg_mask_key(
         self,
         info: ProductInfo,
         theme: Theme,
         visual_size: tuple[int, int],
     ) -> tuple[Any, ...]:
-        # Cursor inclusion mirrors ``_resolve_background``'s precedence:
-        # if a live playback exists for this device, the rendered bg is
-        # ``playback.current`` (per-frame), regardless of whether the
-        # active theme's bundled background is static or video.  Asking
-        # ``themes.background_path(theme)`` alone misses the cloud-bg
-        # override case (active theme = static 00.png, but a cloud
-        # video overrides on top via ``DeviceSettings.background_path``)
-        # — the cache key would stay constant across ticks, every tick
-        # would HIT, and the LCD would freeze on the first-rendered
-        # frame.  Consulting MediaService directly fixes that.
-        cursor: int | None = None
-        pb = self._media.playback(info.key)
-        if pb is not None and pb.frames:
-            cursor = pb.cursor
-        else:
-            path = self._themes.background_path(theme)
-            if path is not None and MEDIA.kind_of(path) is MediaKind.ANIMATED:
-                # Defensive: video-backed theme without a loaded
-                # playback shouldn't happen post-Phase-1 (LoadTheme
-                # auto-dispatches PlayVideo), but pin cursor=0 so the
-                # key stays distinct from static-theme keys.
-                cursor = 0
         # Mask state belongs in this key so the bg+mask layer rebuilds when
         # ApplyMask / SetMaskPosition / SetMaskVisible run. The Commands
         # already explicitly invalidate, but including it defends against
         # any path that mutates Settings without going through Commands.
         s = self._settings.for_device(info.key)
         mask_sig = (s.mask_path, s.mask_position, s.mask_visible, s.fit_mode)
-        # ``background_path`` participates in the key so two cloud
-        # videos played back-to-back (each starting at cursor=0) don't
-        # share a cache entry — PlayVideo already calls
-        # _invalidate_scene, but keying on the override path is the
-        # explicit contract.
-        bg_override = s.background_path
-        # ``background_mode`` + ``overlay_background`` colour also
-        # affect what _build_bg_mask paints — SetBackgroundMode and
-        # SetOverlayBackground invalidate explicitly, but keying on
-        # them here is the explicit contract (same defence-in-depth
-        # the mask_sig provides).
-        bg_mode_sig = (s.background_mode, s.overlay_background)
-        # ``cursor=None`` on a video-backed theme IS the "LCD frozen on the
-        # first frame" bug — the key stays constant and every tick HITs — so
-        # the resolved cursor and where it came from are the diagnostic here.
-        frame_log.debug("_bg_mask_key: cursor=%s (playback=%s) size=%s "
-                        "bg_override=%s mask=%s mode=%s",
-                        cursor, pb is not None, visual_size, bg_override,
-                        mask_sig, bg_mode_sig)
-        return (
-            str(theme.path), bg_override, visual_size,
-            cursor, mask_sig, bg_mode_sig,
-        )
+        token = self._background_token(info, theme)
+        frame_log.debug("_bg_mask_key: token=%s size=%s mask=%s",
+                        token, visual_size, mask_sig)
+        return (token, visual_size, mask_sig)
 
     def _overlay_key(
         self,

@@ -31,6 +31,7 @@ from trcc.core.models import (
 )
 from trcc.core.ports import Renderer
 from trcc.core.protocol import DeviceProfile, get_profile
+from trcc.services.background import BackgroundSlot
 from trcc.services.display import DisplayService
 from trcc.services.media import MediaService
 from trcc.services.overlay import OverlayService
@@ -168,7 +169,7 @@ def display(renderer: RecordingRenderer, tmp_home: Path) -> DisplayService:
         themes=FileContentStore(),
         overlay=_StubOverlay(renderer),
         settings=settings,
-        media=MediaService(),
+        media=MediaService(), backgrounds=BackgroundSlot(),
         paths=paths,
     )
 
@@ -740,7 +741,7 @@ def _display_real(renderer: RecordingRenderer, tmp_home: Path) -> DisplayService
         renderer=renderer, themes=FileContentStore(),
         overlay=OverlayService(renderer),          # REAL overlay → records draw_text
         settings=Settings(FakePaths(tmp_home)),
-        media=MediaService(),
+        media=MediaService(), backgrounds=BackgroundSlot(),
         paths=FakePaths(tmp_home),
     )
 
@@ -860,7 +861,7 @@ def test_composing_without_a_mask_does_not_look_one_up_twice(
     themes = _CountingThemes()
     display = DisplayService(
         renderer=renderer, themes=themes, overlay=_StubOverlay(renderer),
-        settings=settings, media=MediaService(), paths=paths,
+        settings=settings, media=MediaService(), backgrounds=BackgroundSlot(), paths=paths,
     )
 
     theme_dir = tmp_home / "PlainTheme"

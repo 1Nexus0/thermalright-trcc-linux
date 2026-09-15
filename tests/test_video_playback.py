@@ -38,6 +38,7 @@ from trcc.core.models import (
 )
 from trcc.core.ports import Renderer
 from trcc.core.protocol import get_profile
+from trcc.services.background import BackgroundSlot
 from trcc.services.display import DisplayService
 from trcc.services.media import (
     MediaService,
@@ -452,7 +453,7 @@ def test_display_resolves_background_from_playback_when_present(
         themes=FileContentStore(),
         overlay=_StubOverlay(renderer),
         settings=Settings(FakePaths(tmp_home)),
-        media=media,
+        media=media, backgrounds=BackgroundSlot(),
         paths=FakePaths(tmp_home),
     )
 
@@ -488,7 +489,7 @@ def test_display_falls_back_to_theme_when_no_playback(tmp_home: Path) -> None:
         themes=FileContentStore(),
         overlay=_StubOverlay(renderer),
         settings=Settings(FakePaths(tmp_home)),
-        media=media,
+        media=media, backgrounds=BackgroundSlot(),
         paths=FakePaths(tmp_home),
     )
 
@@ -599,7 +600,7 @@ def _video_display(tmp_home: Path, n_frames: int):
         themes=FileContentStore(),
         overlay=OverlayService(renderer),
         settings=Settings(FakePaths(tmp_home)),
-        media=media,
+        media=media, backgrounds=BackgroundSlot(),
         paths=FakePaths(tmp_home),
     )
     info = ProductInfo(
@@ -809,7 +810,7 @@ def test_rendered_surface_exposes_sent_frame_for_preview(
         themes=FileContentStore(),
         overlay=OverlayService(renderer),
         settings=Settings(FakePaths(tmp_home)),
-        media=media,
+        media=media, backgrounds=BackgroundSlot(),
         paths=FakePaths(tmp_home),
     )
     info = ProductInfo(

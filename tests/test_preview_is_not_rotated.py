@@ -41,6 +41,7 @@ import pytest
 from trcc.core.geometry import plan_orientation
 from trcc.core.models import Kind, ProductInfo, Wire
 from trcc.core.protocol import FBL_PROFILES, get_profile
+from trcc.services.background import BackgroundSlot
 from trcc.services.display import DisplayService
 from trcc.services.settings import Settings
 
@@ -76,7 +77,7 @@ def _display(renderer: RecordingRenderer, tmp_home: Path) -> DisplayService:
     return DisplayService(
         renderer=renderer, themes=FileContentStore(),
         overlay=_StubOverlay(renderer), settings=Settings(paths),
-        media=MediaService(), paths=paths,
+        media=MediaService(), backgrounds=BackgroundSlot(), paths=paths,
     )
 
 

@@ -1798,6 +1798,7 @@ def _frame_path_rates(tmp_path: Path, *, starve_cache: bool,
     from trcc.adapters.theme.filesystem import FileContentStore
     from trcc.core.models import Kind, ProductInfo, Theme, Wire
     from trcc.core.protocol import get_profile
+    from trcc.services.background import BackgroundSlot
     from trcc.services.bg_cache import BgMaskCache
     from trcc.services.display import DisplayService
     from trcc.services.media import MediaService, Playback
@@ -1832,7 +1833,7 @@ def _frame_path_rates(tmp_path: Path, *, starve_cache: bool,
         themes=FileContentStore(),
         overlay=OverlayService(renderer),
         settings=Settings(paths),
-        media=media,
+        media=media, backgrounds=BackgroundSlot(),
         paths=paths,
     )
     if starve_cache:

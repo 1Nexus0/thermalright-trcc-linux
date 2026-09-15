@@ -22,6 +22,7 @@ import pytest
 from trcc.adapters.theme.filesystem import FileContentStore
 from trcc.core.models import Kind, OverlayElement, ProductInfo, RawFrame, Theme, Wire
 from trcc.core.ports import Renderer
+from trcc.services.background import BackgroundSlot
 from trcc.services.display import DisplayService
 from trcc.services.media import MediaService
 from trcc.services.overlay import OverlayService
@@ -143,7 +144,7 @@ def display(
         themes=FileContentStore(),
         overlay=_StubOverlay(renderer),
         settings=settings,
-        media=MediaService(),
+        media=MediaService(), backgrounds=BackgroundSlot(),
         paths=FakePaths(tmp_home),
     )
 
@@ -352,7 +353,7 @@ def _display_real(
         themes=FileContentStore(),
         overlay=OverlayService(renderer),
         settings=settings,
-        media=MediaService(),
+        media=MediaService(), backgrounds=BackgroundSlot(),
         paths=FakePaths(tmp_home),
     )
 

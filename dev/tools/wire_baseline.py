@@ -251,6 +251,7 @@ def _render_all(root: Path, *, tweak: dict[str, Any] | None = None,
     recording passes none.
     """
     from trcc.adapters.render.qt import QtRenderer
+    from trcc.services.background import BackgroundSlot
     from trcc.services.display import DisplayService
 
     tweak = tweak or {}
@@ -297,6 +298,7 @@ def _render_all(root: Path, *, tweak: dict[str, Any] | None = None,
             renderer=renderer, themes=store,
             overlay=OverlayService(renderer),
             settings=Settings(paths), media=_FixedMedia(playbacks),
+            backgrounds=BackgroundSlot(),
             paths=_FlippedPaths(root) if tweak.get("flip_origin") else paths,
         )
         s = display._settings.for_device(key)
