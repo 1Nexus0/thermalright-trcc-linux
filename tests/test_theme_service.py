@@ -51,7 +51,14 @@ def test_loads_json_theme(tmp_path: Path) -> None:
     assert t.config["overlay_enabled"] is True
 
 
-def test_falls_back_to_dc_and_migrates(tmp_path: Path) -> None:
+def test_dc_is_read_without_writing_a_json_beside_it(tmp_path: Path) -> None:
+    """A DC theme loads from its DC and leaves the directory as it found it.
+
+    The old behaviour wrote a derived ``trcc.json`` on first load so later
+    loads skipped the binary path.  That bought 2.5 ms across a 120-theme
+    listing and cost correctness: the derived copy became the authority, so
+    every later fix to the DC codec stopped at the themes already converted.
+    """
     theme = tmp_path / "DcTheme"
     theme.mkdir()
     (theme / "config1.dc").write_bytes(_build_dc())
@@ -59,33 +66,89 @@ def test_falls_back_to_dc_and_migrates(tmp_path: Path) -> None:
     svc = FileContentStore()
     t = svc.load(theme)
 
-    # Loaded from DC — name defaults to directory name
     assert t.name == "DcTheme"
-
-    # Migration wrote trcc.json alongside
-    json_path = theme / "trcc.json"
-    assert json_path.exists(), "auto-migration should have created config.json"
-    migrated = json.loads(json_path.read_text(encoding="utf-8"))
-    assert migrated["overlay_enabled"] is True
-
-    # Second load reads JSON directly; no re-migration
-    json_mtime_before = json_path.stat().st_mtime_ns
-    svc.load(theme)
-    assert json_path.stat().st_mtime_ns == json_mtime_before
+    assert not (theme / "trcc.json").exists(), (
+        "loading a DC theme must not write a derived trcc.json beside it"
+    )
+    assert sorted(p.name for p in theme.iterdir()) == ["config1.dc"]
 
 
-def test_prefers_json_over_dc_when_both_present(tmp_path: Path) -> None:
+def test_dc_wins_over_a_derived_json_and_the_artifact_goes(
+    tmp_path: Path,
+) -> None:
+    """Both files present → the DC is the config, the JSON is removed.
+
+    A directory can only carry both because the old migration put them there:
+    ``SaveTheme`` stages a clean dir and writes no DC, and ``export`` bundles
+    no DC so neither does ``import_``.  Measured on a real install: 125 such
+    pairs, ZERO authored.  The JSON here claims a name and an overlay flag
+    that BOTH differ from the DC, so serving the stale copy cannot pass.
+    """
     theme = tmp_path / "Both"
     theme.mkdir()
     (theme / "trcc.json").write_text(json.dumps({
-        "name": "Wins", "elements": [], "overlay_enabled": True,
+        "name": "StaleCopy", "elements": [], "overlay_enabled": False,
     }), encoding="utf-8")
     (theme / "config1.dc").write_bytes(_build_dc())
 
-    svc = FileContentStore()
-    t = svc.load(theme)
+    t = FileContentStore().load(theme)
 
-    assert t.name == "Wins"
+    assert t.name == "Both", "the stale JSON was served instead of the DC"
+    assert t.config["overlay_enabled"] is True, (
+        "overlay_enabled came from the stale JSON, not from the DC"
+    )
+    assert not (theme / "trcc.json").exists(), (
+        "the derived artifact survived, so it will be served again"
+    )
+
+
+def test_an_authored_manifest_alone_is_still_the_config(
+    tmp_path: Path,
+) -> None:
+    """No DC in the directory → the manifest is the theme, untouched.
+
+    This is every theme we author — ``SaveTheme`` and ``import_`` both produce
+    a manifest and no DC.  Nothing about the rule above may reach them.
+    """
+    theme = tmp_path / "Authored"
+    theme.mkdir()
+    (theme / "trcc.json").write_text(json.dumps({
+        "name": "Authored", "width": 320, "height": 320,
+        "elements": [], "overlay_enabled": False,
+    }), encoding="utf-8")
+
+    t = FileContentStore().load(theme)
+
+    assert t.name == "Authored"
+    assert t.config["overlay_enabled"] is False
+    assert (theme / "trcc.json").exists()
+
+
+def test_removing_an_authored_manifest_beside_a_dc_warns(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``width`` marks a manifest somebody MEANT — removing one says so loudly.
+
+    Only a DC parse's output should ever be found beside a DC.  ``width`` is
+    written unconditionally by the sole authored writer and a DC parse cannot
+    produce it, so it is the one reliable mark (verified across a real
+    install: 9 of 9 authored manifests recognised, 0 misclassified).  A silent
+    removal here would let a dev seeder writing into a shipped theme directory
+    lose its fixture and never find out.
+    """
+    theme = tmp_path / "Hybrid"
+    theme.mkdir()
+    (theme / "trcc.json").write_text(json.dumps({
+        "name": "Hybrid", "width": 854, "height": 480, "elements": [],
+    }), encoding="utf-8")
+    (theme / "config1.dc").write_bytes(_build_dc())
+
+    with caplog.at_level(logging.WARNING):
+        FileContentStore().load(theme)
+
+    assert any("carried 'width'" in r.message for r in caplog.records), (
+        "an authored manifest was removed without a warning"
+    )
 
 
 def test_list_finds_both_formats(tmp_path: Path) -> None:
@@ -310,3 +373,32 @@ def test_resolving_a_referenced_mask_does_not_log_at_info(
     info_lines = [r for r in caplog.records
                   if r.levelno >= logging.INFO and "mask_path" in r.message]
     assert info_lines == []
+
+
+def test_no_producer_writes_both_a_dc_and_a_manifest(tmp_path: Path) -> None:
+    """THE INVARIANT the discard rule rests on.
+
+    ``_load_config`` treats "both files present" as proof the JSON is derived,
+    and that is only sound while nothing else can produce the pair.  Two
+    producers could: ``export`` (whose archive ``import_`` unpacks verbatim)
+    and ``SaveTheme``\'s staging dir.  Neither may include a ``config1.dc``.
+
+    Asserted on the EXPORT MEMBERS rather than on a saved directory so the
+    check does not need a device: the archive is what ``import_`` writes, so
+    a DC appearing here is a DC appearing on disk.
+    """
+    theme_dir = tmp_path / "Src"
+    theme_dir.mkdir()
+    (theme_dir / "config1.dc").write_bytes(_build_dc())
+    (theme_dir / "00.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    store = FileContentStore()
+    theme = store.load(theme_dir)
+    members = store._export_members(theme, theme_dir)
+
+    assert "trcc.json" in members, "an export must carry its manifest"
+    assert "config1.dc" not in members, (
+        "an exported theme carries a DC — import_ would then unpack a "
+        "directory holding BOTH, and _load_config would delete the manifest "
+        "it was supposed to honour"
+    )
