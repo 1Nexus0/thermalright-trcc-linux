@@ -2247,3 +2247,80 @@ def test_toggling_participation_sends_the_whole_mask(gui_app: App, qtbot) -> Non
     tab._participation_checks[1].setChecked(False)
 
     assert sent == [(True, False, True)], f"got {sent}"
+
+
+# =========================================================================
+# DisplayPanel — video position, which Play/Pause/Stop never showed
+# =========================================================================
+
+
+def _display_panel(gui_app: App, qtbot):
+    from trcc.ui.qtgui.panels.display_panel import DisplayPanel
+
+    panel = DisplayPanel(gui_app, _bus(gui_app))
+    qtbot.addWidget(panel)
+    panel._require_key = lambda: "0402:3922"   # pyright: ignore[reportAttributeAccessIssue]
+    return panel
+
+
+def _stub_status(panel, *, cursor, frame_count):
+    from trcc.core.results import VideoStatusResult
+
+    real = panel.dispatch
+    sent: list = []
+
+    def spy(cmd):
+        name = type(cmd).__name__
+        sent.append(cmd)
+        if name == "VideoStatus":
+            return VideoStatusResult(
+                ok=True, key="0402:3922", playing=True,
+                cursor=cursor, frame_count=frame_count,
+            )
+        return real(cmd)
+
+    panel.dispatch = spy                       # pyright: ignore[reportAttributeAccessIssue]
+    return sent
+
+
+def test_no_playback_disables_the_scrubber(gui_app: App, qtbot) -> None:
+    """Absence is a normal answer, not a failure.
+
+    A device with no video answers ``ok=True, playing=False`` with the optional
+    fields ``None``.  Showing that as a slider parked at 0 would claim there is
+    a video sitting on its first frame.
+    """
+    panel = _display_panel(gui_app, qtbot)
+    _stub_status(panel, cursor=None, frame_count=None)
+
+    panel._refresh_video_status()
+
+    assert panel._seek.isEnabled() is False
+    assert "no video" in panel._seek_label.text()
+
+
+def test_the_scrubber_shows_the_position(gui_app: App, qtbot) -> None:
+    panel = _display_panel(gui_app, qtbot)
+    _stub_status(panel, cursor=42, frame_count=300)
+
+    panel._refresh_video_status()
+
+    assert panel._seek.isEnabled() is True
+    assert panel._seek.value() == 42
+    assert panel._seek.maximum() == 299          # 0-based cursor
+    assert panel._seek_label.text() == "43 / 300"
+
+
+def test_releasing_the_scrubber_seeks(gui_app: App, qtbot) -> None:
+    """On RELEASE, not per drag step — each seek queues a rebuild."""
+    panel = _display_panel(gui_app, qtbot)
+    sent = _stub_status(panel, cursor=10, frame_count=300)
+    panel._refresh_video_status()
+    panel._seek.setValue(120)
+    sent.clear()
+
+    panel._on_seek_released()
+
+    seeks = [c for c in sent if type(c).__name__ == "SeekVideo"]
+    assert len(seeks) == 1, f"expected exactly one seek, got {len(seeks)}"
+    assert seeks[0].frame == 120

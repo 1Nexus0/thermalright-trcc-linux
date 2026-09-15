@@ -23,10 +23,12 @@ from ....core.commands import (
     OrientedThemeTarget,
     PlayVideo,
     RestoreLastTheme,
+    SeekVideo,
     SetBrightness,
     SetOrientation,
     StopVideo,
     ToggleVideo,
+    VideoStatus,
 )
 from ..base import BasePanel
 from ..device_picker import DevicePickerWidget
@@ -81,11 +83,28 @@ class DisplayPanel(BasePanel):
         self._stop_video_btn = QPushButton("Stop", self)
         self._stop_video_btn.clicked.connect(self._on_stop_video)
 
+        # Position.  Play/Pause/Stop could start and halt a video and never say
+        # WHERE it was, so there was no way to jump -- the CLI and API both
+        # have ``SeekVideo`` and this skin had no surface for it.
+        self._seek = QSlider(Qt.Orientation.Horizontal, self)
+        self._seek.setEnabled(False)
+        self._seek.sliderReleased.connect(self._on_seek_released)
+        self._seek_label = QLabel("no video", self)
+        self._refresh_video_btn = QPushButton("↻", self)
+        self._refresh_video_btn.setToolTip("Refresh playback position")
+        self._refresh_video_btn.setMaximumWidth(32)
+        self._refresh_video_btn.clicked.connect(self._refresh_video_status)
+
         video_row = QHBoxLayout()
         video_row.addWidget(self._play_video_btn)
         video_row.addWidget(self._pause_video_btn)
         video_row.addWidget(self._stop_video_btn)
         video_row.addStretch(1)
+
+        seek_row = QHBoxLayout()
+        seek_row.addWidget(self._seek, 1)
+        seek_row.addWidget(self._seek_label)
+        seek_row.addWidget(self._refresh_video_btn)
 
         self._status = QLabel("", self)
 
@@ -101,6 +120,7 @@ class DisplayPanel(BasePanel):
         root.addWidget(self._restore_btn)
         root.addWidget(QLabel("Video:", self))
         root.addLayout(video_row)
+        root.addLayout(seek_row)
         root.addWidget(self._status)
         root.addStretch(1)
 
@@ -146,6 +166,7 @@ class DisplayPanel(BasePanel):
         log.info("_on_play_video: key=%s path=%s", key, source)
         result = self.dispatch(PlayVideo(key=key, path=Path(source)))
         self._status.setText(result.message)
+        self._refresh_video_status()
 
     def _on_toggle_video(self) -> None:
         key = self._require_key()
@@ -154,6 +175,7 @@ class DisplayPanel(BasePanel):
         log.info("_on_toggle_video: key=%s", key)
         result = self.dispatch(ToggleVideo(key=key))
         self._status.setText(result.message)
+        self._refresh_video_status()
 
     def _on_stop_video(self) -> None:
         key = self._require_key()
@@ -162,6 +184,48 @@ class DisplayPanel(BasePanel):
         log.info("_on_stop_video: key=%s", key)
         result = self.dispatch(StopVideo(key=key))
         self._status.setText(result.message)
+        self._refresh_video_status()
+
+    def _refresh_video_status(self) -> None:
+        """Ask what playback is doing and show it.
+
+        ``VideoStatus`` is the read: a device with no playback answers
+        ``ok=True, playing=False`` with the optional fields ``None`` -- absence
+        is a normal answer here, not a failure, so an empty slider is disabled
+        rather than shown at zero as if it were parked at frame 0.
+        """
+        key = self._require_key()
+        if key is None:
+            return
+        r = self.dispatch(VideoStatus(key=key))
+        log.debug("_refresh_video_status: key=%s playing=%s cursor=%s/%s",
+                  key, r.playing, r.cursor, r.frame_count)
+        total = r.frame_count or 0
+        if not total:
+            self._seek.setEnabled(False)
+            self._seek_label.setText("no video")
+            return
+        self._seek.setEnabled(True)
+        self._seek.blockSignals(True)
+        self._seek.setRange(0, max(0, total - 1))
+        self._seek.setValue(r.cursor or 0)
+        self._seek.blockSignals(False)
+        self._seek_label.setText(f"{(r.cursor or 0) + 1} / {total}")
+
+    def _on_seek_released(self) -> None:
+        """Jump on RELEASE, not on every drag step.
+
+        ``SeekVideo`` moves the playback cursor, which the render tick reads --
+        seeking per pixel of drag would queue a rebuild per pixel.
+        """
+        key = self._require_key()
+        if key is None:
+            return
+        frame = int(self._seek.value())
+        log.info("_on_seek_released: key=%s frame=%d", key, frame)
+        result = self.dispatch(SeekVideo(key=key, frame=frame))
+        self._status.setText(result.message)
+        self._refresh_video_status()
 
     def _reload_theme_for_orientation(self, key: str) -> str:
         """Reload the active theme's oriented variant after a rotation.
