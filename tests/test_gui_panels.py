@@ -2083,13 +2083,80 @@ def test_toggling_hdd_persists_it(gui_app: App, qtbot) -> None:
     assert gui_app.settings.app.hdd_enabled is panel._hdd_check.isChecked()
 
 
-def test_the_panel_offers_a_way_to_install_an_update(gui_app: App, qtbot) -> None:
-    """Checking for updates told the user one existed and stopped there.
+def _drive_upgrade(gui_app: App, qtbot, monkeypatch, *, confirm: bool):
+    """Press Upgrade with the confirmation answered *confirm*.
 
-    cli has ``trcc system upgrade`` and api has the route; qtgui users were the
-    only ones who had to leave the app to act on what it told them.
+    ``hasattr(panel, "_upgrade_btn")`` was the first version of this and it is
+    worthless: it proves a button exists, not that the button is safe.  The
+    safety-critical behaviour is that NOTHING runs until the user agrees --
+    ``RunUpgrade(dry_run=False)`` spawns a package-manager subprocess under
+    sudo.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    panel = _system_panel(gui_app, qtbot)
+    # A host with no package manager makes the DRY RUN fail, and the panel
+    # correctly bails before confirming -- which is right, and would leave the
+    # confirm path untested everywhere.  Give it a manager so the gate can
+    # reach the branch it exists to guard.
+    monkeypatch.setattr(gui_app.diagnostics, "package_manager",
+                        lambda: "pacman")
+    monkeypatch.setattr(gui_app.platform, "upgrade_command",
+                        lambda: ["true", "-upgrade"])
+    answer = (QMessageBox.StandardButton.Yes if confirm
+              else QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "question",
+                        staticmethod(lambda *a, **k: answer))
+    sent: list[bool] = []
+    real = panel.dispatch
+
+    def spy(cmd):
+        if type(cmd).__name__ == "RunUpgrade":
+            sent.append(cmd.dry_run)
+        return real(cmd)
+
+    panel.dispatch = spy                      # pyright: ignore[reportAttributeAccessIssue]
+    panel._on_upgrade()
+    return sent
+
+
+def test_declining_the_upgrade_runs_nothing(
+    gui_app: App, qtbot, monkeypatch,
+) -> None:
+    sent = _drive_upgrade(gui_app, qtbot, monkeypatch, confirm=False)
+
+    assert sent == [True], (
+        "saying No must leave ONLY the dry run — a False in this list is a "
+        f"sudo subprocess the user declined, got {sent}"
+    )
+
+
+def test_confirming_the_upgrade_runs_it(
+    gui_app: App, qtbot, monkeypatch,
+) -> None:
+    sent = _drive_upgrade(gui_app, qtbot, monkeypatch, confirm=True)
+
+    assert sent == [True, False], (
+        f"expected a dry run, then the real one; got {sent}"
+    )
+
+
+def test_the_confirmation_quotes_the_command_that_will_run(
+    gui_app: App, qtbot,
+) -> None:
+    """The dialog must show the REAL argv, not a UI's guess at it.
+
+    ``RunUpgrade(dry_run=True)`` exists for exactly this: it returns
+    ``message="Would run: ..."`` plus the ``command`` list, so the text the
+    user approves is the text the Command would execute.
     """
     panel = _system_panel(gui_app, qtbot)
+    from trcc.core.commands import RunUpgrade
 
-    assert hasattr(panel, "_upgrade_btn"), "no upgrade affordance at all"
-    assert panel._upgrade_btn.isEnabled()
+    preview = panel.dispatch(RunUpgrade(dry_run=True))
+
+    if preview.ok:
+        assert preview.command, "dry run reported ok with no command to show"
+        assert " ".join(preview.command) in preview.message
+    else:
+        assert preview.message, "a refusal must say why, it is shown to the user"
