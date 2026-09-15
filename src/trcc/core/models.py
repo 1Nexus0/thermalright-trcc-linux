@@ -849,6 +849,27 @@ class OverlayMode(int, Enum):
     CUSTOM = 4
 
 
+class DisplaySource(int, Enum):
+    """What a ``config1.dc`` says the panel is SHOWING — the C# form ``myMode``.
+
+    NOT ``OverlayMode`` above.  That is an overlay ELEMENT's ``myMode``; this is
+    the FORM's, and the two are unrelated integers that happen to share a name
+    in the decompile.
+
+    Written by ``ThemeSetting`` (FormCZTV.cs:5948), where the three source
+    toggles are mutually exclusive — turning one on turns the other two off,
+    and the reader re-asserts it (``if (myBjxs || myTpxs) mySpxs = false``).
+    Note the video toggle ``mySpxs`` is never written to the DC, so
+    ``VIDEO`` is the ONLY record that a saved theme is a video theme.
+
+    MEASURED 2026-09-14 over 2622 shipped DCs: every one is ``THEME``.  We read
+    it so a user-saved theme can round-trip its source; nothing acts on it yet.
+    """
+    THEME = 0
+    SCREENCAST = 16
+    VIDEO = 48
+
+
 # Date format sub-mode → asset basename for the cycling button icon.
 DATE_FORMAT_IMAGES: dict[int, str] = {
     1: "display_mode_date_ymd.png",

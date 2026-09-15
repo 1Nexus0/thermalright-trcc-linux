@@ -50,7 +50,7 @@ def _build_dc(
         buf.extend(bytes([0, 0, 0, 255, 0xDE, 0xAD, 0xBE]))  # style+unit+charset+alpha+r+g+b
 
     buf.append(1)                             # background_display
-    buf.append(0)                             # transparent_display
+    buf.append(0)                             # screencast_display (myTpxs)
     buf.extend(struct.pack("<i", rotation))
     buf.extend(struct.pack("<i", 0))          # ui_mode
 

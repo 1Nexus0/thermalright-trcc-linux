@@ -691,10 +691,12 @@ class SaveTheme(Command[ThemeResult]):
         and produces no ref.
         """
         manifest: dict = {"name": self.name, "width": width, "height": height}
-        for field in (
-            "overlay_enabled", "rotation", "background_display",
-            "transparent_display", "mask_visible", "mask_position",
-        ):
+        # The codec names these, so the codec lists them.  Spelled out here,
+        # the tuple went on saying ``transparent_display`` after the field was
+        # renamed — and a manifest key nothing reads is indistinguishable from
+        # one that works.
+        from ...services._dc import THEME_FLAG_KEYS
+        for field in THEME_FLAG_KEYS:
             if field in theme.config:
                 manifest[field] = theme.config[field]
         manifest.setdefault("overlay_enabled", True)

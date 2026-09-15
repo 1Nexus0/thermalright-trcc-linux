@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.errors import ThemeError
-from ..core.models import DATE_FORMATS, METRICS
+from ..core.models import DATE_FORMATS, METRICS, DisplaySource
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +42,50 @@ _MODE_TIME = 1
 _MODE_WEEKDAY = 2
 _MODE_DATE = 3
 _MODE_CUSTOM = 4
+
+
+# =========================================================================
+# The ``config1.dc`` trailer — ONE declaration, walked by both readers and
+# the writer.
+#
+# Order and meaning come from the 2.1.6 writer (``FormCZTV.cs:7156``) and its
+# own readers (``case 221`` :6817 · ``case 220`` :6212).  Each entry is
+# ``(config key, default)`` and the DEFAULT'S TYPE is the wire type: ``bool``
+# → one byte, ``int`` → int32, ``tuple`` → that many int32s.  There is nothing
+# else to say about a field, so there is nothing else to keep in sync — the
+# three hand-spelled copies this replaces had already drifted (the writer knew
+# ``ui_mode`` / ``display_mode`` / ``overlay_rect``; neither reader produced
+# them, so every write round-tripped those five fields to zero).
+#
+# ``0xDD`` writes the two runs back to back.  ``0xDC`` splits them: the 13
+# element positions, the custom-text string and the show-unit bool sit in
+# between.  That split is the only reason there are two runs.
+_TRAILER_HEAD: tuple[tuple[str, Any], ...] = (
+    ("background_display", True),        # myBjxs      背景显示 — background
+    ("screencast_display", False),       # myTpxs      投屏显示 — SCREENCAST
+    ("rotation", 0),                     # directionB
+    ("ui_mode", 0),                      # myUIMode
+)
+_TRAILER_TAIL: tuple[tuple[str, Any], ...] = (
+    ("display_source", 0),               # myMode      → DisplaySource
+    ("screencast_border", False),        # myYcbk      buttonXSBK — show border
+    ("screencast_rect", (0, 0, 0, 0)),   # JpX JpY JpW JpH
+    ("mask_visible", False),             # myMbxs      蒙版显示 — mask
+    ("mask_position", (0, 0)),           # XvalMB YvalMB
+)
+
+#: Every flag a ``config1.dc`` carries, as this codec names it.  ``SaveTheme``
+#: copies these into its manifest by this name, so the manifest cannot go on
+#: naming a field the codec has renamed.
+THEME_FLAG_KEYS: tuple[str, ...] = (
+    "overlay_enabled",
+    *(key for key, _ in _TRAILER_HEAD),
+    *(key for key, _ in _TRAILER_TAIL),
+)
+
+# Names for the log line.  ``DisplaySource(n)`` raises on a value the C# never
+# writes; a diagnostic must never be the thing that fails.
+_SOURCE_NAMES: dict[int, str] = {s.value: s.name for s in DisplaySource}
 
 
 # Metric VALUE slots carry their unit in the format so it renders DYNAMICALLY —
@@ -144,12 +188,17 @@ class Reader:
                 result = _parse_dc(data, theme_name)
         except (struct.error, IndexError, UnicodeDecodeError) as e:
             raise ThemeError(str(e)) from e
+        source = result.get("display_source", 0)
         log.info(
-            "Reader.parse: %s → %d elements, mask_visible=%s "
-            "mask_position=%s overlay_enabled=%s rotation=%s",
+            "Reader.parse: %s → %d elements, source=%s overlay_enabled=%s "
+            "background=%s screencast=%s rect=%s border=%s mask_visible=%s "
+            "mask_position=%s rotation=%s",
             theme_name, len(result.get("elements", [])),
+            _SOURCE_NAMES.get(source, source), result.get("overlay_enabled"),
+            result.get("background_display"), result.get("screencast_display"),
+            result.get("screencast_rect"), result.get("screencast_border"),
             result.get("mask_visible"), result.get("mask_position"),
-            result.get("overlay_enabled"), result.get("rotation"),
+            result.get("rotation"),
         )
         return result
 
@@ -177,7 +226,10 @@ class Writer:
         elements: list[dict[str, Any]] = list(config.get("elements", []))
         w = _Writer()
         w.write_byte(_MAGIC_DD)
-        w.write_bool(True)
+        # ``myXtxx`` — the overlay toggle.  Hardcoded ``True`` until
+        # 2026-09-14, when the readers stopped looking for it in the
+        # trailer; a write now preserves what the read found.
+        w.write_bool(bool(config.get("overlay_enabled", True)))
         w.write_int32(len(elements))
         for element in elements:
             _write_dd_element(w, element)
@@ -331,13 +383,65 @@ class _Writer:
 # =========================================================================
 
 
+def _trailer_defaults() -> dict[str, Any]:
+    """Every trailer field at its default — what a truncated DC yields."""
+    defaults = {key: list(default) if isinstance(default, tuple) else default
+                for run in (_TRAILER_HEAD, _TRAILER_TAIL)
+                for key, default in run}
+    log.debug("_trailer_defaults: %d field(s) seeded — %s",
+              len(defaults), defaults)
+    return defaults
+
+
+def _read_run(r: _Reader, run: tuple[tuple[str, Any], ...],
+              into: dict[str, Any]) -> None:
+    """Read one declared run, writing each field as it lands.
+
+    Fields land one at a time rather than as a batch so a DC truncated
+    mid-run keeps the fields that were actually there — the shape the
+    hand-written readers had, preserved.
+    """
+    for key, default in run:
+        if isinstance(default, bool):
+            into[key] = r.read_bool()
+        elif isinstance(default, tuple):
+            into[key] = [r.read_int32() for _ in default]
+        else:
+            into[key] = r.read_int32()
+    log.debug("_read_run: %s",
+              {key: into[key] for key, _ in run})
+
+
+def _write_run(w: _Writer, run: tuple[tuple[str, Any], ...],
+               config: dict[str, Any]) -> None:
+    """Write one declared run, padding a short tuple with its default.
+
+    A field must occupy its full width or every byte after it shifts, so a
+    config carrying a 3-int ``screencast_rect`` still writes four.
+    """
+    log.debug("_write_run: %s",
+              {key: config.get(key, default) for key, default in run})
+    for key, default in run:
+        value = config.get(key, default)
+        if isinstance(default, bool):
+            w.write_bool(bool(value))
+        elif isinstance(default, tuple):
+            for item in (*value, *default)[:len(default)]:
+                w.write_int32(int(item))
+        else:
+            w.write_int32(int(value))
+
+
+
 def _parse_dc(data: bytes, theme_name: str) -> dict[str, Any]:
     r = _Reader(data, start=1)
     r.read_int32()
     r.read_int32()
 
     flag_custom = r.read_bool()
-    r.read_bool()
+    # ``myXtxx`` — the OVERLAY toggle, same field 0xDD carries in its header
+    # and discarded here for the same reason.  See ``_parse_dd``.
+    overlay_enabled = r.read_bool()
     flag_cpu_temp = r.read_bool()
     flag_cpu_freq = r.read_bool()
     flag_cpu_usage = r.read_bool()
@@ -397,13 +501,11 @@ def _parse_dc(data: bytes, theme_name: str) -> dict[str, Any]:
                 "italic": False, "color": "#ffffff",
             })
 
+    trailer = _trailer_defaults()
     try:
-        background_display = r.read_bool()
-        transparent_display = r.read_bool()
-        rotation = r.read_int32()
-        r.read_int32()
-    except (struct.error, IndexError):
-        background_display, transparent_display, rotation = True, False, 0
+        _read_run(r, _TRAILER_HEAD, trailer)
+    except (struct.error, IndexError) as e:
+        log.debug("0xDC head truncated (%s) — keeping defaults", e)
 
     positions: list[tuple[int, int]] = []
     for _ in range(_ELEMENT_SLOTS):
@@ -444,24 +546,18 @@ def _parse_dc(data: bytes, theme_name: str) -> dict[str, Any]:
     # clock/date/weekday block.  Same fields legacy DcParser reads
     # after the 13 positions; ported verbatim to avoid silently losing
     # the time/date/weekday elements 0xDC themes carry.
-    overlay_enabled = True
-    mask_visible = False
-    mask_x = 0
-    mask_y = 0
     try:
         r.read_string()         # custom-text string (unused here)
-        r.read_bool()            # num8 (unknown)
-        r.read_int32()           # num5 (mode)
-        overlay_enabled = r.read_bool()
-        r.read_int32()           # overlay rect X
-        r.read_int32()           # overlay rect Y
-        r.read_int32()           # overlay rect W
-        r.read_int32()           # overlay rect H
-        mask_visible = r.read_bool()
-        mask_x = r.read_int32()
-        mask_y = r.read_int32()
-    except (struct.error, IndexError):
-        pass
+        # ``num8`` — the C# copies this into EVERY value element's
+        # ``myModeSub``, i.e. it is the theme's show-unit switch.  MEASURED
+        # 2026-09-14: False in 20 of 1050 shipped 0xDC masks, whose art bakes
+        # its own unit glyph — and we draw the unit regardless.  Honouring it
+        # changes what renders, so it is deliberately NOT part of this naming
+        # fix; it is read and dropped exactly as before.
+        r.read_bool()
+        _read_run(r, _TRAILER_TAIL, trailer)
+    except (struct.error, IndexError) as e:
+        log.debug("0xDC tail absent/truncated (%s) — keeping defaults", e)
 
     # Clock/date/weekday block.  Flag10 is the master enable; flag11
     # = date, flag12 = time, flag13 = weekday.  Each carries its own
@@ -514,18 +610,18 @@ def _parse_dc(data: bytes, theme_name: str) -> dict[str, Any]:
     return {
         "name": theme_name,
         "overlay_enabled": overlay_enabled,
-        "rotation": rotation,
-        "background_display": background_display,
-        "transparent_display": transparent_display,
-        "mask_visible": mask_visible,
-        "mask_position": [mask_x, mask_y],
+        **trailer,
         "elements": elements,
     }
 
 
 def _parse_dd(data: bytes, theme_name: str) -> dict[str, Any]:
     r = _Reader(data, start=1)
-    r.read_bool()
+    # ``myXtxx`` — ``ucXiTongXianShi1``, 系统显示, the OVERLAY toggle.  Read and
+    # DISCARDED until 2026-09-14, while ``overlay_enabled`` took the trailer's
+    # ``myYcbk`` (the screencast show-border flag) instead.  Measured over 2622
+    # shipped DCs the two disagree on 892 of them — 34.0%.
+    overlay_enabled = r.read_bool()
     count = r.read_int32()
     if count < 0 or count > 100:
         raise ThemeError(f"0xDD element count out of range: {count}")
@@ -545,36 +641,17 @@ def _parse_dd(data: bytes, theme_name: str) -> dict[str, Any]:
         )) is not None:
             elements.append(el)
 
-    background_display = True
-    transparent_display = False
-    rotation = 0
-    overlay_enabled = True
-    mask_visible = False
-    mask_x = 0
-    mask_y = 0
+    trailer = _trailer_defaults()
     try:
-        background_display = r.read_bool()
-        transparent_display = r.read_bool()
-        rotation = r.read_int32()
-        r.read_int32()
-        r.read_int32()
-        overlay_enabled = r.read_bool()
-        for _ in range(4):
-            r.read_int32()
-        mask_visible = r.read_bool()
-        mask_x = r.read_int32()
-        mask_y = r.read_int32()
-    except (struct.error, IndexError):
-        pass
+        _read_run(r, _TRAILER_HEAD, trailer)
+        _read_run(r, _TRAILER_TAIL, trailer)
+    except (struct.error, IndexError) as e:
+        log.debug("0xDD trailer truncated (%s) — later fields keep defaults", e)
 
     return {
         "name": theme_name,
         "overlay_enabled": overlay_enabled,
-        "rotation": rotation,
-        "background_display": background_display,
-        "transparent_display": transparent_display,
-        "mask_visible": mask_visible,
-        "mask_position": [mask_x, mask_y],
+        **trailer,
         "elements": elements,
     }
 
@@ -688,23 +765,16 @@ def _write_dd_font(w: _Writer, element: dict[str, Any]) -> None:
 
 
 def _write_dd_trailer(w: _Writer, config: dict[str, Any]) -> None:
-    w.write_bool(bool(config.get("background_display", True)))
-    w.write_bool(bool(config.get("transparent_display", False)))
-    w.write_int32(int(config.get("rotation", 0)))
-    w.write_int32(int(config.get("ui_mode", 0)))
-    w.write_int32(int(config.get("display_mode", 0)))
-    w.write_bool(bool(config.get("overlay_enabled", True)))
-    overlay_rect = config.get("overlay_rect", (0, 0, 0, 0))
-    for value in overlay_rect:
-        w.write_int32(int(value))
-    # Read ``mask_visible`` — the key every reader + consumer uses
-    # (models / overlay / settings / api).  The old ``mask_enabled``
-    # was a dead key nothing produced, so a mask-visible theme silently
-    # re-saved as mask-hidden on every write (B1).
-    w.write_bool(bool(config.get("mask_visible", False)))
-    mask_pos = config.get("mask_position", (0, 0))
-    for value in mask_pos:
-        w.write_int32(int(value))
+    """Write the trailer from the same declaration both readers walk.
+
+    Every key here is a key a reader produces, because it is literally the
+    same tuple — a field cannot be written under a name nothing reads back.
+    That is not hypothetical: ``ui_mode``, ``display_mode`` and
+    ``overlay_rect`` were spelled here and by neither reader, so all five
+    of those ints round-tripped to zero.
+    """
+    _write_run(w, _TRAILER_HEAD, config)
+    _write_run(w, _TRAILER_TAIL, config)
 
 
 def _element_to_legacy(

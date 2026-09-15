@@ -75,7 +75,7 @@ def _seed_theme(name: str, width: int, height: int) -> Path:
         "overlay_enabled": True,
         "rotation": 0,
         "background_display": True,
-        "transparent_display": False,
+        "screencast_display": False,
         "mask_visible": False,
         "mask_position": [width // 2, height // 2],
         "elements": [
