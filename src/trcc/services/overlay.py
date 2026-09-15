@@ -152,8 +152,16 @@ def _element_family(element: dict[str, Any]) -> str:
 class OverlayService:
     """Compose text/metric overlays onto a base surface."""
 
-    def __init__(self, renderer: Renderer) -> None:
+    def __init__(self, renderer: Renderer,
+                 unsupported: frozenset[str] = frozenset()) -> None:
         self._r = renderer
+        # Quantities NO backend on this host can read — ``SensorEnumerator.
+        # unsupported()``, which is STATIC, so it is injected once rather than
+        # threaded through six signatures alongside every tick's readings.
+        # Without it a missing metric warns identically whether the host has
+        # no such sensor at all or this tick's read came back empty, and those
+        # are different diagnoses with different replies to a reporter.
+        self._unsupported = unsupported
 
     @classmethod
     def render_dc_standalone(
@@ -373,12 +381,24 @@ class OverlayService:
         metric_id = str(element.get("metric", ""))
         value: float | None = sensors.get(metric_id)
         if value is None:
-            log.warning(
-                "draw_metric %s: metric %r has no sensor reading — skipping "
-                "(available sensors: %d, sample keys=%s)",
-                source, metric_id, len(sensors),
-                list(sensors.keys())[:5],
-            )
+            if metric_id in self._unsupported:
+                # Not a fault and not a slow tick: nothing on this host reads
+                # it, and it never will.  Saying so stops a reporter (and me)
+                # hunting a transient that cannot happen.
+                log.warning(
+                    "draw_metric %s: metric %r is UNSUPPORTED on this host — "
+                    "no backend reads it, so this element will always be "
+                    "blank (not a transient miss)",
+                    source, metric_id,
+                )
+            else:
+                log.warning(
+                    "draw_metric %s: metric %r has no sensor reading this "
+                    "tick — skipping (the host CAN read it; available "
+                    "sensors: %d, sample keys=%s)",
+                    source, metric_id, len(sensors),
+                    list(sensors.keys())[:5],
+                )
             return
         fmt = str(element.get("format", "{value}"))
         text = fmt.format(value=value)

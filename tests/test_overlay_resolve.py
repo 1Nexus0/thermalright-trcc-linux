@@ -77,3 +77,76 @@ def test_no_user_layer_still_falls_back() -> None:
     theme's, exactly as before.  This is what the v1→v2 config migration
     preserves for every existing user."""
     assert resolve_overlay_elements(_THEME, None) == _THEME["elements"]
+
+
+# =========================================================================
+# TASK 2 — "no reading" is TWO different diagnoses
+# =========================================================================
+
+
+def test_an_unsupported_metric_says_so_instead_of_blaming_the_tick(caplog):
+    """A host with no such sensor must not read as a transient miss.
+
+    Both cases arrive at ``_draw_metric`` as ``value is None``.  Warning
+    identically sends a reporter (and me) hunting a transient that cannot
+    happen — the element will be blank on every tick, forever.
+    """
+    import logging
+
+    from trcc.adapters.render.qt import QtRenderer
+    from trcc.services.overlay import OverlayService
+
+    svc = OverlayService(QtRenderer(), unsupported=frozenset({"cpu:power"}))
+    surface = svc._r.create_surface(64, 64)
+
+    with caplog.at_level(logging.WARNING, logger="trcc.services.overlay"):
+        svc._draw_metric(
+            surface, {"type": "metric", "metric": "cpu:power", "x": 0, "y": 0},
+            {},                                  # nothing read this tick
+        )
+
+    assert "UNSUPPORTED" in caplog.text
+    assert "always be blank" in caplog.text
+
+
+def test_a_supported_metric_that_missed_a_tick_says_THAT(caplog):
+    """The other half — the host CAN read it, so this one may resolve."""
+    import logging
+
+    from trcc.adapters.render.qt import QtRenderer
+    from trcc.services.overlay import OverlayService
+
+    svc = OverlayService(QtRenderer(), unsupported=frozenset({"cpu:power"}))
+    surface = svc._r.create_surface(64, 64)
+
+    with caplog.at_level(logging.WARNING, logger="trcc.services.overlay"):
+        svc._draw_metric(
+            surface, {"type": "metric", "metric": "cpu:temp", "x": 0, "y": 0},
+            {},
+        )
+
+    assert "UNSUPPORTED" not in caplog.text
+    assert "this tick" in caplog.text
+    assert "CAN read it" in caplog.text
+
+
+def test_the_app_actually_wires_the_unsupported_set(fake_platform) -> None:
+    """The injection is load-bearing and its default is SILENT.
+
+    ``OverlayService(renderer)`` defaults to an empty set, so an App that
+    forgets to pass one degrades straight back to "every miss looks
+    transient" with nothing failing.  Gate the wire, not just the branch —
+    the branch test passes either way.
+    """
+    from trcc.adapters.render.qt import QtRenderer
+    from trcc.app import App
+
+    known = frozenset({"cpu:power", "disk:temp"})
+    sensors = fake_platform.sensors()
+    sensors.unsupported = lambda: known          # type: ignore[method-assign]
+
+    app = App(platform=fake_platform, renderer=QtRenderer())
+
+    assert app.display._overlay._unsupported == known, (
+        "App built an OverlayService without the host's unsupported set"
+    )

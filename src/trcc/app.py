@@ -562,7 +562,11 @@ class App:
         self._display = DisplayService(
             renderer=renderer,
             themes=self.themes,
-            overlay=OverlayService(renderer),
+            # The host's static "can never read this" set, resolved ONCE —
+            # see OverlayService.__init__.
+            overlay=OverlayService(
+                renderer, unsupported=self.platform.sensors().unsupported(),
+            ),
             settings=self.settings,
             media=self.media,
             backgrounds=self.backgrounds,
