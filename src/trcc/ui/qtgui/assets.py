@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 # the assets it actually displays, and cached.  Installed packages can override
 # the root via ``set_assets_dir``.
 def _default_assets_dir() -> Path:
+    log.debug("_default_assets_dir")
     trcc_mod = sys.modules.get("trcc")
     trcc_file = getattr(trcc_mod, "__file__", None) if trcc_mod else None
     if trcc_file is None:
@@ -60,6 +61,7 @@ def set_assets_dir(path: Path) -> None:
 @lru_cache(maxsize=512)
 def _resolve(name: str) -> Path:
     """Resolve a name → Path.  Auto-appends ``.png`` if no extension."""
+    log.debug("_resolve: name=%s", name)
     direct = _assets_dir / name
     if direct.exists():
         return direct
@@ -96,6 +98,7 @@ def _greyscale(pixmap: QPixmap) -> QPixmap:
     ``Format_Grayscale8`` is opaque, so the original alpha is re-applied via a
     ``DestinationIn`` composite — transparent chrome stays transparent.
     """
+    log.debug("_greyscale: pixmap=%s", pixmap)
     src = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
     grey = src.convertToFormat(QImage.Format.Format_Grayscale8).convertToFormat(
         QImage.Format.Format_ARGB32,
@@ -111,6 +114,7 @@ def _greyscale(pixmap: QPixmap) -> QPixmap:
 
 def _placeholder() -> QPixmap:
     """1×1 transparent pixmap — used when an asset isn't on disk."""
+    log.debug("_placeholder")
     pixmap = QPixmap(1, 1)
     pixmap.fill(Qt.GlobalColor.transparent)
     return pixmap
@@ -157,14 +161,17 @@ class Assets:
     @staticmethod
     def path(name: str) -> Path:
         """Resolve *name* to a Path (may not exist)."""
+        log.debug("path: name=%s", name)
         return _resolve(name)
 
     @staticmethod
     def pixmap(name: str) -> QPixmap:
         """Load *name* as a QPixmap; placeholder if missing."""
+        log.debug("pixmap: name=%s", name)
         return _pixmap(name)
 
     @staticmethod
     def exists(name: str) -> bool:
         """True if *name* resolves to an on-disk file."""
+        log.debug("exists: name=%s", name)
         return _resolve(name).is_file()

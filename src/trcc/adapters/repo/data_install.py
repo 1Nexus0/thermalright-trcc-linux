@@ -160,6 +160,7 @@ class HttpDataInstaller(DataInstaller):
         *,
         extractor: _ArchiveExtractor | None = None,
     ) -> None:
+        log.debug("__init__: http=%s", http)
         self._http = http
         self._extractor = extractor or SevenZipExtractor()
 
@@ -220,6 +221,7 @@ def _is_populated(directory: Path) -> bool:
     """A target dir is "ready" if it contains at least one regular file
     or subdirectory.  Tracks the same semantics as legacy ``has_themes``
     (which checked for any subdir or theme file)."""
+    log.debug("_is_populated: directory=%s", directory)
     try:
         return directory.is_dir() and any(directory.iterdir())
     except OSError:

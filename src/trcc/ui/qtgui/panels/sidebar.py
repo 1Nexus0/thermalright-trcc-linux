@@ -58,6 +58,7 @@ class ActivitySidebar(BasePanel):
     selected = Signal(str)
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         self.setFixedWidth(200)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 16, 8, 16)
@@ -95,6 +96,7 @@ class ActivitySidebar(BasePanel):
 
     def select(self, key: str) -> None:
         """Programmatically check the button for *key* (no signal emitted)."""
+        log.debug("select: key=%s", key)
         button = self._buttons.get(key)
         if button is not None and not button.isChecked():
             button.setChecked(True)
@@ -106,4 +108,5 @@ class ActivitySidebar(BasePanel):
     def apply_language(self, lang: str) -> None:
         # Translation keys come back when tr() wiring lands; the sidebar
         # is one of the smallest places to start localizing.
+        log.debug("apply_language: lang=%s", lang)
         del lang

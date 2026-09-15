@@ -47,6 +47,7 @@ class AppProxy:
     """
 
     def __init__(self, *, timeout: float = 30.0) -> None:
+        log.debug("__init__")
         self._timeout = timeout
         self._events: EventBus | None = None
         self._reader: threading.Thread | None = None
@@ -254,6 +255,7 @@ class AppProxy:
     # ── Attributes that a real App exposes but the proxy can't ──────────
 
     def __getattr__(self, name: str) -> object:
+        log.debug("__getattr__: name=%s", name)
         raise AttributeError(
             f"AppProxy has no attribute {name!r} — daemon mode only exposes "
             "dispatch(cmd); use a Command to query App state remotely"

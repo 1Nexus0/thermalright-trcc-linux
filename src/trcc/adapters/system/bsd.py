@@ -104,21 +104,25 @@ class BsdOS(BaseOS, key="bsd"):
     # ── Per-OS internals (the add-a-new-OS interface) ────────────────────
 
     def _make_paths(self) -> Paths:
+        log.debug("_make_paths")
         return BSDPaths()
 
     def _build_sensors(self) -> SensorEnumerator:
         """sysctl CPU temp on top of the psutil/NVML baseline."""
+        log.debug("_build_sensors")
         from ..sensors.bsd import build_bsd_sensors
         return build_bsd_sensors()
 
     def _build_autostart(self) -> AutostartManager:
         # XDG .desktop — the BSD desktops (GNOME/KDE/XFCE on FreeBSD et al.)
         # honour the same spec as Linux; legacy shared this code.
+        log.debug("_build_autostart")
         from ._autostart import XdgDesktopAutostart
         return XdgDesktopAutostart()
 
     def _build_hotplug(self) -> HotplugMonitor:
         """No hotplug source by default; FreeBSD overrides with devd."""
+        log.debug("_build_hotplug")
         from ._hotplug import NoopHotplugMonitor
         return NoopHotplugMonitor(
             reason=f"no hotplug listener for {self.distro_name()}",

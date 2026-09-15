@@ -26,6 +26,7 @@ class UrllibHttpFetcher(HttpFetcher):
     def __init__(self, *, ssl_context: ssl.SSLContext | None = None) -> None:
         # Caller can hand in a stricter context (e.g. cert pinning); default
         # is the platform's default trust store via urllib.
+        log.debug("__init__")
         self._ctx = ssl_context
 
     def fetch(self, url: str, timeout_s: float = 30.0) -> bytes:

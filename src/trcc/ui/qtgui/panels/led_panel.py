@@ -45,6 +45,7 @@ class LedPanel(BasePanel):
 
     def _setup_ui(self) -> None:
         # ── Header: device key + status ───────────────────────────────
+        log.debug("_setup_ui")
         self._picker = DevicePickerWidget(
             self.app, self._bus, kind_filter="led", parent=self,
         )
@@ -101,6 +102,7 @@ class LedPanel(BasePanel):
     # ── Key plumbing ─────────────────────────────────────────────────
 
     def _current_key(self) -> str:
+        log.debug("_current_key")
         return self._picker.current_key()
 
     def _on_key_changed(self, _key: str = "") -> None:
@@ -170,6 +172,7 @@ class LedPanel(BasePanel):
         # The two optional tabs are added late so they always sit at
         # the right of the bar.  Use widget lookups, not stored
         # indices, since indices shift when other tabs are removed.
+        log.debug("_set_optional_tabs_visible")
         for widget, show in (
             (self._zone_tab, zones),
             (self._segment_tab, segments),

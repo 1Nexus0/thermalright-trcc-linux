@@ -40,4 +40,5 @@ def find(*args: Any, **kwargs: Any) -> Any:
     where it's installed (Windows, via the bundled DLL) and falls back to
     ``usb.core.find`` everywhere else (Linux/macOS/BSD system libusb).
     """
+    log.debug("find")
     return _find(*args, **kwargs)

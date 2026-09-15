@@ -133,6 +133,7 @@ class FileContentStore(ContentStore):
         only exercise self-contained themes), resolution falls back to
         the in-directory convention.
         """
+        log.debug("__init__: paths=%s", paths)
         self._paths = paths
 
     def _resolve_asset_ref(self, ref: str) -> Path | None:
@@ -178,6 +179,7 @@ class FileContentStore(ContentStore):
         id keeps on-disk paths readable.  Identical bytes always hash to
         the same id — that is what gives the writers their auto-dedup.
         """
+        log.debug("_content_id: data=%s", data)
         return hashlib.sha256(data).hexdigest()[:16]
 
     @contextmanager
@@ -777,6 +779,7 @@ class FileContentStore(ContentStore):
         seen: set[Path] = set()
 
         def _scan(directory: Path | None, is_custom: bool) -> None:
+            log.debug("_scan: directory=%s is_custom=%s", directory, is_custom)
             if directory is None or not directory.exists():
                 return
             for item in sorted(directory.iterdir()):
@@ -1059,6 +1062,7 @@ class FileContentStore(ContentStore):
 
     def _resolution_from_config(self, config: dict) -> tuple[int, int]:
         """Extract (width, height) from config; fall back to (0, 0) if absent."""
+        log.debug("_resolution_from_config: config=%s", config)
         width = int(config.get("width", 0))
         height = int(config.get("height", 0))
         return (width, height)
@@ -1084,6 +1088,7 @@ def _has_theme_marker(entry: Path) -> bool:
     deeper check because the filename collides with unrelated config
     files — we read it and require theme-shape content.
     """
+    log.debug("_has_theme_marker: entry=%s", entry)
     if ThemeDir(entry).json.exists():
         return True
     if (entry / _PRE_CUTOVER_CONFIG_FILE).exists():
@@ -1109,6 +1114,7 @@ def _looks_like_legacy_theme_config(raw: dict) -> bool:
     keeps unrelated config.json files from being mistaken for themes
     when ``list()`` walks a directory.
     """
+    log.debug("_looks_like_legacy_theme_config: raw=%s", raw)
     if not isinstance(raw, dict):
         return False
     if isinstance(raw.get("dc"), dict):
@@ -1137,6 +1143,7 @@ def _legacy_json_to_next_config(raw: dict, theme_name: str) -> dict:
     discovery uses ``ThemeDir`` (``00.png`` only) so the explicit
     ``background`` path here is informational only.
     """
+    log.debug("_legacy_json_to_next_config: raw=%s theme_name=%s", raw, theme_name)
     elements: list[dict] = []
     dc = raw.get("dc")
     if isinstance(dc, dict):
@@ -1172,6 +1179,7 @@ _LEGACY_FONT_DEFAULTS = {"name": "Microsoft YaHei", "size": 24, "style": "regula
 
 def _legacy_entry_to_next_element(entry: dict) -> dict | None:
     """One legacy overlay-config entry → one next/-shape element dict."""
+    log.debug("_legacy_entry_to_next_element: entry=%s", entry)
     font_in = entry.get("font")
     font = (
         font_in if isinstance(font_in, dict) else _LEGACY_FONT_DEFAULTS

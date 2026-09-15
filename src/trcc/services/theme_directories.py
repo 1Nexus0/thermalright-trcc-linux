@@ -118,6 +118,7 @@ def oriented_theme_reload_target(
     holding ``ThemeDirectoriesResult`` (whose paths are strings, for the daemon
     socket) can pass them without rebuilding the dataclass.
     """
+    log.debug("oriented_theme_reload_target: active_theme_path=%s user_theme_dir=%s", active_theme_path, user_theme_dir)
     name = active_theme_path.name
     for candidate in (user_theme_dir / name, theme_dir / name):
         if candidate == active_theme_path:

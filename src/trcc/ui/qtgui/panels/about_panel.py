@@ -5,17 +5,22 @@ package's ``__version__`` and the current language for localization.
 """
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QLabel, QVBoxLayout
 
 from ..base import BasePanel
 
+log = logging.getLogger(__name__)
+
 
 class AboutPanel(BasePanel):
     """Project identity + version + links."""
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         from .... import __version__
 
         layout = QVBoxLayout(self)
@@ -60,6 +65,7 @@ class AboutPanel(BasePanel):
 
     @staticmethod
     def _tagline_text() -> str:
+        log.debug("_tagline_text")
         return (
             "Open-source control for Thermalright LCD coolers on Linux.\n"
             "Architecture: hexagonal (ports + adapters), one Command bus, "
@@ -69,6 +75,7 @@ class AboutPanel(BasePanel):
     def apply_language(self, lang: str) -> None:
         """Localized text re-render — minimal for now (English only),
         but the hook is in place for when ``tr()`` keys land."""
+        log.debug("apply_language: lang=%s", lang)
         del lang
         from .... import __version__
         self._version_label.setText(f"version {__version__}")

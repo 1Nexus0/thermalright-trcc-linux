@@ -49,6 +49,7 @@ class QuickstartReport:
 
     @property
     def failed_step(self) -> QuickstartStep | None:
+        log.debug("failed_step")
         for s in self.steps:
             if s.status == "fail":
                 return s
@@ -63,6 +64,7 @@ class QuickstartService:
     """
 
     def __init__(self, platform: Platform, diagnostics: Diagnostics) -> None:
+        log.debug("__init__: platform=%s diagnostics=%s", platform, diagnostics)
         self._platform = platform
         self._diagnostics = diagnostics
 
@@ -87,6 +89,7 @@ class QuickstartService:
     # ── Steps ─────────────────────────────────────────────────────────
 
     def _run_doctor(self, report: QuickstartReport) -> bool:
+        log.debug("_run_doctor: report=%s", report)
         health = self._diagnostics.health()
         if health.fail_count:
             failing = [c for c in health.checks if c.severity == "FAIL"]
@@ -121,6 +124,7 @@ class QuickstartService:
     def _run_scan(
         self, report: QuickstartReport,
     ) -> list | None:
+        log.debug("_run_scan: report=%s", report)
         try:
             devices = self._platform.scan_devices()
         except (OSError, RuntimeError) as e:

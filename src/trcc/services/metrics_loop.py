@@ -45,6 +45,7 @@ class MetricsLoop:
     """
 
     def __init__(self, app: App) -> None:  # type: ignore[name-defined]  # noqa: F821
+        log.debug("__init__: app=%s", app)
         self._app = app
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -78,6 +79,7 @@ class MetricsLoop:
 
     @property
     def is_running(self) -> bool:
+        log.debug("is_running")
         return self._thread is not None and self._thread.is_alive()
 
     def start(self) -> None:

@@ -62,6 +62,7 @@ class OverlayEditorPanel(BasePanel):
     """Manage a device's user-overlay element list."""
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         self._picker = DevicePickerWidget(
             self.app, self._bus, kind_filter="lcd", parent=self,
         )
@@ -165,10 +166,12 @@ class OverlayEditorPanel(BasePanel):
         user element lost its font on restart.  Round-tripped in tests for
         text, metric AND clock elements rather than only the one to hand.
         """
+        log.debug("_entry_to_dict: entry=%s", entry)
         return dataclasses.asdict(entry)
 
     @staticmethod
     def _format_element_row(element) -> str:
+        log.debug("_format_element_row: element=%s", element)
         head = f"[{element.type:6}] ({element.x:>4},{element.y:>4})"
         if element.type == "text":
             payload = repr(element.text)
@@ -181,6 +184,7 @@ class OverlayEditorPanel(BasePanel):
     # ── Actions ───────────────────────────────────────────────────────
 
     def _key(self) -> str | None:
+        log.debug("_key")
         key = self._picker.current_key()
         if not key:
             self._status.setText(
@@ -191,6 +195,7 @@ class OverlayEditorPanel(BasePanel):
         return key
 
     def _selected_id(self) -> str | None:
+        log.debug("_selected_id")
         item = self._list.currentItem()
         if item is None:
             self._status.setText("Pick an element from the list first.")
@@ -305,6 +310,7 @@ class _ElementDialog(QDialog):
     """Modal form for adding or editing one overlay element."""
 
     def __init__(self, parent, *, prefill=None) -> None:
+        log.debug("__init__: parent=%s", parent)
         super().__init__(parent)
         self.setWindowTitle(
             "Edit overlay element" if prefill is not None else "Add overlay element",
@@ -314,6 +320,7 @@ class _ElementDialog(QDialog):
         self._build()
 
     def _build(self) -> None:
+        log.debug("_build")
         self._type = QComboBox(self)
         for kind in _TYPES:
             self._type.addItem(kind.capitalize(), userData=kind)
@@ -401,6 +408,7 @@ class _ElementDialog(QDialog):
         self._refresh_visibility()
 
     def _apply_prefill(self, element) -> None:
+        log.debug("_apply_prefill: element=%s", element)
         index = max(0, list(_TYPES).index(element.type))
         self._type.setCurrentIndex(index)
         self._x.setValue(element.x)
@@ -432,12 +440,14 @@ class _ElementDialog(QDialog):
         self._set_row_visible(self._source, kind == "clock")
 
     def _set_row_visible(self, widget, visible: bool) -> None:
+        log.debug("_set_row_visible: widget=%s visible=%s", widget, visible)
         label = self._form.labelForField(widget)
         widget.setVisible(visible)
         if label is not None:
             label.setVisible(visible)
 
     def _pick_color(self) -> None:
+        log.debug("_pick_color")
         from PySide6.QtGui import QColor
         current = QColor(self._color)
         picked = QColorDialog.getColor(current, self, "Pick element color")
@@ -447,6 +457,7 @@ class _ElementDialog(QDialog):
 
     def _pick_color_from_screen(self) -> None:
         """Freeze the desktop and let the user pick a pixel colour."""
+        log.debug("_pick_color_from_screen")
         from ...eyedropper import EyedropperOverlay
 
         overlay = EyedropperOverlay(self)
@@ -460,6 +471,7 @@ class _ElementDialog(QDialog):
 
     def _pick_metric(self) -> None:
         """Open a modal sensor-picker dialog; commit the chosen sensor id."""
+        log.debug("_pick_metric")
         from ..sensor_picker import SensorPickerWidget
 
         # Reach back to the parent's app reference — the dialog is a
@@ -496,6 +508,7 @@ class _ElementDialog(QDialog):
         self._metric.setText(sensor_id)
 
     def values(self) -> dict:
+        log.debug("values")
         return {
             "type":    self._type.currentData(),
             "x":       int(self._x.value()),

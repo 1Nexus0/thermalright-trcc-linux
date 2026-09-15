@@ -124,6 +124,7 @@ def install(dry_run: bool = False) -> int:
 
 
 def _is_macos() -> bool:
+    log.debug("_is_macos")
     return sys.platform == "darwin"
 
 
@@ -134,6 +135,7 @@ def _enclosing_app_bundle(binary: Path) -> Path | None:
     so we walk parents looking for ``Contents/MacOS`` and return the
     enclosing ``.app``.
     """
+    log.debug("_enclosing_app_bundle: binary=%s", binary)
     for parent in binary.parents:
         if parent.suffix == ".app" and (parent / "Contents" / "MacOS").is_dir():
             return parent
@@ -157,6 +159,7 @@ def _check_codesign(target: str) -> bool | None:
 
 def _has_quarantine_attr(path: Path) -> bool:
     """Check the ``com.apple.quarantine`` extended attribute via ``xattr``."""
+    log.debug("_has_quarantine_attr: path=%s", path)
     try:
         result = subprocess.run(
             ["xattr", str(path)],

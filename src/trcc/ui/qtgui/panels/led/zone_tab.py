@@ -66,6 +66,7 @@ class _ZoneRow(QWidget):
         on_brightness,
         parent: QWidget | None = None,
     ) -> None:
+        log.debug("__init__: index=%s on_pick=%s", index, on_pick)
         super().__init__(parent)
         self._index = index
         self._color = QColor(255, 0, 0)
@@ -115,10 +116,12 @@ class _ZoneRow(QWidget):
         row.addWidget(self._pick_btn)
 
     def set_color(self, r: int, g: int, b: int) -> None:
+        log.debug("set_color: r=%s g=%s", r, g)
         self._color = QColor(r, g, b)
         self._update_swatch()
 
     def set_enabled(self, on: bool, *, emit_signals: bool = True) -> None:
+        log.debug("set_enabled: on=%s", on)
         if not emit_signals:
             self._enabled.blockSignals(True)
         self._enabled.setChecked(on)
@@ -126,6 +129,7 @@ class _ZoneRow(QWidget):
             self._enabled.blockSignals(False)
 
     def set_active(self, active: bool) -> None:
+        log.debug("set_active: active=%s", active)
         self._radio.blockSignals(True)
         self._radio.setChecked(active)
         self._radio.blockSignals(False)
@@ -136,12 +140,14 @@ class _ZoneRow(QWidget):
             self._on_radio(self._index)
 
     def _update_swatch(self) -> None:
+        log.debug("_update_swatch")
         self._swatch.setStyleSheet(
             f"background-color: {self._color.name()}; "
             "border: 1px solid #333;",
         )
 
     def set_mode(self, mode: LEDMode) -> None:
+        log.debug("set_mode: mode=%s", mode)
         self._mode.blockSignals(True)
         idx = self._mode.findData(int(mode))
         if idx >= 0:
@@ -149,6 +155,7 @@ class _ZoneRow(QWidget):
         self._mode.blockSignals(False)
 
     def set_brightness(self, percent: int) -> None:
+        log.debug("set_brightness: percent=%s", percent)
         self._brightness.blockSignals(True)
         self._brightness.setValue(percent)
         self._brightness.blockSignals(False)
@@ -166,12 +173,14 @@ class ZoneTab(LedTabBase):
     """Per-zone colour + sync carousel."""
 
     def __init__(self, app, key_provider, parent=None) -> None:
+        log.debug("__init__: app=%s key_provider=%s", app, key_provider)
         super().__init__(app, key_provider, parent)
         self._zone_widgets: list[_ZoneRow] = []
         self._placeholder_visible = True
         self._build_ui()
 
     def _build_ui(self) -> None:
+        log.debug("_build_ui")
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
@@ -269,11 +278,13 @@ class ZoneTab(LedTabBase):
     # ── Internals ─────────────────────────────────────────────────────
 
     def _show_placeholder(self, show: bool) -> None:
+        log.debug("_show_placeholder: show=%s", show)
         self._placeholder_visible = show
         self._placeholder.setVisible(show)
         self._zones_box.setVisible(not show)
 
     def _rebuild_zone_rows(self, count: int) -> None:
+        log.debug("_rebuild_zone_rows: count=%s", count)
         if count == len(self._zone_widgets):
             return
         # Wipe + recreate so we never carry stale widgets.

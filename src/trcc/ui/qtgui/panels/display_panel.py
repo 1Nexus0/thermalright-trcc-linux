@@ -40,6 +40,7 @@ class DisplayPanel(BasePanel):
     """Per-device display controls (orientation / brightness / theme)."""
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         self._picker = DevicePickerWidget(
             self.app, self._bus, kind_filter="lcd", parent=self,
         )
@@ -128,6 +129,7 @@ class DisplayPanel(BasePanel):
 
     def _require_key(self) -> str | None:
         """Return the picked device key, or set a prompt + return None."""
+        log.debug("_require_key")
         key = self._picker.current_key()
         if not key:
             self._status.setText(

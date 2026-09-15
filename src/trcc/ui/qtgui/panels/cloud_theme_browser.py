@@ -45,6 +45,7 @@ class CloudThemeBrowser(BasePanel):
     """Browse + apply themes from Thermalright's cloud catalog."""
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         self._picker = DevicePickerWidget(
             self.app, self._bus, kind_filter="lcd", parent=self,
         )
@@ -105,6 +106,7 @@ class CloudThemeBrowser(BasePanel):
 
     def _populate_categories(self) -> None:
         """Fill the category dropdown from the catalog (offline-safe)."""
+        log.debug("_populate_categories")
         result = self.dispatch(ListCloudThemes(
             category=_ALL_CATEGORIES, resolution=self._resolution()))
         # Categories never change after this — they're a static table.
@@ -138,6 +140,7 @@ class CloudThemeBrowser(BasePanel):
 
     def _resolution(self) -> tuple[int, int] | None:
         """The picked device's canvas resolution, or None if unresolvable."""
+        log.debug("_resolution")
         key = self._picker.current_key()
         if not key:
             return None
@@ -154,6 +157,7 @@ class CloudThemeBrowser(BasePanel):
         return None
 
     def _fill_list_from_result(self, result) -> None:
+        log.debug("_fill_list_from_result: result=%s", result)
         self._list.clear()
         # ListCloudThemes carries each entry's preview path (resolved for the
         # device resolution we passed).  Thin UI: just read entry.preview.
@@ -197,6 +201,7 @@ class CloudThemeBrowser(BasePanel):
 
 def _user_friendly_error(message: str) -> str:
     """Translate adapter-layer error strings into plain-language hints."""
+    log.debug("_user_friendly_error: message=%s", message)
     lower = message.lower()
     if "url error" in lower or "timed out" in lower:
         return (

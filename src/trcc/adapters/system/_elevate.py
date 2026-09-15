@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 
 def _import_paths() -> list[str]:
     """Every dir ``trcc`` might be importable from, for the root re-exec."""
+    log.debug("_import_paths")
     paths: list[str] = list(site.getsitepackages())
     paths.append(site.getusersitepackages())
     # .../trcc/adapters/system/_elevate.py → parents[3] holds the `trcc` package

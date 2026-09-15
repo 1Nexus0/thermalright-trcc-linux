@@ -32,6 +32,7 @@ class PeriodicUpdater:
     __slots__ = ("_owner", "_timer")
 
     def __init__(self, owner: QWidget) -> None:
+        log.debug("__init__: owner=%s", owner)
         self._owner = owner
         self._timer: QTimer | None = None
 
@@ -68,4 +69,5 @@ class PeriodicUpdater:
     @property
     def is_active(self) -> bool:
         """True while the timer is running."""
+        log.debug("is_active")
         return self._timer is not None and self._timer.isActive()

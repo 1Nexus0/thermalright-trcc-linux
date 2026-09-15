@@ -109,6 +109,7 @@ def is_default_date_pattern(fmt: str) -> bool:
     (e.g. ``%m/%d``) is a deliberate design choice the renderer honours; a
     default-equivalent pattern means the theme didn't customise the date, so the
     user's global ``date_format`` preference wins — universally, every UI."""
+    log.debug("is_default_date_pattern: fmt=%s", fmt)
     return _translate_date_pattern(fmt) == _translate_date_pattern(_DEFAULT_DATE_FORMAT)
 
 

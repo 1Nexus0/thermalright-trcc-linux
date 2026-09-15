@@ -58,10 +58,12 @@ class AdvancedTab(LedTabBase):
     """Sensor source + test mode + clock options."""
 
     def __init__(self, app, key_provider, parent=None) -> None:
+        log.debug("__init__: app=%s key_provider=%s", app, key_provider)
         super().__init__(app, key_provider, parent)
         self._build_ui()
 
     def _build_ui(self) -> None:
+        log.debug("_build_ui")
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
@@ -244,6 +246,7 @@ class AdvancedTab(LedTabBase):
             self._disk_selector.blockSignals(False)
 
     def _block_sources(self, blocked: bool) -> None:
+        log.debug("_block_sources: blocked=%s", blocked)
         for w in (
             self._temp_cpu, self._temp_gpu,
             self._load_cpu, self._load_gpu,
@@ -255,18 +258,22 @@ class AdvancedTab(LedTabBase):
     # Radio buttons emit ``toggled`` for both the newly-checked and
     # newly-unchecked button — only act on the checked one.
     def _on_temp_cpu_toggled(self, checked: bool) -> None:
+        log.debug("_on_temp_cpu_toggled: checked=%s", checked)
         if checked:
             self._on_temp_source("cpu")
 
     def _on_temp_gpu_toggled(self, checked: bool) -> None:
+        log.debug("_on_temp_gpu_toggled: checked=%s", checked)
         if checked:
             self._on_temp_source("gpu")
 
     def _on_load_cpu_toggled(self, checked: bool) -> None:
+        log.debug("_on_load_cpu_toggled: checked=%s", checked)
         if checked:
             self._on_load_source("cpu")
 
     def _on_load_gpu_toggled(self, checked: bool) -> None:
+        log.debug("_on_load_gpu_toggled: checked=%s", checked)
         if checked:
             self._on_load_source("gpu")
 

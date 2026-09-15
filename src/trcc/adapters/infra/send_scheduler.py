@@ -25,6 +25,7 @@ class _TaskThread:
     __slots__ = ("_stop", "_task", "_thread")
 
     def __init__(self, task: SendTask) -> None:
+        log.debug("__init__: task=%s", task)
         self._task = task
         self._stop = threading.Event()
         self._thread = threading.Thread(
@@ -32,11 +33,13 @@ class _TaskThread:
         )
 
     def start(self) -> None:
+        log.debug("start")
         self._thread.start()
 
     def _run(self) -> None:
         # First pass establishes the initial delay (e.g. a volatile task wants
         # to keepalive even if no frame has been submitted yet).
+        log.debug("_run")
         delay = self._task.run_once(time.monotonic())
         while not self._stop.is_set():
             self._task.wait(delay)
@@ -57,6 +60,7 @@ class ThreadSendScheduler(SendScheduler):
     """One daemon thread per task — the production execution model."""
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._threads: dict[str, _TaskThread] = {}
         self._lock = threading.Lock()
 
@@ -92,6 +96,7 @@ class SyncSendScheduler(SendScheduler):
     """Deterministic driver — tests call :meth:`tick(now)`; no threads."""
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._tasks: dict[str, SendTask] = {}
 
     def add(self, task: SendTask) -> None:
@@ -103,9 +108,11 @@ class SyncSendScheduler(SendScheduler):
         self._tasks.pop(key, None)
 
     def shutdown(self) -> None:
+        log.debug("shutdown")
         self._tasks.clear()
 
     def tick(self, now: float) -> None:
         """Drive every registered task once with clock *now* (seconds)."""
+        log.debug("tick: now=%s", now)
         for task in list(self._tasks.values()):
             task.run_once(now)

@@ -127,6 +127,7 @@ _SENSOR_TO_HW: dict[str, tuple[int, int]] | None = None
 
 
 def _sensor_to_hw() -> dict[str, tuple[int, int]]:
+    log.debug("_sensor_to_hw")
     global _SENSOR_TO_HW
     if _SENSOR_TO_HW is None:
         _SENSOR_TO_HW = {
@@ -143,6 +144,7 @@ def hardware_metric(main: int, sub: int) -> tuple[str, str] | None:
     the two never drift on metric ids (``cpu:temp``) or format strings.
     Returns ``None`` for an unmapped code.
     """
+    log.debug("hardware_metric: main=%s sub=%s", main, sub)
     return _HW_TO_SENSOR.get((main, sub))
 
 
@@ -152,6 +154,7 @@ def metric_to_hardware(sensor: str) -> tuple[int, int] | None:
     Used when loading a next/ metric element back into the legacy-style
     overlay grid (which keys hardware elements by ``main``/``sub`` count).
     """
+    log.debug("metric_to_hardware: sensor=%s", sensor)
     return _sensor_to_hw().get(sensor)
 
 
@@ -259,6 +262,7 @@ class File:
         reader: Reader | None = None,
         writer: Writer | None = None,
     ) -> None:
+        log.debug("__init__: path=%s", path)
         self.path = path
         self.reader = reader or Reader()
         self.writer = writer or Writer()
@@ -308,30 +312,36 @@ class _Reader:
     __slots__ = ("data", "pos")
 
     def __init__(self, data: bytes, start: int) -> None:
+        log.debug("__init__: data=%s start=%s", data, start)
         self.data = data
         self.pos = start
 
     def read_int32(self) -> int:
+        log.debug("read_int32")
         val = struct.unpack_from("<i", self.data, self.pos)[0]
         self.pos += 4
         return val
 
     def read_bool(self) -> bool:
+        log.debug("read_bool")
         val = self.data[self.pos] != 0
         self.pos += 1
         return val
 
     def read_byte(self) -> int:
+        log.debug("read_byte")
         val = self.data[self.pos]
         self.pos += 1
         return val
 
     def read_float(self) -> float:
+        log.debug("read_float")
         val = struct.unpack_from("<f", self.data, self.pos)[0]
         self.pos += 4
         return val
 
     def read_string(self) -> str:
+        log.debug("read_string")
         if self.pos >= len(self.data):
             return ""
         length = self.data[self.pos]
@@ -350,21 +360,27 @@ class _Writer:
     __slots__ = ("buf",)
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self.buf = bytearray()
 
     def write_byte(self, value: int) -> None:
+        log.debug("write_byte: value=%s", value)
         self.buf.append(value & 0xFF)
 
     def write_bool(self, value: bool) -> None:
+        log.debug("write_bool: value=%s", value)
         self.buf.append(1 if value else 0)
 
     def write_int32(self, value: int) -> None:
+        log.debug("write_int32: value=%s", value)
         self.buf.extend(struct.pack("<i", value))
 
     def write_float(self, value: float) -> None:
+        log.debug("write_float: value=%s", value)
         self.buf.extend(struct.pack("<f", value))
 
     def write_string(self, value: str) -> None:
+        log.debug("write_string: value=%s", value)
         if not value:
             self.buf.append(0)
             return
@@ -668,6 +684,7 @@ def _parse_dd(data: bytes, theme_name: str) -> dict[str, Any]:
 
 
 def _read_dd_font(r: _Reader) -> dict[str, Any]:
+    log.debug("_read_dd_font: r=%s", r)
     name = r.read_string() or _DEFAULT_FONT_NAME
     size = _clamp_font_size(r.read_float())
     style = r.read_byte()
@@ -735,6 +752,7 @@ def _clamp_font_size(raw: float, default: float = 24.0) -> float:
     # Theme fonts span ~8 px labels up to the panel's hero number (the 001-series
     # temperature is authored at 128).  Only reject values a misaligned/garbage
     # read produces (NaN, negative, or absurdly large); everything else is real.
+    log.debug("_clamp_font_size: raw=%s default=%s", raw, default)
     if 8.0 <= raw <= 512.0:
         return raw
     return default
@@ -746,6 +764,7 @@ def _clamp_font_size(raw: float, default: float = 24.0) -> float:
 
 
 def _write_dd_element(w: _Writer, element: dict[str, Any]) -> None:
+    log.debug("_write_dd_element: w=%s element=%s", w, element)
     mode, mode_sub, main_count, sub_count, custom_text = _element_to_legacy(element)
     w.write_int32(mode)
     w.write_int32(mode_sub)
@@ -758,6 +777,7 @@ def _write_dd_element(w: _Writer, element: dict[str, Any]) -> None:
 
 
 def _write_dd_font(w: _Writer, element: dict[str, Any]) -> None:
+    log.debug("_write_dd_font: w=%s element=%s", w, element)
     w.write_string(str(element.get("font_name", _DEFAULT_FONT_NAME)))
     w.write_float(float(element.get("size", 24.0)))
     style = 0
@@ -784,6 +804,7 @@ def _write_dd_trailer(w: _Writer, config: dict[str, Any]) -> None:
     ``overlay_rect`` were spelled here and by neither reader, so all five
     of those ints round-tripped to zero.
     """
+    log.debug("_write_dd_trailer: w=%s config=%s", w, config)
     _write_run(w, _TRAILER_HEAD, config)
     _write_run(w, _TRAILER_TAIL, config)
 
@@ -791,6 +812,7 @@ def _write_dd_trailer(w: _Writer, config: dict[str, Any]) -> None:
 def _element_to_legacy(
     element: dict[str, Any],
 ) -> tuple[int, int, int, int, str]:
+    log.debug("_element_to_legacy: element=%s", element)
     kind = element.get("type", "text")
     if kind == "text":
         return (_MODE_CUSTOM, 0, 0, 0, str(element.get("text", "")))
@@ -825,6 +847,7 @@ def _hex_to_argb(hex_color: str) -> tuple[int, int, int, int]:
     The 6-char form (no alpha) defaults to opaque; bad input returns
     opaque white, matching firmware's tolerance behaviour.
     """
+    log.debug("_hex_to_argb: hex_color=%s", hex_color)
     s = hex_color.lstrip("#").strip()
     if len(s) == 6:
         try:

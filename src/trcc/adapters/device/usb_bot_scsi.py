@@ -43,17 +43,21 @@ class UsbBotScsiTransport(ScsiTransport):
     """
 
     def __init__(self, bulk: BulkTransport) -> None:
+        log.debug("__init__: bulk=%s", bulk)
         self._bulk = bulk
         self._tag = 0
 
     @property
     def is_open(self) -> bool:
+        log.debug("is_open")
         return self._bulk.is_open
 
     def open(self) -> bool:
+        log.debug("open")
         return self._bulk.open()
 
     def close(self) -> None:
+        log.debug("close")
         self._bulk.close()
 
     def send_cdb(self, cdb: bytes, data: bytes,
@@ -91,6 +95,7 @@ class UsbBotScsiTransport(ScsiTransport):
 
     def _build_cbw(self, data_length: int, direction: int, cdb: bytes) -> bytes:
         """Command Block Wrapper — 31 bytes, CDB zero-padded to 16."""
+        log.debug("_build_cbw: data_length=%s direction=%s", data_length, direction)
         self._tag = (self._tag + 1) & 0xFFFFFFFF
         cbw = struct.pack(
             "<IIIBBB",

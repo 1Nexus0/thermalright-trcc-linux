@@ -44,6 +44,7 @@ class TrayController:
         icon: QIcon,
         tooltip: str = "TRCC Linux",
     ) -> None:
+        log.debug("__init__: window=%s", window)
         self._window = window
         self._minimize_on_close = minimize_on_close
         self._icon = icon
@@ -74,10 +75,12 @@ class TrayController:
 
     @property
     def minimized_to_taskbar(self) -> bool:
+        log.debug("minimized_to_taskbar")
         return self._minimized_to_taskbar
 
     def clear_minimized(self) -> None:
         """Reset the minimised flag — call when raising from tray/taskbar."""
+        log.debug("clear_minimized")
         self._minimized_to_taskbar = False
 
     # ── Actions ───────────────────────────────────────────────────────
@@ -107,6 +110,7 @@ class TrayController:
         self._window.close()
 
     def notify(self, title: str, message: str, msecs: int = 8000) -> None:
+        log.debug("notify: title=%s message=%s", title, message)
         if self._tray is not None and QSystemTrayIcon.isSystemTrayAvailable():
             self._tray.showMessage(
                 title, message, QSystemTrayIcon.MessageIcon.Warning, msecs,

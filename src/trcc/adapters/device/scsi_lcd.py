@@ -130,10 +130,12 @@ class ScsiLcd(BaseDevice[ScsiTransport], wire=Wire.SCSI):
 
     def _handshake_detail(self, result: HandshakeResult) -> str:
         """SCSI reports one byte — call it FBL, since PM *is* FBL here."""
+        log.debug("_handshake_detail: result=%s", result)
         return f" (FBL {result.fbl})"
 
     def _frame_size(self) -> tuple[int, int]:
         """The resolution the device reported, or the registry default."""
+        log.debug("_frame_size")
         return (self._handshake.resolution if self._handshake
                 else self.info.native_resolution)
 
@@ -176,6 +178,7 @@ class ScsiLcd(BaseDevice[ScsiTransport], wire=Wire.SCSI):
 
     @property
     def can_boot_animate(self) -> bool:
+        log.debug("can_boot_animate")
         return True
 
     def send_boot_animation(
@@ -247,6 +250,7 @@ class ScsiLcd(BaseDevice[ScsiTransport], wire=Wire.SCSI):
             [8:12]  word2 — frame_count for first, frame_index for carousel
             [12:16] compressed_size
         """
+        log.debug("_build_anim_cdb: cmd=%s word2=%s", cmd, word2)
         return struct.pack("<IIII", cmd, 0, word2, compressed_size)
 
     # ── SCSI framing ──────────────────────────────────────────────────
@@ -268,11 +272,13 @@ class ScsiLcd(BaseDevice[ScsiTransport], wire=Wire.SCSI):
         turns out to want one, it is a 17th-through-20th byte that does not
         exist today, not a line to un-comment.
         """
+        log.debug("_build_cdb: cmd=%s size=%s", cmd, size)
         return struct.pack("<I", cmd) + b"\x00" * 8 + struct.pack("<I", size)
 
     @staticmethod
     def _frame_chunks(width: int, height: int) -> list[tuple[int, int]]:
         """Compute (cmd, size) pairs for chunked frame send."""
+        log.debug("_frame_chunks: width=%s height=%s", width, height)
         pixels = width * height
         chunk_size = (_CHUNK_SIZE_SMALL if pixels <= _SMALL_DISPLAY_PIXELS
                       else _CHUNK_SIZE_LARGE)

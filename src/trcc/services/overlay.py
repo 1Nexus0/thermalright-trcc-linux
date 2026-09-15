@@ -35,6 +35,7 @@ _METRIC_UNITS = ("°C", "°F", "℃", "℉", " MHz", "MHz", " RPM", "RPM", "%")
 
 def _strip_metric_unit(text: str) -> str:
     """Return ``text`` with any trailing metric unit removed (bare number)."""
+    log.debug("_strip_metric_unit: text=%s", text)
     for unit in _METRIC_UNITS:
         text = text.replace(unit, "")
     return text.strip()
@@ -71,6 +72,7 @@ def resolve_overlay_elements(
     own elements already use) so every consumer — render, the DC writer,
     theme save/export — shares one definition of "what is on screen".
     """
+    log.debug("resolve_overlay_elements: theme_config=%s user_elements=%s", theme_config, user_elements)
     if user_elements is not None:
         return [e.to_dict() for e in user_elements]
     return list(theme_config.get("elements") or [])
@@ -154,6 +156,7 @@ class OverlayService:
 
     def __init__(self, renderer: Renderer,
                  unsupported: frozenset[str] = frozenset()) -> None:
+        log.debug("__init__: renderer=%s unsupported=%s", renderer, unsupported)
         self._r = renderer
         # Quantities NO backend on this host can read — ``SensorEnumerator.
         # unsupported()``, which is STATIC, so it is injected once rather than

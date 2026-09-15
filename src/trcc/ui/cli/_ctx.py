@@ -28,11 +28,13 @@ def dumps_json(payload: Any) -> str:
     Paths / tuples serialise without a custom encoder.  One shape for every
     ``--json`` flag (per-result via :func:`emit_json`, composite via the
     top-level ``status``)."""
+    log.debug("dumps_json: payload=%s", payload)
     return json.dumps(payload, default=str, indent=2)
 
 
 def emit_json(result: Any) -> None:
     """Print a dataclass Result/Snapshot as indented JSON for scripts."""
+    log.debug("emit_json: result=%s", result)
     typer.echo(dumps_json(dataclasses.asdict(result)))
 
 
@@ -47,6 +49,7 @@ def ensure_connected(app: App, key: str) -> None:
     render/play loop.  Exits with the connect error on failure (a wire command
     against an unattached device can do nothing useful).
     """
+    log.debug("ensure_connected: app=%s key=%s", app, key)
     from ...core.commands import EnsureConnected
     result = app.dispatch(EnsureConnected(key=key))
     if not result.ok:
@@ -90,6 +93,7 @@ def dispatch_echo(cmd: Any) -> Any:
     command repeats.  Commands that read fields off the Result keep the returned
     value; the rest just call it.
     """
+    log.debug("dispatch_echo: cmd=%s", cmd)
     result = get_app().dispatch(cmd)
     typer.echo(result.message)
     if not result.ok:
@@ -99,6 +103,7 @@ def dispatch_echo(cmd: Any) -> Any:
 
 def parse_on_off(state: str) -> bool:
     """Parse an ``on``/``off`` CLI argument to bool, or raise ``BadParameter``."""
+    log.debug("parse_on_off: state=%s", state)
     lowered = state.lower()
     if lowered not in ("on", "off"):
         raise typer.BadParameter(f"state must be 'on' or 'off', got {state!r}")
@@ -111,6 +116,7 @@ _renderer_override: Renderer | None = None
 
 def set_platform(platform: Platform) -> None:
     """Override the autodetected Platform (tests, dev mock)."""
+    log.debug("set_platform: platform=%s", platform)
     global _platform_override
     _platform_override = platform
     get_app.cache_clear()
@@ -118,6 +124,7 @@ def set_platform(platform: Platform) -> None:
 
 def set_renderer(renderer: Renderer) -> None:
     """Override the default QtRenderer.  Mostly for tests."""
+    log.debug("set_renderer: renderer=%s", renderer)
     global _renderer_override
     _renderer_override = renderer
     get_app.cache_clear()
@@ -131,4 +138,5 @@ def get_app() -> App:
     ``TRCC_DAEMON=1`` is set — UIs don't distinguish, both expose
     ``dispatch(cmd) -> Result``.
     """
+    log.debug("get_app")
     return trcc(platform=_platform_override, renderer=_renderer_override)

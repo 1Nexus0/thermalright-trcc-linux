@@ -86,6 +86,7 @@ def install(dry_run: bool = False) -> int:
 
 
 def _is_windows() -> bool:
+    log.debug("_is_windows")
     return sys.platform.startswith("win")
 
 
@@ -96,6 +97,7 @@ def _check_pyusb_backend() -> int:
     wizard can't tell the user what to do until pyusb can talk to the
     USB stack at all.
     """
+    log.debug("_check_pyusb_backend")
     try:
         import usb.backend.libusb1
     except ImportError:
@@ -123,6 +125,7 @@ def _classify_devices() -> tuple[
     driver.  We can't tell the two apart without enumerating Windows'
     own driver tree, so the instructions cover both cases.
     """
+    log.debug("_classify_devices")
     from ..device._pyusb_find import find as usb_find
 
     visible: list[tuple[int, int, str]] = []

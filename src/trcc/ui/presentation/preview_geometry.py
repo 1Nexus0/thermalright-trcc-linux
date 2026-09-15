@@ -51,4 +51,5 @@ def rotated_lcd_size(
     catalog + preview portrait selection.  Square panels swap to themselves, so
     only non-square panels actually change.
     """
+    log.debug("rotated_lcd_size: canvas_size=%s orientation=%s", canvas_size, orientation)
     return orientation in (90, 270), oriented_resolution(canvas_size, orientation)

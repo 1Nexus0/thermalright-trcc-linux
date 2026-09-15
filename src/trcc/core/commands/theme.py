@@ -86,6 +86,7 @@ def _theme_preview(themes: ContentStore, theme_dir: Path) -> str:
     module reaching for the filesystem to do it.  This wrapper survives only to
     turn ``Path | None`` into the ``str`` the result DTO carries.
     """
+    log.debug("_theme_preview: themes=%s theme_dir=%s", themes, theme_dir)
     tile = themes.tile_path(theme_dir)
     return str(tile) if tile is not None else ""
 
@@ -93,6 +94,7 @@ def _theme_preview(themes: ContentStore, theme_dir: Path) -> str:
 def _cloud_preview(web_dir: Path | None, theme_id: str) -> str:
     """On-disk preview PNG for a cloud theme id (``web/{w}{h}/<id>.png``), or ""
     when no resolution was given or the preview hasn't been extracted yet."""
+    log.debug("_cloud_preview: web_dir=%s theme_id=%s", web_dir, theme_id)
     if web_dir is None:
         return ""
     png = web_dir / f"{theme_id}.png"
@@ -1279,6 +1281,7 @@ class ListThemes(Query[ThemesListResult]):
     directory: Path | None = None
 
     def execute(self, app: App) -> ThemesListResult:
+        log.debug("execute: app=%s", app)
         paths = app.platform.paths()
         if self.directory is not None:
             roots = [self.directory]
@@ -1583,6 +1586,7 @@ class ListMasks(Query[MasksListResult]):
         # Delegate to the SAME discovery the gui skin uses — one implementation,
         # and it carries the preview path so the result is self-sufficient for
         # any UI (no re-deriving the thumbnail from the path).
+        log.debug("execute: app=%s", app)
         if self.directory is not None:
             cloud_dir: Path | None = self.directory
             user_dir: Path | None = None
@@ -1632,6 +1636,7 @@ class RestoreLastTheme(Command[ThemeResult]):
     key: str
 
     def execute(self, app: App) -> ThemeResult:
+        log.debug("execute: app=%s", app)
         settings = app.settings.for_device(self.key)
         stored = settings.current_theme
         if not stored:
@@ -1767,6 +1772,7 @@ class ListCloudThemes(Query[CloudThemesListResult]):
     resolution: tuple[int, int] | None = None
 
     def execute(self, app: App) -> CloudThemesListResult:
+        log.debug("execute: app=%s", app)
         try:
             themes = app.cloud_themes.list_themes(self.category)
         except ValueError as e:
@@ -2001,6 +2007,7 @@ class LoadImage(Command[ThemeResult]):
     path: Path
 
     def execute(self, app: App) -> ThemeResult:
+        log.debug("execute: app=%s", app)
         if not self.path.is_file():
             return ThemeResult(
                 ok=False, key=self.key,
@@ -2265,6 +2272,7 @@ class LoadVideo(Command[ThemeResult]):
     rotation: int = 0
 
     def execute(self, app: App) -> ThemeResult:
+        log.debug("execute: app=%s", app)
         if not self.path.is_file():
             return ThemeResult(
                 ok=False, key=self.key,

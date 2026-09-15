@@ -35,6 +35,7 @@ class DevicePanel(BasePanel):
     """Lists detected devices, connect/disconnect, and inspects the live one."""
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         self._last_bytes: dict[str, int] = {}
 
         self._list = QListWidget(self)
@@ -102,6 +103,7 @@ class DevicePanel(BasePanel):
         self._status.setText(result.message)
 
     def _selected_key(self) -> str | None:
+        log.debug("_selected_key")
         item = self._list.currentItem()
         if item is None:
             self._status.setText("Select a device first.")
@@ -110,6 +112,7 @@ class DevicePanel(BasePanel):
 
     def _current_key(self) -> str | None:
         """The selected key without mutating the status line."""
+        log.debug("_current_key")
         item = self._list.currentItem()
         return str(item.data(_USER_ROLE)) if item is not None else None
 
@@ -134,6 +137,7 @@ class DevicePanel(BasePanel):
     # ── Inspector ─────────────────────────────────────────────────────
 
     def _on_frame_sent(self, event: object) -> None:
+        log.debug("_on_frame_sent: event=%s", event)
         key = getattr(event, "key", None)
         n = getattr(event, "bytes_sent", None)
         if key is None or n is None:
@@ -143,6 +147,7 @@ class DevicePanel(BasePanel):
             self._refresh_inspector()
 
     def _refresh_inspector(self, *_args: object) -> None:
+        log.debug("_refresh_inspector")
         key = self._current_key()
         if not key:
             self._inspector.setText("Select a device to inspect.")

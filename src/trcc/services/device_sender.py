@@ -107,15 +107,18 @@ class DeviceSender(SendTask):
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return self._device.key
 
     def wait(self, timeout: float) -> None:
         """Block until a producer submits or *timeout* elapses."""
+        frame_log.debug("wait: timeout=%s", timeout)
         self._wake.wait(timeout)
         self._wake.clear()
 
     def wake(self) -> None:
         """Interrupt a pending :meth:`wait` (scheduler teardown)."""
+        frame_log.debug("wake")
         self._wake.set()
 
     def run_once(self, now: float) -> float:
@@ -125,6 +128,7 @@ class DeviceSender(SendTask):
         ``device.send`` is never re-entered.  The device write happens
         OUTSIDE the inbox lock so a slow USB write never blocks ``submit``.
         """
+        frame_log.debug("run_once: now=%s", now)
         with self._lock:
             payload = self._pending if self._has_pending else None
             had_pending = self._has_pending
@@ -223,6 +227,7 @@ class DeviceSender(SendTask):
 
     def last(self) -> Any:
         """The last payload successfully written (the keepalive frame)."""
+        log.debug("last")
         with self._lock:
             return self._last
 

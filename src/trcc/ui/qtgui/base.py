@@ -63,6 +63,7 @@ class BasePanel(QFrame):
         bus: BusBridge,
         parent: QWidget | None = None,
     ) -> None:
+        log.debug("__init__: app=%s bus=%s", app, bus)
         super().__init__(parent)
         self._app = app
         self._bus = bus
@@ -71,6 +72,7 @@ class BasePanel(QFrame):
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Reject concrete subclasses that forget to implement _setup_ui."""
+        log.debug("__init_subclass__")
         super().__init_subclass__(**kwargs)
         if cls.__dict__.get("_abstract", False):
             return
@@ -90,34 +92,41 @@ class BasePanel(QFrame):
 
     def _setup_ui(self) -> None:
         """Build widgets + lay out the panel.  Called by ``__init__``."""
+        log.debug("_setup_ui")
         raise NotImplementedError(
             f"{type(self).__name__} must implement _setup_ui()"
         )
 
     def apply_language(self, lang: str) -> None:
         """Re-render localized strings.  Default no-op."""
+        log.debug("apply_language: lang=%s", lang)
         del lang
 
     def get_state(self) -> dict:
         """Serialize panel state for save / restore.  Default empty."""
+        log.debug("get_state")
         return {}
 
     def set_state(self, state: dict) -> None:
         """Restore panel state from a previously saved dict.  Default no-op."""
+        log.debug("set_state: state=%s", state)
         del state
 
     # ── Concrete helpers ───────────────────────────────────────────────
 
     def dispatch(self, command: Command[R]) -> R:
         """Run *command* on the App.  Convenience over ``self._app.dispatch``."""
+        log.debug("dispatch: command=%s", command)
         return self._app.dispatch(command)
 
     @property
     def app(self) -> App:
+        log.debug("app")
         return self._app
 
     @property
     def bus(self) -> BusBridge:
+        log.debug("bus")
         return self._bus
 
     def start_periodic_updates(
@@ -126,8 +135,10 @@ class BasePanel(QFrame):
         callback: Callable[[], None],
     ) -> None:
         """Run *callback* every *interval_ms* on the Qt main thread."""
+        log.debug("start_periodic_updates: interval_ms=%s callback=%s", interval_ms, callback)
         self._updates.start(interval_ms, callback)
 
     def stop_periodic_updates(self) -> None:
         """Stop the periodic update timer if running."""
+        log.debug("stop_periodic_updates")
         self._updates.stop()

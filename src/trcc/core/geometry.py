@@ -157,6 +157,7 @@ def save_folder_resolution(
     this predicate rather than borrowing the renderer's canvas.  Mirrors the
     v9.8.0 folder-switch (Phase D): a portrait selection → ``theme{h}{w}``.
     """
+    log.debug("save_folder_resolution: profile=%s orientation=%s", profile, orientation)
     w, h = profile.resolution
     rotate_panel = profile.rotate and w != h and orientation in (90, 270)
     if rotate_panel and (content_is_portrait or profile.widescreen):

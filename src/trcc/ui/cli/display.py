@@ -105,6 +105,7 @@ def set_brightness(
 
 def _parse_hex_color(hex_str: str) -> tuple[int, int, int] | None:
     """Parse a 6-char hex color into ``(r, g, b)``; ``None`` on miss."""
+    log.debug("_parse_hex_color: hex_str=%s", hex_str)
     try:
         r, g, b, _a = parse_hex(hex_str)
     except ValueError:
@@ -1276,6 +1277,7 @@ def screencast(
     stopped = {"flag": False}
 
     def _handle(*_args: object) -> None:
+        log.debug("_handle")
         stopped["flag"] = True
 
     signal.signal(signal.SIGINT, _handle)

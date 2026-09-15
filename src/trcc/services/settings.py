@@ -123,6 +123,7 @@ class Settings:
     """
 
     def __init__(self, paths: Paths) -> None:
+        log.debug("__init__: paths=%s", paths)
         self._paths = paths
         self._lock = RLock()
         self._app = AppSettings()
@@ -779,6 +780,7 @@ class Settings:
     # ── Persistence ───────────────────────────────────────────────────
 
     def _config_path(self) -> Path:
+        log.debug("_config_path")
         return config_path(self._paths)
 
     def _load(self) -> None:
@@ -818,6 +820,7 @@ class Settings:
 
     def _save(self) -> None:
         """Atomic write: tmp file → fsync → rename."""
+        log.debug("_save")
         path = self._config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -893,6 +896,7 @@ def resolve_config_path(paths: Paths) -> Path:
 
 def _json_default(obj: Any) -> Any:
     """Coerce tuples → lists (JSON has no tuple type)."""
+    log.debug("_json_default: obj=%s", obj)
     if isinstance(obj, tuple):
         return list(obj)
     raise TypeError(f"{type(obj).__name__} is not JSON-serialisable")
@@ -935,6 +939,7 @@ def _migrate_device(
 
 def _device_settings_from_dict(data: dict[str, Any]) -> DeviceSettings:
     """Build DeviceSettings from a parsed JSON dict, tolerant of extras."""
+    log.debug("_device_settings_from_dict: data=%s", data)
     kwargs: dict[str, Any] = {}
     valid_fields = {f for f in DeviceSettings.__dataclass_fields__}
     for field_name, value in data.items():
@@ -971,6 +976,7 @@ def _device_settings_from_dict(data: dict[str, Any]) -> DeviceSettings:
 
 def _led_zone_from_dict(data: dict[str, Any]) -> LedZoneSettings:
     """Build one LedZoneSettings from a parsed JSON dict."""
+    log.debug("_led_zone_from_dict: data=%s", data)
     kwargs: dict[str, Any] = {}
     valid = set(LedZoneSettings.__dataclass_fields__)
     for k, v in data.items():
@@ -988,6 +994,7 @@ def _led_zone_from_dict(data: dict[str, Any]) -> LedZoneSettings:
 
 def _led_settings_from_dict(data: dict[str, Any]) -> LedDeviceSettings:
     """Build LedDeviceSettings from a parsed JSON dict, tolerant of extras."""
+    log.debug("_led_settings_from_dict: data=%s", data)
     kwargs: dict[str, Any] = {}
     valid = set(LedDeviceSettings.__dataclass_fields__)
     for k, v in data.items():

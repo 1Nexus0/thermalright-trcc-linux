@@ -78,6 +78,7 @@ def _is_widescreen_split(visual_size: tuple[int, int]) -> bool:
     the Dynamic Island split overlay.  Gates ``_composite_split_overlay``
     so non-widescreen devices skip the load+composite entirely.
     """
+    log.debug("_is_widescreen_split: visual_size=%s", visual_size)
     return visual_size in _WIDESCREEN_SPLIT_RESOLUTIONS
 
 
@@ -92,6 +93,7 @@ def _cutout_is_right_side(
     without a PanelCutout (or whose cutout is left-of-midline) keep
     the assets as-authored.
     """
+    log.debug("_cutout_is_right_side: info=%s visual_size=%s", info, visual_size)
     cutout = info.panel_cutout
     if cutout is None:
         return False
@@ -156,6 +158,7 @@ class DisplayService:
         backgrounds: BackgroundSlot,
         paths: Paths,
     ) -> None:
+        log.debug("__init__: renderer=%s themes=%s", renderer, themes)
         self._r = renderer
         self._themes = themes
         self._overlay = overlay
@@ -1588,6 +1591,7 @@ def _fit(
     dst_w: int, dst_h: int,
 ) -> tuple[int, int, int, int]:
     """(fit_w, fit_h, x_offset, y_offset)."""
+    log.debug("_fit: mode=%s src_w=%s", mode, src_w)
     if mode is FitMode.STRETCH or src_w == 0 or src_h == 0:
         return dst_w, dst_h, 0, 0
 

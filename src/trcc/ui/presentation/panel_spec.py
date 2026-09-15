@@ -28,10 +28,14 @@ and keeping them out is what stops this becoming a widget framework.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 # (x, y, w, h) — the shape ``Layout`` already stores and ``setGeometry`` wants.
 Rect = tuple[int, int, int, int]
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +117,7 @@ class PanelSpec:
 
     def control(self, control_id: str) -> Control:
         """Look a control up by id — for tests and for panels that need one."""
+        log.debug("control: control_id=%s", control_id)
         for c in self.controls:
             if c.id == control_id:
                 return c

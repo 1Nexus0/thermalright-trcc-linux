@@ -117,6 +117,7 @@ def personalize_metrics(
 
     def conv(celsius: float) -> float:
         # 0.0 == "no reading" — never fabricate 32°F from an absent sensor.
+        log.debug("conv: celsius=%s", celsius)
         return celsius_to_fahrenheit(celsius) if (to_f and celsius) else celsius
 
     cpus = [dataclasses.replace(c, temp=conv(c.temp)) for c in metrics.cpus]

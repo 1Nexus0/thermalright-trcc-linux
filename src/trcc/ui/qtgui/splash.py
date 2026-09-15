@@ -39,6 +39,7 @@ def make_splash() -> QSplashScreen | QFrame:
     name + version on a dark background.  Both honor ``.show()`` /
     ``.close()``.
     """
+    log.debug("make_splash")
     if Assets.exists(Assets.SPLASH_BG):
         pix = Assets.pixmap(Assets.SPLASH_BG)
         splash = QSplashScreen(pix, Qt.WindowType.WindowStaysOnTopHint)
@@ -52,6 +53,7 @@ class _FrameSplash(QFrame):
     """Minimal splash used when no SPLASH_BG asset is bundled."""
 
     def __init__(self) -> None:
+        log.debug("__init__")
         super().__init__(None, Qt.WindowType.SplashScreen
                          | Qt.WindowType.WindowStaysOnTopHint
                          | Qt.WindowType.FramelessWindowHint)
@@ -95,6 +97,7 @@ def show_splash(parent: QWidget | None = None) -> QWidget:
     ``parent`` is unused for now (splashes are always top-level) but
     kept in the signature for the future per-window-positioning case.
     """
+    log.debug("show_splash: parent=%s", parent)
     del parent
     splash = make_splash()
     splash.show()
@@ -107,4 +110,5 @@ def auto_close(splash: QWidget, after_ms: int = 250) -> None:
     Used by the launcher when MainWindow is ready immediately — keeps
     the splash visible just long enough to register visually.
     """
+    log.debug("auto_close: splash=%s after_ms=%s", splash, after_ms)
     QTimer.singleShot(after_ms, splash.close)

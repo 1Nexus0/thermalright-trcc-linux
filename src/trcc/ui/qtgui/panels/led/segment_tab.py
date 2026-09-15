@@ -36,12 +36,14 @@ class SegmentTab(LedTabBase):
     """Per-segment visibility checkboxes."""
 
     def __init__(self, app, key_provider, parent=None) -> None:
+        log.debug("__init__: app=%s key_provider=%s", app, key_provider)
         super().__init__(app, key_provider, parent)
         self._checks: list[QCheckBox] = []
         self._placeholder_visible = True
         self._build_ui()
 
     def _build_ui(self) -> None:
+        log.debug("_build_ui")
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
@@ -83,6 +85,7 @@ class SegmentTab(LedTabBase):
     # ── Internals ─────────────────────────────────────────────────────
 
     def _show_placeholder(self, show: bool) -> None:
+        log.debug("_show_placeholder: show=%s", show)
         self._placeholder_visible = show
         self._placeholder.setVisible(show)
         # Clear the grid if showing the placeholder.
@@ -92,6 +95,7 @@ class SegmentTab(LedTabBase):
     def _rebuild_checks(self, segment_on: Sequence[bool]) -> None:
         # Sequence, not list: the mask arrives from ``LedSnapshotResult`` as a
         # tuple (a Result is frozen), and this only ever reads it.
+        log.debug("_rebuild_checks: segment_on=%s", segment_on)
         if len(self._checks) != len(segment_on):
             # Wipe + rebuild — segment counts only change when the
             # connected device changes, so this is cheap.

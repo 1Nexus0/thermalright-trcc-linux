@@ -63,6 +63,7 @@ class NoopHotplugMonitor(HotplugMonitor):
     """
 
     def __init__(self, *, reason: str = "no implementation for this platform") -> None:
+        log.debug("__init__")
         self._reason = reason
         self._running = False
 
@@ -150,6 +151,7 @@ class _LinuxPowerListener:
     """
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._thread: threading.Thread | None = None
         self._loop: Any = None
         self._bus: EventBus | None = None
@@ -244,6 +246,7 @@ class LinuxHotplugMonitor(HotplugMonitor):
     """
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._bus: EventBus | None = None
@@ -349,6 +352,7 @@ class LinuxHotplugMonitor(HotplugMonitor):
         Shared by event dispatch and the coldplug pass so both read the udev
         properties + registry filter identically.
         """
+        log.debug("_device_key: device=%s", device)
         vid = (device.get("ID_VENDOR_ID") or "").lower()
         pid = (device.get("ID_MODEL_ID") or "").lower()
         if not vid or not pid or (vid, pid) not in self._known:
@@ -441,6 +445,7 @@ class WindowsHotplugMonitor(HotplugMonitor):
     """
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._threads: list[threading.Thread] = []
         self._stop_event = threading.Event()
         self._bus: EventBus | None = None
@@ -487,6 +492,7 @@ class WindowsHotplugMonitor(HotplugMonitor):
         # Per-method logging on Windows-specific monitors is deferred
         # until I've researched the canonical Windows logging pattern
         # (WMI/ETW conventions vs plain Python logging) on real hardware.
+        log.debug("is_running")
         return any(t.is_alive() for t in self._threads)
 
     # ── Worker loop ──────────────────────────────────────────────────
@@ -620,6 +626,7 @@ class FreeBSDHotplugMonitor(HotplugMonitor):
     """
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._bus: EventBus | None = None
@@ -768,6 +775,7 @@ class PollingHotplugMonitor(HotplugMonitor):
         *,
         interval_s: float = _POLL_INTERVAL_S,
     ) -> None:
+        log.debug("__init__: scan=%s", scan)
         self._scan = scan
         self._interval_s = interval_s
         self._thread: threading.Thread | None = None
@@ -813,6 +821,7 @@ class PollingHotplugMonitor(HotplugMonitor):
 
     def _registry_set(self) -> set[tuple[int, int]]:
         """Registry as int tuples, matching scan_devices's shape."""
+        log.debug("_registry_set")
         return {(int(vid, 16), int(pid, 16)) for vid, pid in self._known}
 
     def _tick(self) -> None:
@@ -837,6 +846,7 @@ class PollingHotplugMonitor(HotplugMonitor):
             self._bus.publish(DeviceDetached(key=key, vid=vid, pid=pid))
 
     def _poll_loop(self) -> None:
+        log.debug("_poll_loop")
         while not self._stop_event.is_set():
             self._tick()
             self._stop_event.wait(self._interval_s)

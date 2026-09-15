@@ -89,6 +89,7 @@ class LyLcd(BaseBulkDevice, wire=Wire.LY):
     _EP_WRITE = 0x01
 
     def __init__(self, info: ProductInfo, transport: BulkTransport) -> None:
+        log.debug("__init__: info=%s transport=%s", info, transport)
         super().__init__(info, transport)
         self._pm: int = 0
         self._sub: int = 0
@@ -203,6 +204,7 @@ class LyLcd(BaseBulkDevice, wire=Wire.LY):
 
     def _handshake_detail(self, result: HandshakeResult) -> str:
         """The PID picks the variant (LY vs LY1) — worth having on the record."""
+        log.debug("_handshake_detail: result=%s", result)
         return f" (pid=0x{self.info.pid:04x})"
 
     def _prepare_frame(self, payload: bytes) -> bytes:
@@ -247,6 +249,7 @@ class LyLcd(BaseBulkDevice, wire=Wire.LY):
 
     def _write_frame(self, frame: bytes) -> bool:
         """4096-byte USB writes over the chunk buffer, then the 512-byte ACK."""
+        log.debug("_write_frame: frame=%s", frame)
         total_bytes = len(frame)
         pos = 0
         while pos < total_bytes:

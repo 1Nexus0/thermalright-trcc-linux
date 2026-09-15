@@ -45,6 +45,7 @@ class StatusPanel(BasePanel):
     """Live device state + rolling event log."""
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         self._picker = DevicePickerWidget(
             self.app, self._bus, kind_filter="lcd", parent=self,
         )
@@ -150,6 +151,7 @@ class StatusPanel(BasePanel):
         self._temp_label.setText(result.temp_unit)
 
     def _add_event(self, text: str) -> None:
+        log.debug("_add_event: text=%s", text)
         stamp = time.strftime("%H:%M:%S")
         line = f"{stamp}  {text}"
         # Prepend (newest on top).

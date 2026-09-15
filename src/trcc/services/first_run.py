@@ -37,10 +37,12 @@ class FirstRunService:
     """
 
     def __init__(self, paths: Paths) -> None:
+        log.debug("__init__: paths=%s", paths)
         self._paths = paths
 
     @property
     def marker_path(self) -> Path:
+        log.debug("marker_path")
         return self._paths.config_dir() / _MARKER_NAME
 
     def is_first_run(self) -> bool:

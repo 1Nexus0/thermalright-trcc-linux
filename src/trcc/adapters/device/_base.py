@@ -93,6 +93,7 @@ class BaseDevice(Device[T]):
         DEVICES.register(wire)(cls)
 
     def __init__(self, info: ProductInfo, transport: T) -> None:
+        log.debug("__init__: info=%s transport=%s", info, transport)
         super().__init__(info, transport)
         # Handshake-derived geometry + encoding flags.  Every LCD wire fills
         # this in ``_do_handshake``; LED leaves it None (no canvas), which is
@@ -148,6 +149,7 @@ class BaseDevice(Device[T]):
         there, and the logger is the SUBCLASS's module so a report still says
         which wire spoke.
         """
+        log.debug("_trace_reply: resp=%s", resp)
         trace(logging.getLogger(type(self).__module__),
               "%s raw handshake reply (%d bytes, first %d): %s",
               self.info.key, len(resp), min(len(resp), _TRACE_REPLY_BYTES),
@@ -169,6 +171,7 @@ class BaseDevice(Device[T]):
         encoding it picked, the PID variant, the LED style.  Returns a string
         that already carries its own leading space, or empty.
         """
+        log.debug("_handshake_detail: result=%s", result)
         return ""
 
     def _open_transport(self) -> None:
@@ -197,6 +200,7 @@ class BaseDevice(Device[T]):
            reconnect-and-retry / consecutive-failure escalation every wire
            shares (``core.ports.Device``).
         """
+        frame_log.debug("send: payload=%s", payload)
         self._require_connected()
         frame = self._prepare_frame(payload)
         return self._send_with_recovery(partial(self._write_frame, frame))
@@ -251,6 +255,7 @@ class BaseDevice(Device[T]):
         geometry from the handshake wants.  A wire whose profile is a fixed
         constant, or that caches something else (Led), overrides.
         """
+        log.debug("_reset_state")
         self._profile = None
 
 

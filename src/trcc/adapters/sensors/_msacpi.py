@@ -21,9 +21,13 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from ...core.logs import per_frame
 from ...core.ports import CpuSource
 
 log = logging.getLogger(__name__)
+#: Per-tick readers — their records must never be CONSTRUCTED at
+#: default verbosity.  73 ns/call short-circuited, measured.
+frame_log = per_frame(__name__)
 
 
 _MSACPI_NAMESPACE = "root\\wmi"
@@ -71,12 +75,14 @@ class WmiAcpiCpu(CpuSource):
         # Defer the handle to first read so it is born on the READING
         # thread's apartment (the poll thread), not the construction
         # thread's.  The zone count is apartment-agnostic, cached once.
+        log.debug("__init__")
         self._handle_factory = handle_factory
         self._probed = False
         self._zone_count = 0
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self.name_default
 
     def _ensure_probed(self, handle: Any) -> None:

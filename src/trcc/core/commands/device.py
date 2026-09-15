@@ -421,6 +421,7 @@ class DeviceConnectionIssues(Query[ConnectionIssuesResult]):
     """
 
     def execute(self, app: App) -> ConnectionIssuesResult:
+        log.debug("execute: app=%s", app)
         issues = app.connection_issues()
         return ConnectionIssuesResult(
             ok=True, issues=issues,
@@ -477,6 +478,7 @@ class SendFrame(Command[SendResult]):
     data: bytes
 
     def execute(self, app: App) -> SendResult:
+        log.debug("execute: app=%s", app)
         try:
             _require_connected_device(app, self.key)
         except (DeviceNotFoundError, DeviceNotConnectedError) as e:
@@ -515,6 +517,7 @@ class SendColor(Command[SendResult]):
     b: int
 
     def execute(self, app: App) -> SendResult:
+        log.debug("execute: app=%s", app)
         for label, value in (("r", self.r), ("g", self.g), ("b", self.b)):
             if not 0 <= value <= 255:
                 return SendResult(
@@ -1909,6 +1912,7 @@ class SetOrientation(Command[OrientationResult]):
     degrees: int
 
     def execute(self, app: App) -> OrientationResult:
+        log.debug("execute: app=%s", app)
         try:
             vid_str, pid_str = self.key.split(":")
             vid, pid = int(vid_str, 16), int(pid_str, 16)
@@ -1952,6 +1956,7 @@ class SetBrightness(Command[BrightnessResult]):
     percent: int
 
     def execute(self, app: App) -> BrightnessResult:
+        log.debug("execute: app=%s", app)
         if not 0 <= self.percent <= 100:
             return BrightnessResult(
                 ok=False, key=self.key, percent=self.percent,
@@ -1980,6 +1985,7 @@ class SetFitMode(Command[FitModeResult]):
     mode: str
 
     def execute(self, app: App) -> FitModeResult:
+        log.debug("execute: app=%s", app)
         try:
             parsed = FitMode(self.mode)
         except ValueError:
@@ -2008,6 +2014,7 @@ class EnableOverlay(Command[OverlayResult]):
     enabled: bool
 
     def execute(self, app: App) -> OverlayResult:
+        log.debug("execute: app=%s", app)
         app.settings.set_overlay_enabled(self.key, self.enabled)
         _invalidate_scene(app, self.key)
         app.events.publish(OverlayChanged(key=self.key, enabled=self.enabled))
@@ -2030,6 +2037,7 @@ class SetSplitMode(Command[SplitModeResult]):
     mode: int
 
     def execute(self, app: App) -> SplitModeResult:
+        log.debug("execute: app=%s", app)
         if self.mode not in (0, 1, 2, 3):
             return SplitModeResult(
                 ok=False, key=self.key, mode=self.mode,
@@ -2198,6 +2206,7 @@ class SetMaskPosition(Command[MaskPositionResult]):
     y: int | None
 
     def execute(self, app: App) -> MaskPositionResult:
+        log.debug("execute: app=%s", app)
         if (self.x is None) != (self.y is None):
             return MaskPositionResult(
                 ok=False, key=self.key,
@@ -2229,6 +2238,7 @@ class SetMaskVisible(Command[MaskVisibilityResult]):
     visible: bool
 
     def execute(self, app: App) -> MaskVisibilityResult:
+        log.debug("execute: app=%s", app)
         app.settings.set_mask_visible(self.key, self.visible)
         _invalidate_scene(app, self.key)
         app.events.publish(
@@ -2251,6 +2261,7 @@ class SetBackgroundMode(Command[BackgroundModeResult]):
     mode: str
 
     def execute(self, app: App) -> BackgroundModeResult:
+        log.debug("execute: app=%s", app)
         try:
             app.settings.set_background_mode(self.key, self.mode)  # type: ignore[arg-type]
         except ValueError as e:
@@ -2271,6 +2282,7 @@ class SetOverlayBackground(Command[OverlayBackgroundResult]):
     color: tuple[int, int, int]
 
     def execute(self, app: App) -> OverlayBackgroundResult:
+        log.debug("execute: app=%s", app)
         try:
             app.settings.set_overlay_background(self.key, self.color)
         except ValueError as e:
@@ -2310,6 +2322,7 @@ class AddOverlayElement(Command[OverlayElementResult]):
     element_id: str = ""
 
     def execute(self, app: App) -> OverlayElementResult:
+        log.debug("execute: app=%s", app)
         if self.type not in ("text", "metric", "clock"):
             return OverlayElementResult(
                 ok=False, key=self.key, element=None,
@@ -2363,6 +2376,7 @@ class UpdateOverlayElement(Command[OverlayElementResult]):
     source: str | None = None
 
     def execute(self, app: App) -> OverlayElementResult:
+        log.debug("execute: app=%s", app)
         try:
             element = app.settings.update_user_overlay_element(
                 self.key, self.element_id,
@@ -2390,6 +2404,7 @@ class DeleteOverlayElement(Command[OverlayElementDeleteResult]):
     element_id: str
 
     def execute(self, app: App) -> OverlayElementDeleteResult:
+        log.debug("execute: app=%s", app)
         try:
             app.settings.delete_user_overlay_element(self.key, self.element_id)
         except KeyError as e:
@@ -2426,6 +2441,7 @@ class FlashOverlayElement(Command[OverlayElementResult]):
         # never matched them (the "element 'N' not found" flash bug).
         # Same helper ResolveOverlay uses, so the id a UI was given there is
         # the id looked up here.
+        log.debug("execute: app=%s", app)
         for entry in resolve_overlay_layout(app, self.key).elements:
             if entry.id == self.element_id:
                 app.events.publish(OverlayChanged(
@@ -2677,6 +2693,7 @@ class SetOverlayConfig(Command[OverlayConfigResult]):
     elements: tuple[dict, ...] = ()
 
     def execute(self, app: App) -> OverlayConfigResult:
+        log.debug("execute: app=%s", app)
         parsed: list[OverlayElement] = []
         for raw in self.elements:
             element = OverlayElement.from_dict(dict(raw))
@@ -2714,6 +2731,7 @@ class PauseVideo(Command[PauseVideoResult]):
     paused: bool
 
     def execute(self, app: App) -> PauseVideoResult:
+        log.debug("execute: app=%s", app)
         playback = app.media.playback(self.key)
         if playback is None:
             return PauseVideoResult(
@@ -2780,6 +2798,7 @@ class ToggleVideo(Command[PauseVideoResult]):
     key: str
 
     def execute(self, app: App) -> PauseVideoResult:
+        log.debug("execute: app=%s", app)
         playback = app.media.playback(self.key)
         if playback is None:
             return PauseVideoResult(
@@ -2796,6 +2815,7 @@ class SeekVideo(Command[SeekVideoResult]):
     frame: int
 
     def execute(self, app: App) -> SeekVideoResult:
+        log.debug("execute: app=%s", app)
         playback = app.media.playback(self.key)
         if playback is None:
             return SeekVideoResult(
@@ -2823,6 +2843,7 @@ class LoopVideo(Command[LoopVideoResult]):
     loop: bool
 
     def execute(self, app: App) -> LoopVideoResult:
+        log.debug("execute: app=%s", app)
         playback = app.media.playback(self.key)
         if playback is None:
             return LoopVideoResult(
@@ -2845,6 +2866,7 @@ class LcdSnapshot(Query[LcdSnapshotResult]):
     key: str
 
     def execute(self, app: App) -> LcdSnapshotResult:
+        log.debug("execute: app=%s", app)
         s = app.settings.for_device(self.key)
         return LcdSnapshotResult(
             ok=True, key=self.key,

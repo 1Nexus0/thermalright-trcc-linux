@@ -60,6 +60,7 @@ class ModeTab(LedTabBase):
     """Radio-button mode picker.  Each click dispatches SetLedMode."""
 
     def __init__(self, app, key_provider, parent=None) -> None:
+        log.debug("__init__: app=%s key_provider=%s", app, key_provider)
         super().__init__(app, key_provider, parent)
         self._radios: dict[LEDMode, QRadioButton] = {}
         self._group = QButtonGroup(self)
@@ -67,6 +68,7 @@ class ModeTab(LedTabBase):
         self._build_ui()
 
     def _build_ui(self) -> None:
+        log.debug("_build_ui")
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(8)

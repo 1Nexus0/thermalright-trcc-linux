@@ -44,6 +44,7 @@ class GitHubReleases:
         owner: str = "Lexonight1",
         repo: str = "thermalright-trcc-linux",
     ) -> None:
+        log.debug("__init__: http=%s", http)
         self._http = http
         self._url = _RELEASES_LATEST_URL.format(owner=owner, repo=repo)
 

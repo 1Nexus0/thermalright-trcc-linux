@@ -68,6 +68,7 @@ class LcdPresentationModel:
     """
 
     def __init__(self, device_key: str) -> None:
+        log.debug("__init__: device_key=%s", device_key)
         self.device_key = device_key
         self.state = DeviceState()
 
@@ -117,16 +118,19 @@ class LcdPresentationModel:
     @staticmethod
     def video_interval_ms(fps: float | None) -> int:
         """ms-per-frame for a playback fps (None / 0 → 30 fps → 33 ms)."""
+        log.debug("video_interval_ms: fps=%s", fps)
         return max(1, int(1000 / (fps or 30)))
 
     @staticmethod
     def seek_frame(percent: float, total: int) -> int:
         """Clamp a 0..1 seek fraction to a valid frame index in ``total``."""
+        log.debug("seek_frame: percent=%s total=%s", percent, total)
         return max(0, min(total - 1, int(percent * total)))
 
     @staticmethod
     def progress_fraction(cursor: int, total: int) -> float:
         """Playback progress as 0..1 (0.0 when there are no frames)."""
+        log.debug("progress_fraction: cursor=%s total=%s", cursor, total)
         return (cursor / total) if total else 0.0
 
     def apply_split_mode(

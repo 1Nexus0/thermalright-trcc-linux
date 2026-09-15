@@ -75,6 +75,7 @@ log = logging.getLogger(__name__)
 
 def _parse_resolution(resolution: str) -> tuple[int, int]:
     """Parse ``"320x320"`` → ``(320, 320)``; raise 400 on bad input."""
+    log.debug("_parse_resolution: resolution=%s", resolution)
     try:
         return parse_resolution(resolution)
     except ValueError as e:
@@ -85,6 +86,7 @@ router = APIRouter(prefix="/theme", tags=["theme"])
 
 def _safe_basename(value: str) -> str:
     """Strip any directory parts; raise if the result is empty."""
+    log.debug("_safe_basename: value=%s", value)
     name = Path(value).name.strip()
     if not name:
         raise HTTPException(400, "name required")
@@ -293,6 +295,7 @@ async def config_import_upload(
 
 
 def _unlink_quietly(path: Path) -> None:
+    log.debug("_unlink_quietly: path=%s", path)
     try:
         path.unlink()
     except OSError:

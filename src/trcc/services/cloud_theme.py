@@ -45,6 +45,7 @@ class CloudThemeService:
         catalog: CloudCatalog,
         paths: Paths,
     ) -> None:
+        log.debug("__init__: catalog=%s paths=%s", catalog, paths)
         self._catalog = catalog
         self._paths = paths
 
@@ -181,6 +182,7 @@ def _is_first_frame_png(png: Path, mp4: Path) -> bool:
     bundled catalog thumbnails from the 7z) get replaced so the
     fallback shows the actual video's content.
     """
+    log.debug("_is_first_frame_png: png=%s mp4=%s", png, mp4)
     if not png.is_file() or not mp4.is_file():
         return False
     try:

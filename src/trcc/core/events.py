@@ -431,6 +431,7 @@ class EventBus:
     """
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._handlers: defaultdict[type[Event], list[Handler]] = defaultdict(list)
 
     def subscribe(self, event_type: type[Event], handler: Handler) -> None:

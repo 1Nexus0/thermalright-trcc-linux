@@ -52,6 +52,7 @@ class ColorWheel(QWidget):
     _SELECTOR_PEN_W = 2
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        log.debug("__init__: parent=%s", parent)
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMinimumSize(160, 160)
@@ -61,22 +62,27 @@ class ColorWheel(QWidget):
     # ── Public API ───────────────────────────────────────────────────
 
     def hue(self) -> int:
+        log.debug("hue")
         return self._hue
 
     def set_hue(self, hue: int) -> None:
         """Set hue without emitting the change signal."""
+        log.debug("set_hue: hue=%s", hue)
         self._hue = hue % 360
         self.update()
 
     # ── Geometry helpers ─────────────────────────────────────────────
 
     def _center(self) -> tuple[float, float]:
+        log.debug("_center")
         return self.width() / 2.0, self.height() / 2.0
 
     def _outer_r(self) -> float:
+        log.debug("_outer_r")
         return min(self.width(), self.height()) / 2.0 - 4
 
     def _inner_r(self) -> float:
+        log.debug("_inner_r")
         return self._outer_r() * (1.0 - self._RING_THICKNESS_RATIO)
 
     def _on_ring(self, x: float, y: float) -> bool:
@@ -89,6 +95,7 @@ class ColorWheel(QWidget):
     # ── Painting ─────────────────────────────────────────────────────
 
     def paintEvent(self, event) -> None:
+        log.debug("paintEvent: event=%s", event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -133,6 +140,7 @@ class ColorWheel(QWidget):
     # ── Mouse interaction ────────────────────────────────────────────
 
     def mousePressEvent(self, event) -> None:
+        log.debug("mousePressEvent: event=%s", event)
         if event.button() != Qt.MouseButton.LeftButton:
             return
         pos = event.position()
@@ -141,15 +149,18 @@ class ColorWheel(QWidget):
             self._update_hue_from_pos(pos.x(), pos.y())
 
     def mouseMoveEvent(self, event) -> None:
+        log.debug("mouseMoveEvent: event=%s", event)
         if self._dragging:
             pos = event.position()
             self._update_hue_from_pos(pos.x(), pos.y())
 
     def mouseReleaseEvent(self, event) -> None:
+        log.debug("mouseReleaseEvent: event=%s", event)
         if event.button() == Qt.MouseButton.LeftButton:
             self._dragging = False
 
     def _update_hue_from_pos(self, x: float, y: float) -> None:
+        log.debug("_update_hue_from_pos: x=%s y=%s", x, y)
         cx, cy = self._center()
         dx = x - cx
         dy = -(y - cy)  # screen → math Y

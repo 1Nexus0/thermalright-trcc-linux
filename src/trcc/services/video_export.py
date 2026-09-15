@@ -88,6 +88,7 @@ class VideoExporter:
     # ── Internals ────────────────────────────────────────────────────
 
     def _validate(self, req: VideoExportRequest) -> None:
+        log.debug("_validate: req=%s", req)
         if not toolchain.present("ffmpeg"):
             raise VideoExportError(
                 "ffmpeg not found on PATH.  Install it via your package "
@@ -118,6 +119,7 @@ class VideoExporter:
     def _do_export(
         self, req: VideoExportRequest, progress: ProgressCallback,
     ) -> Path:
+        log.debug("_do_export: req=%s progress=%s", req, progress)
         progress(0, "Preparing export…")
         temp_dir = Path(tempfile.mkdtemp(prefix="trcc-videoexport-"))
         frames_dir = temp_dir / "frames"
@@ -139,6 +141,7 @@ class VideoExporter:
         frames_dir: Path,
         progress: ProgressCallback,
     ) -> None:
+        log.debug("_run_ffmpeg: req=%s frames_dir=%s", req, frames_dir)
         progress(5, "Extracting frames…")
         vf: list[str] = []
         if req.rotation == 90:
@@ -182,6 +185,7 @@ class VideoExporter:
     def _collect_frames(
         self, frames_dir: Path, progress: ProgressCallback,
     ) -> list[bytes]:
+        log.debug("_collect_frames: frames_dir=%s progress=%s", frames_dir, progress)
         jpeg_paths = sorted(frames_dir.glob("*.jpg"))
         if not jpeg_paths:
             raise VideoExportError(
@@ -208,6 +212,7 @@ class VideoExporter:
         jpegs: list[bytes],
         progress: ProgressCallback,
     ) -> None:
+        log.debug("_write_zt: output_path=%s jpegs=%s", output_path, jpegs)
         progress(85, "Writing Theme.zt…")
         try:
             with output_path.open("wb") as f:

@@ -83,6 +83,7 @@ def configs_to_overlay_config(
 
     Returns ``{}`` when overlay is disabled (the renderer draws nothing).
     """
+    log.debug("configs_to_overlay_config: configs=%s enabled=%s", configs, enabled)
     if not enabled:
         return {}
 
@@ -312,6 +313,7 @@ def dc_as_legacy_overlay_config(theme_dir: Path) -> dict[str, dict[str, Any]]:
 def _theme_config_to_overlay_dict(
     theme_config: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
+    log.debug("_theme_config_to_overlay_dict: theme_config=%s", theme_config)
     overlay: dict[str, dict[str, Any]] = {}
     counters: dict[str, int] = {}
     for element in theme_config.get("elements", ()):
@@ -327,6 +329,7 @@ def _theme_config_to_overlay_dict(
 def _element_to_legacy_entry(
     element: dict[str, Any], counters: dict[str, int],
 ) -> tuple[str | None, dict[str, Any] | None]:
+    log.debug("_element_to_legacy_entry: element=%s counters=%s", element, counters)
     etype = element.get("type")
     if etype not in ("text", "metric", "clock"):
         return None, None
@@ -366,6 +369,7 @@ def _element_to_legacy_entry(
 
 
 def _take_key(base: str, counters: dict[str, int]) -> str:
+    log.debug("_take_key: base=%s counters=%s", base, counters)
     n = counters.get(base, 0)
     counters[base] = n + 1
     return base if n == 0 else f"{base}_{n}"

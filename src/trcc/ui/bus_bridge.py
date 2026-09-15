@@ -136,6 +136,7 @@ class _SignalForwarder:
     __slots__ = ("_event_name", "_signal")
 
     def __init__(self, signal: SignalInstance, event_name: str) -> None:
+        log.debug("__init__: signal=%s event_name=%s", signal, event_name)
         self._signal = signal
         self._event_name = event_name
 

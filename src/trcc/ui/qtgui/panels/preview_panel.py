@@ -49,6 +49,7 @@ class PreviewPanel(BasePanel):
     _encode: Literal["", "png"] = ""
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         self._picker = DevicePickerWidget(
             self.app, self._bus, kind_filter="lcd", parent=self,
         )
@@ -158,6 +159,7 @@ class PreviewPanel(BasePanel):
         self._size_label.setText(f"{pix.width()}×{pix.height()}")
 
     def _set_placeholder(self, text: str) -> None:
+        log.debug("_set_placeholder: text=%s", text)
         self._preview.clear()
         self._preview.setText(text)
         font = QFont()

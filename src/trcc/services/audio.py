@@ -35,6 +35,7 @@ class AudioCapture:
     """
 
     def __init__(self, bands: int = NUM_BANDS) -> None:
+        log.debug("__init__: bands=%s", bands)
         self._bands = bands
         self._spectrum = np.zeros(bands, dtype=np.float32)
         self._lock = threading.Lock()
@@ -43,6 +44,7 @@ class AudioCapture:
 
     @property
     def running(self) -> bool:
+        log.debug("running")
         return self._running
 
     def start(

@@ -28,10 +28,12 @@ _SELINUX_FS = Path("/sys/fs/selinux")
 
 def _selinux_active() -> bool:
     """True only on a system actually running SELinux (rules would matter)."""
+    log.debug("_selinux_active")
     return _SELINUX_FS.is_dir() and shutil.which("semodule") is not None
 
 
 def _already_loaded() -> bool:
+    log.debug("_already_loaded")
     try:
         out = subprocess.run(
             ["semodule", "-l"], capture_output=True, text=True,

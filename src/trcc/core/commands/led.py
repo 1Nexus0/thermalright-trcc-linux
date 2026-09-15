@@ -503,6 +503,7 @@ def _multi_zone_count(app: App, key: str) -> int | None:
     ``len(zone_led_map)`` for the per-zone styles (PA120/LF10), or None for
     every other device, so a colour setter can branch global vs per-zone.
     """
+    log.debug("_multi_zone_count: app=%s key=%s", app, key)
     from ...services.led_segment import get_display
     try:
         device = app.get(key)
@@ -578,6 +579,7 @@ class SetLedBrightness(Command[LedColorsResult]):
     percent: int
 
     def execute(self, app: App) -> LedColorsResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return LedColorsResult(ok=False, key=self.key, colors=[],
                                    message=why)
@@ -600,6 +602,7 @@ class EnableLedTestMode(Command[LedColorsResult]):
     enabled: bool
 
     def execute(self, app: App) -> LedColorsResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return LedColorsResult(ok=False, key=self.key, colors=[],
                                    message=why)
@@ -620,6 +623,7 @@ class SetLedTempSource(Command[LedColorsResult]):
     source: str
 
     def execute(self, app: App) -> LedColorsResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return LedColorsResult(ok=False, key=self.key, colors=[],
                                    message=why)
@@ -649,6 +653,7 @@ class ToggleLed(Command[LedColorsResult]):
     zone: int | None = None
 
     def execute(self, app: App) -> LedColorsResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return LedColorsResult(ok=False, key=self.key, colors=[],
                                    message=why)
@@ -677,6 +682,7 @@ class SetLedLoadSource(Command[LedColorsResult]):
     source: str
 
     def execute(self, app: App) -> LedColorsResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return LedColorsResult(ok=False, key=self.key, colors=[],
                                    message=why)
@@ -700,6 +706,7 @@ class SetLedZoneColor(Command[LedColorsResult]):
     color: tuple[int, int, int]
 
     def execute(self, app: App) -> LedColorsResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return LedColorsResult(ok=False, key=self.key, colors=[],
                                    message=why)
@@ -736,6 +743,7 @@ class SetLedZoneMode(Command[LedColorsResult]):
     mode: LEDMode
 
     def execute(self, app: App) -> LedColorsResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return LedColorsResult(ok=False, key=self.key, colors=[],
                                    message=why)
@@ -764,6 +772,7 @@ class SetLedZoneBrightness(Command[LedColorsResult]):
     percent: int
 
     def execute(self, app: App) -> LedColorsResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return LedColorsResult(ok=False, key=self.key, colors=[],
                                    message=why)
@@ -793,6 +802,7 @@ class SetLedZoneSync(Command[LedColorsResult]):
     enabled: bool
 
     def execute(self, app: App) -> LedColorsResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return LedColorsResult(ok=False, key=self.key, colors=[],
                                    message=why)
@@ -814,6 +824,7 @@ class SetLedZoneSyncInterval(Command[LedColorsResult]):
     ticks: int
 
     def execute(self, app: App) -> LedColorsResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return LedColorsResult(ok=False, key=self.key, colors=[],
                                    message=why)
@@ -861,6 +872,7 @@ class SelectZone(Command[LedColorsResult]):
     zone: int
 
     def execute(self, app: App) -> LedColorsResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return LedColorsResult(ok=False, key=self.key, colors=[],
                                    message=why)
@@ -884,6 +896,7 @@ class ToggleSegment(Command[LedColorsResult]):
     on: bool
 
     def execute(self, app: App) -> LedColorsResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return LedColorsResult(ok=False, key=self.key, colors=[],
                                    message=why)
@@ -907,6 +920,7 @@ class SetClockFormat(Command[ClockFormatResult]):
     is_24h: bool
 
     def execute(self, app: App) -> ClockFormatResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return ClockFormatResult(ok=False, key=self.key,
                                      is_24h=self.is_24h, message=why)
@@ -925,6 +939,7 @@ class SetWeekStart(Command[WeekStartResult]):
     sunday_first: bool
 
     def execute(self, app: App) -> WeekStartResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return WeekStartResult(ok=False, key=self.key,
                                    sunday_first=self.sunday_first, message=why)
@@ -943,6 +958,7 @@ class SetMemoryRatio(Command[MemoryRatioResult]):
     ratio: int
 
     def execute(self, app: App) -> MemoryRatioResult:
+        log.debug("execute: app=%s", app)
         if (why := _not_an_led(app, self.key)) is not None:
             return MemoryRatioResult(ok=False, key=self.key,
                                      ratio=self.ratio, message=why)
@@ -964,6 +980,7 @@ class SetHddEnabled(Command[HddEnabledResult]):
     enabled: bool
 
     def execute(self, app: App) -> HddEnabledResult:
+        log.debug("execute: app=%s", app)
         app.settings.set_hdd_enabled(self.enabled)
         # Wake subscribers (MetricsLoop) so the broadcast refreshes
         # with the new HDD-filter state immediately, not after a full
@@ -1032,6 +1049,7 @@ class ListLedModes(Query[LedModesListResult]):
     """Enumerate the LEDMode enum names (STATIC, BREATHING, RAINBOW, …)."""
 
     def execute(self, app: App) -> LedModesListResult:
+        log.debug("execute: app=%s", app)
         del app
         modes = [m.name for m in LEDMode]
         return LedModesListResult(
@@ -1048,6 +1066,7 @@ class LedSnapshot(Query[LedSnapshotResult]):
     key: str
 
     def execute(self, app: App) -> LedSnapshotResult:
+        log.debug("execute: app=%s", app)
         s = app.settings.for_led(self.key)
         return LedSnapshotResult(
             ok=True, key=self.key,

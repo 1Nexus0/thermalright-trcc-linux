@@ -301,6 +301,7 @@ def _resolve_oriented_resolution(app: App, key: str) -> tuple[int, int] | None:
     (which is the wire/device-buffer size and stays orientation-agnostic).
     Returns ``None`` when the native resolution can't be resolved.
     """
+    log.debug("_resolve_oriented_resolution: app=%s key=%s", app, key)
     native = _resolve_resolution(app, key)
     if native is None:
         return None

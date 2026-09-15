@@ -350,6 +350,7 @@ class LinuxScsiTransport(ScsiTransport):
 
     def _alloc_write_bufs(self, cdb_len: int, data_len: int) -> tuple:
         """Build a (cdb, data, sense, hdr, ioctl) buffer set for one size class."""
+        log.debug("_alloc_write_bufs: cdb_len=%s data_len=%s", cdb_len, data_len)
         cdb_buf = (ctypes.c_ubyte * cdb_len)()
         data_buf = (ctypes.c_ubyte * data_len)()
         sense_buf = (ctypes.c_ubyte * _SENSE_BUF_LEN)()
@@ -556,17 +557,21 @@ class LinuxOS(BaseOS, key="linux"):
     # ── Per-OS internals (the add-a-new-OS interface) ────────────────────
 
     def _make_paths(self) -> Paths:
+        log.debug("_make_paths")
         return LinuxPaths()
 
     def _build_sensors(self) -> SensorEnumerator:
+        log.debug("_build_sensors")
         return build_linux_sensors()
 
     def _build_autostart(self) -> AutostartManager:
         # XDG .desktop — ~/.config/autostart/trcc.desktop.
+        log.debug("_build_autostart")
         from ._autostart import XdgDesktopAutostart
         return XdgDesktopAutostart()
 
     def _build_hotplug(self) -> HotplugMonitor:
+        log.debug("_build_hotplug")
         from ._hotplug import LinuxHotplugMonitor
         return LinuxHotplugMonitor()
 
@@ -704,12 +709,14 @@ class LinuxOS(BaseOS, key="linux"):
                 continue
 
             def _read(node: Path, name: str, default: str = "") -> str:
+                log.debug("_read: node=%s name=%s", node, name)
                 try:
                     return (node / name).read_text().strip()
                 except OSError:
                     return default
 
             def _int(node: Path, name: str) -> int:
+                log.debug("_int: node=%s name=%s", node, name)
                 raw = _read(node, name)
                 return int(raw) if raw.isdigit() else 0
 
@@ -962,6 +969,7 @@ _live_imc_cache: object = _UNREAD
 
 def _cpu_is_adl_rpl() -> bool:
     """Rootless: True iff /proc/cpuinfo is an Intel family-6 Alder/Raptor Lake."""
+    log.debug("_cpu_is_adl_rpl")
     family = model = None
     try:
         with Path("/proc/cpuinfo").open(encoding="utf-8") as f:

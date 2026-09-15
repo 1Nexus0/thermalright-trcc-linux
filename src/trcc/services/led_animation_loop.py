@@ -41,6 +41,7 @@ class LedAnimationLoop:
     """Background ~150 ms ticker re-rendering animating LED devices."""
 
     def __init__(self, app: App) -> None:  # type: ignore[name-defined]
+        log.debug("__init__: app=%s", app)
         self._app = app
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -48,6 +49,7 @@ class LedAnimationLoop:
 
     @property
     def is_running(self) -> bool:
+        log.debug("is_running")
         return self._thread is not None and self._thread.is_alive()
 
     def start(self) -> None:
@@ -85,6 +87,7 @@ class LedAnimationLoop:
         individual zones (with "select all"/``zone_sync`` off) would never tick
         and stay frozen (#193).
         """
+        log.debug("animating_keys")
         keys: list[str] = []
         for key, device in self._app.devices.items():
             if not (device.is_led and device.is_connected):

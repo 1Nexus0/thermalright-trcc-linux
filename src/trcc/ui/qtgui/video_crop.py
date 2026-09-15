@@ -72,6 +72,7 @@ _FRAME_INTERVAL_MS = int(1000 / EXPORT_FPS)
 
 def _format_ms(ms: int) -> str:
     """``hh:mm:ss`` (we never display milliseconds — too fiddly to read)."""
+    log.debug("_format_ms: ms=%s", ms)
     s = max(0, int(ms / 1000))
     h, s = divmod(s, 3600)
     m, s = divmod(s, 60)
@@ -86,6 +87,7 @@ class _TimelineBar(QWidget):
     seek_requested = Signal(int)  # ms
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        log.debug("__init__: parent=%s", parent)
         super().__init__(parent)
         self.setFixedSize(_TIMELINE_W, _TIMELINE_H)
         self.setMouseTracking(True)
@@ -97,30 +99,36 @@ class _TimelineBar(QWidget):
     # ── Public API ───────────────────────────────────────────────────
 
     def set_range(self, duration_ms: int) -> None:
+        log.debug("set_range: duration_ms=%s", duration_ms)
         self._duration_ms = max(0, duration_ms)
         self._start_ms = 0
         self._end_ms = min(self._duration_ms, MAX_DURATION_MS)
         self.update()
 
     def set_start(self, start_ms: int) -> None:
+        log.debug("set_start: start_ms=%s", start_ms)
         self._start_ms = max(0, min(start_ms, self._end_ms - 1))
         self.update()
 
     def set_end(self, end_ms: int) -> None:
+        log.debug("set_end: end_ms=%s", end_ms)
         self._end_ms = max(self._start_ms + 1, min(end_ms, self._duration_ms))
         self.update()
 
     def clip_ms(self) -> tuple[int, int]:
+        log.debug("clip_ms")
         return self._start_ms, self._end_ms
 
     # ── Geometry ─────────────────────────────────────────────────────
 
     def _ms_to_x(self, ms: int) -> int:
+        log.debug("_ms_to_x: ms=%s", ms)
         if self._duration_ms <= 0:
             return 0
         return int(ms / self._duration_ms * _TIMELINE_W)
 
     def _x_to_ms(self, x: int) -> int:
+        log.debug("_x_to_ms: x=%s", x)
         if self._duration_ms <= 0:
             return 0
         x = max(0, min(_TIMELINE_W, x))
@@ -129,6 +137,7 @@ class _TimelineBar(QWidget):
     # ── Painting ─────────────────────────────────────────────────────
 
     def paintEvent(self, event) -> None:
+        log.debug("paintEvent: event=%s", event)
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(QPen(QColor("#555"), 1))
@@ -155,6 +164,7 @@ class _TimelineBar(QWidget):
     # ── Mouse ────────────────────────────────────────────────────────
 
     def mousePressEvent(self, event) -> None:
+        log.debug("mousePressEvent: event=%s", event)
         if event.button() != Qt.MouseButton.LeftButton or self._duration_ms <= 0:
             return
         x = int(event.position().x())
@@ -168,6 +178,7 @@ class _TimelineBar(QWidget):
             self.seek_requested.emit(self._x_to_ms(x))
 
     def mouseMoveEvent(self, event) -> None:
+        log.debug("mouseMoveEvent: event=%s", event)
         if not self._dragging or self._duration_ms <= 0:
             return
         ms = self._x_to_ms(int(event.position().x()))
@@ -188,6 +199,7 @@ class _TimelineBar(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, event) -> None:
+        log.debug("mouseReleaseEvent: event=%s", event)
         self._dragging = None
 
 
@@ -214,6 +226,7 @@ class VideoCropDialog(QDialog):
         key: str,
         parent: QWidget | None = None,
     ) -> None:
+        log.debug("__init__: app=%s bus=%s", app, bus)
         super().__init__(parent)
         self.setWindowTitle("Crop video → Theme.zt")
         self.setModal(True)
@@ -275,11 +288,13 @@ class VideoCropDialog(QDialog):
 
     def output_path(self) -> Path | None:
         """Path to the produced Theme.zt after Accept, else ``None``."""
+        log.debug("output_path")
         return self._output
 
     # ── UI build ─────────────────────────────────────────────────────
 
     def _build(self) -> None:
+        log.debug("_build")
         toolbar = QToolBar(self)
         act_rotate = QAction("Rotate 90°", self)
         act_rotate.triggered.connect(self._on_rotate)
@@ -414,12 +429,14 @@ class VideoCropDialog(QDialog):
         self._seek_preview(start)
 
     def _toggle_play(self) -> None:
+        log.debug("_toggle_play")
         if self._playing:
             self._stop_play()
         else:
             self._start_play()
 
     def _start_play(self) -> None:
+        log.debug("_start_play")
         if self._video_path is None:
             return
         self._playing = True
@@ -429,6 +446,7 @@ class VideoCropDialog(QDialog):
         self._play_timer.start(_FRAME_INTERVAL_MS)
 
     def _stop_play(self) -> None:
+        log.debug("_stop_play")
         self._playing = False
         self._play_action.setText("Play")
         self._play_timer.stop()

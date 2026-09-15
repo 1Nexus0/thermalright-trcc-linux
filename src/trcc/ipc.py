@@ -128,6 +128,7 @@ def daemon_running() -> bool:
 
 
 def _collect_classes(module: Any, base: type) -> dict[str, type]:
+    log.debug("_collect_classes: module=%s base=%s", module, base)
     return {
         name: cls
         for name, cls in vars(module).items()
@@ -201,6 +202,7 @@ def _from_wire(raw: Any) -> Any:
     Enums and dataclasses need their target type (see ``_coerce``) — this
     walker only handles the type-blind bytes marker.
     """
+    log.debug("_from_wire: raw=%s", raw)
     if isinstance(raw, dict) and len(raw) == 1 and _BYTES_MARKER in raw:
         return base64.b64decode(raw[_BYTES_MARKER])
     if isinstance(raw, list):
@@ -217,6 +219,7 @@ def _from_wire(raw: Any) -> Any:
 
 def _coerce(hint: Any, raw: Any) -> Any:
     """Convert a JSON-decoded value into the type the field expects."""
+    log.debug("_coerce: hint=%s raw=%s", hint, raw)
     if raw is None:
         return None
     origin = typing.get_origin(hint)
@@ -301,6 +304,7 @@ def _hints(cls: type) -> dict[str, Any]:
 
 def _build_dataclass(cls: type, data: dict[str, Any]) -> Any:
     """Reconstruct a dataclass instance from a JSON-decoded dict."""
+    log.debug("_build_dataclass: data=%s", data)
     hints = _hints(cls)
     kwargs: dict[str, Any] = {}
     for field in dataclasses.fields(cls):
@@ -523,6 +527,7 @@ class IPCServer:
     """
 
     def __init__(self, app: App) -> None:
+        log.debug("__init__: app=%s", app)
         self._app = app
         self._sock: socket.socket | None = None
         # The path we actually BOUND.  ``shutdown`` must unlink this, not a
@@ -943,6 +948,7 @@ class SingleInstance:
     def __init__(self, name: str) -> None:
         # __new__ does all the work; __init__ runs again on re-entry but
         # binding already happened.  Keep this idempotent.
+        log.debug("__init__: name=%s", name)
         if not hasattr(self, "_name"):
             self._name = name
 
@@ -1030,6 +1036,7 @@ class SingleInstance:
 
 def _instance_socket_path(name: str) -> Path:
     """Per-UI socket path (one file per UI flavour)."""
+    log.debug("_instance_socket_path: name=%s", name)
     runtime = os.environ.get("XDG_RUNTIME_DIR")
     if runtime:
         base = Path(runtime) / SingleInstance._DIR_NAME
@@ -1052,6 +1059,7 @@ def _msvcrt_acquire(name: str) -> Any | None:
     (``raise_existing_instance`` was a ``pass``).  Modern Windows
     (1803+) gets the full AF_UNIX path with raise.
     """
+    log.debug("_msvcrt_acquire: name=%s", name)
     try:
         import msvcrt  # pyright: ignore[reportMissingImports]
     except ImportError:

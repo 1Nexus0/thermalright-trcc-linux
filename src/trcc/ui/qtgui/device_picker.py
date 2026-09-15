@@ -60,6 +60,7 @@ class DevicePickerWidget(QWidget):
         kind_filter: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
+        log.debug("__init__: app=%s bus=%s", app, bus)
         super().__init__(parent)
         self._app = app
         self._bus = bus
@@ -92,6 +93,7 @@ class DevicePickerWidget(QWidget):
         back to the typed text only when nothing is selected (the editable
         "type a raw key" path).
         """
+        log.debug("current_key")
         data = self._combo.currentData()
         if data:
             return str(data).strip()
@@ -99,6 +101,7 @@ class DevicePickerWidget(QWidget):
 
     def set_key(self, key: str) -> None:
         """Set the visible key without emitting :sig:`key_changed`."""
+        log.debug("set_key: key=%s", key)
         self._combo.blockSignals(True)
         # If the key already exists in the dropdown, select it.
         # Otherwise just set the editable text.
@@ -118,6 +121,7 @@ class DevicePickerWidget(QWidget):
     # ── UI ───────────────────────────────────────────────────────────
 
     def _build(self) -> None:
+        log.debug("_build")
         self._combo = QComboBox(self)
         self._combo.setEditable(True)
         self._combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -189,6 +193,7 @@ class DevicePickerWidget(QWidget):
 
     def _matches_filter(self, entry) -> bool:
         """Optional 'lcd' / 'led' filter — narrow when callers know."""
+        log.debug("_matches_filter: entry=%s", entry)
         if self._kind_filter is None:
             return True
         if not entry.kind:
@@ -196,6 +201,7 @@ class DevicePickerWidget(QWidget):
         return entry.kind.lower().endswith(self._kind_filter.lower())
 
     def _index_for_key(self, key: str) -> int:
+        log.debug("_index_for_key: key=%s", key)
         for i in range(self._combo.count()):
             if self._combo.itemData(i) == key:
                 return i

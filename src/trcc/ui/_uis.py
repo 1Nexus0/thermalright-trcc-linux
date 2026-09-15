@@ -234,6 +234,7 @@ class GuiUI(_QtUI, name="gui"):
 
     def compose(self, platform: Platform | None) -> App:
         """Point the asset resolver at the packaged directory, then build."""
+        log.debug("compose: platform=%s", platform)
         from .gui.assets import _PKG_ASSETS_DIR, set_assets_dir
         set_assets_dir(_PKG_ASSETS_DIR)
         return super().compose(platform)

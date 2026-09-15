@@ -62,6 +62,7 @@ class ConfigurationPanel(BasePanel):
     """Bundled device-config knobs (split / fit / background / slideshow)."""
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         self._picker = DevicePickerWidget(
             self.app, self._bus, kind_filter="lcd", parent=self,
         )
@@ -208,6 +209,7 @@ class ConfigurationPanel(BasePanel):
     # ── Helpers ───────────────────────────────────────────────────────
 
     def _key(self) -> str | None:
+        log.debug("_key")
         key = self._picker.current_key()
         if not key:
             self._status.setText(
@@ -220,6 +222,7 @@ class ConfigurationPanel(BasePanel):
     def _populate_languages(self) -> None:
         """Fill the language combo from the live i18n table (self-healing —
         a newly-translated language shows up automatically)."""
+        log.debug("_populate_languages")
         result = self.dispatch(ListLanguages())
         self._language.clear()
         for entry in result.languages:
@@ -254,6 +257,7 @@ class ConfigurationPanel(BasePanel):
         self._status.setText("  |  ".join(messages))
 
     def _pick_bg_color(self) -> None:
+        log.debug("_pick_bg_color")
         picked = QColorDialog.getColor(
             QColor(self._bg_color), self, "Pick background color",
         )
@@ -262,6 +266,7 @@ class ConfigurationPanel(BasePanel):
             self._bg_color_label.setText(self._bg_color)
 
     def _load_from_snapshot(self) -> None:
+        log.debug("_load_from_snapshot")
         key = self._key()
         if key is None:
             return
@@ -288,12 +293,14 @@ class ConfigurationPanel(BasePanel):
 
     @staticmethod
     def _select_combo_by_data(combo: QComboBox, value) -> None:
+        log.debug("_select_combo_by_data: combo=%s value=%s", combo, value)
         for index in range(combo.count()):
             if combo.itemData(index) == value:
                 combo.setCurrentIndex(index)
                 return
 
     def _apply(self) -> None:
+        log.debug("_apply")
         key = self._key()
         if key is None:
             return
@@ -367,6 +374,7 @@ class ConfigurationPanel(BasePanel):
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     """Parse #rrggbb → (r, g, b); fall back to black on bad input."""
+    log.debug("_hex_to_rgb: hex_color=%s", hex_color)
     try:
         r, g, b, _a = parse_hex(hex_color)
     except ValueError:

@@ -112,6 +112,7 @@ class App:
                  data_install_runner: DataInstallRunner | None = None,
                  video_export_runner: VideoExportRunner | None = None,
                  ) -> None:
+        log.debug("__init__: platform=%s renderer=%s", platform, renderer)
         self.platform = platform
         self.devices: dict[str, Device] = {}
         # Last scan's live DeviceInfo per key — carries the firmware fingerprint
@@ -335,6 +336,7 @@ class App:
         user mask's ``config1.dc`` so its metric placement is editable +
         durable.  ``event`` is ``Any`` to satisfy the ``Handler`` type, as
         ``_on_visual_change`` does."""
+        log.debug("_persist_user_mask_dc: event=%s", event)
         from .core.commands._helpers import persist_user_mask_dc
         persist_user_mask_dc(self, event.key)
 
@@ -593,6 +595,7 @@ class App:
         the renderer directly without going through DisplayService's
         scene cache.  Raises if no renderer is attached.
         """
+        log.debug("renderer")
         if self._renderer is None:
             raise RuntimeError(
                 "Renderer unavailable — call App.set_renderer(...) first"
@@ -660,6 +663,7 @@ class App:
     def remember_scan(self, infos: list[DeviceInfo]) -> None:
         """Cache the live DeviceInfo per key from a scan, so a later ``attach``
         can resolve firmware quirks from the fingerprint (bcdDevice).  (#228)"""
+        log.debug("remember_scan: infos=%s", infos)
         for info in infos:
             self._scanned[info.key] = info
 
@@ -726,6 +730,7 @@ class App:
 
     def connection_issues(self) -> list[ConnectResult]:
         """Current connect failures — the queryable model state."""
+        log.debug("connection_issues")
         return list(self._connect_issues.values())
 
     def detach(self, key: str) -> None:
@@ -948,6 +953,7 @@ class App:
         from .core.commands import ConnectDevice, DiscoverDevices
 
         def _say(message: str) -> None:
+            log.debug("_say: message=%s", message)
             if on_progress is not None:
                 on_progress(message)
 
@@ -1056,6 +1062,7 @@ class _DeviceRenderObserver:
     """Listen for visual-mutation events; trigger one re-render each."""
 
     def __init__(self, app: App) -> None:
+        log.debug("__init__: app=%s", app)
         self._app = app
         # Lazy import — RenderAndSend lives in core.commands, which
         # already imports from app.py via TYPE_CHECKING.

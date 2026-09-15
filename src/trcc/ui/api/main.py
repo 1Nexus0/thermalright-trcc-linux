@@ -130,6 +130,7 @@ def build_app(trcc: App | None = None) -> FastAPI:
     @api.get("/health", tags=["meta"])
     def health() -> dict:
         """Liveness probe — always reachable, no auth required."""
+        log.debug("health")
         return {"status": "ok", "version": __version__}
 
     # ── Pairing endpoint — exempt from auth ─────────────────────────
@@ -197,6 +198,7 @@ def build_app(trcc: App | None = None) -> FastAPI:
 
     @api.get("/", tags=["meta"])
     def root() -> dict:
+        log.debug("root")
         return {
             "name": "TRCC API",
             "version": "next",
@@ -262,4 +264,5 @@ def run(platform: Platform | None = None, *,
 
 def serve(host: str = "127.0.0.1", port: int = 8080) -> None:
     """Back-compat entry — serve on the host platform (blocking)."""
+    log.debug("serve: host=%s port=%s", host, port)
     run(host=host, port=port)

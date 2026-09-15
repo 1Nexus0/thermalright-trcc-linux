@@ -34,6 +34,7 @@ class LibraryMigration:
     """
 
     def __init__(self, paths: Paths) -> None:
+        log.debug("__init__: paths=%s", paths)
         self._paths = paths
 
     def run(self) -> int:
@@ -75,6 +76,7 @@ class LibraryMigration:
     @staticmethod
     def _is_library_dir(name: str) -> bool:
         """True only for the ``data/`` twin dirs: ``web`` or ``theme{w}{h}``."""
+        log.debug("_is_library_dir: name=%s", name)
         return name == "web" or (name.startswith("theme") and name[5:].isdigit())
 
     def _merge_move(self, src: Path, dst: Path) -> int:

@@ -57,6 +57,7 @@ def overlay_font(family: str, size: int) -> QFont:
 @lru_cache(maxsize=1)
 def is_wayland() -> bool:
     """``True`` if we're running under a Wayland session."""
+    log.debug("is_wayland")
     return (
         os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
         or bool(os.environ.get("WAYLAND_DISPLAY"))
@@ -67,6 +68,7 @@ _FALLBACK_TOOLS: tuple[str, ...] = ("grim", "gnome-screenshot", "scrot")
 
 
 def _has_tool(name: str) -> bool:
+    log.debug("_has_tool: name=%s", name)
     return shutil.which(name) is not None
 
 
@@ -106,6 +108,7 @@ def grab_full_screen() -> QPixmap:
     in that order.  Returns a null pixmap if every option fails — the
     caller is responsible for surfacing that to the user.
     """
+    log.debug("grab_full_screen")
     screen = QApplication.primaryScreen()
     if screen is not None:
         pix = screen.grabWindow(0)  # type: ignore[arg-type]
@@ -132,6 +135,7 @@ class BaseScreenOverlay(QWidget):
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        log.debug("__init__: parent=%s", parent)
         super().__init__(parent)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -161,17 +165,20 @@ class BaseScreenOverlay(QWidget):
         self.activateWindow()
 
     def keyPressEvent(self, event) -> None:
+        log.debug("keyPressEvent: event=%s", event)
         if event.key() == Qt.Key.Key_Escape:
             self._cancel()
         else:
             super().keyPressEvent(event)
 
     def _cancel(self) -> None:
+        log.debug("_cancel")
         self.hide()
         self._emit_cancel()
         self.deleteLater()
 
     def _emit_cancel(self) -> None:
+        log.debug("_emit_cancel")
         raise NotImplementedError(
             "BaseScreenOverlay subclass must emit its own cancel signal",
         )
@@ -326,6 +333,7 @@ class DragSelectOverlay(BaseScreenOverlay):
 
     def _confirm(self, sel: QRect) -> None:
         """Act on the chosen rectangle — hide, emit, ``deleteLater``."""
+        log.debug("_confirm: sel=%s", sel)
         raise NotImplementedError(
             "DragSelectOverlay subclass must act on the chosen rectangle",
         )

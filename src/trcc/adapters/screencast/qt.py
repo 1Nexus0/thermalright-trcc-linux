@@ -123,6 +123,7 @@ class QtScreenCapture(ScreenCapture):
     def _qt_grab(
         self, x: int, y: int, w: int, h: int,
     ) -> QPixmap | None:
+        log.debug("_qt_grab: x=%s y=%s", x, y)
         if not self._qt_can_grab():
             return None
         screen = QApplication.primaryScreen()
@@ -238,6 +239,7 @@ def _pixmap_to_raw_frame(
     the dimensions — external tools sometimes round geometry to even
     pixels.
     """
+    log.debug("_pixmap_to_raw_frame: pix=%s target_w=%s", pix, target_w)
     image = pix.toImage().convertToFormat(QImage.Format.Format_RGB888)
     if image.width() != target_w or image.height() != target_h:
         image = image.scaled(target_w, target_h)

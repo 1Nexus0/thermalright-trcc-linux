@@ -50,6 +50,7 @@ class LocalThemeBrowser(AssetBrowserPanel):
     """List + apply + delete themes from the user content directory."""
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         self._picker = DevicePickerWidget(
             self.app, self._bus, kind_filter="lcd", parent=self,
         )
@@ -156,6 +157,7 @@ class LocalThemeBrowser(AssetBrowserPanel):
 
     def _selected(self) -> tuple[str, str] | None:
         """Return (theme_path, theme_name) or None if nothing selected."""
+        log.debug("_selected")
         item = self._list.currentItem()
         if item is None:
             self._status.setText("Select a theme first.")

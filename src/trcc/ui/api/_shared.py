@@ -40,6 +40,7 @@ log = logging.getLogger(__name__)
 def product_to_schema(p: ProductInfo) -> ProductSchema:
     """Materialize ``ProductInfo.key`` — a derived property that stdlib
     dataclass serialization would drop.  See :class:`ProductSchema`."""
+    log.debug("product_to_schema: p=%s", p)
     return ProductSchema(
         key=p.key, vid=p.vid, pid=p.pid,
         vendor=p.vendor, product=p.product,
@@ -50,6 +51,7 @@ def product_to_schema(p: ProductInfo) -> ProductSchema:
 
 
 def to_discover_response(result: DiscoverResult) -> DiscoverResponse:
+    log.debug("to_discover_response: result=%s", result)
     return DiscoverResponse(
         ok=result.ok, message=result.message,
         products=[product_to_schema(p) for p in result.products],
@@ -59,6 +61,7 @@ def to_discover_response(result: DiscoverResult) -> DiscoverResponse:
 def to_theme_response(result: ThemeResult) -> ThemeResponse:
     """Deliberate narrowing: ``ThemeResult.theme_path`` is a server-side
     absolute path and stays off the wire.  Everything else is exposed."""
+    log.debug("to_theme_response: result=%s", result)
     return ThemeResponse(
         ok=result.ok, message=result.message,
         key=result.key, theme_name=result.theme_name,
@@ -69,6 +72,7 @@ def to_theme_response(result: ThemeResult) -> ThemeResponse:
 def to_import_config_response(result: ImportConfigResult) -> ImportConfigResponse:
     """Deliberate narrowing: ``ImportConfigResult.input_path`` is a
     server-side absolute path and stays off the wire."""
+    log.debug("to_import_config_response: result=%s", result)
     return ImportConfigResponse(
         ok=result.ok, message=result.message, key=result.key,
     )
@@ -81,6 +85,7 @@ def to_import_config_response(result: ImportConfigResult) -> ImportConfigRespons
 
 def http_error_if_failed(result: Result, status_code: int = 400) -> None:
     """Raise HTTPException with the result message if ok is False."""
+    log.debug("http_error_if_failed: result=%s status_code=%s", result, status_code)
     if not result.ok:
         raise HTTPException(status_code=status_code, detail=result.message)
 

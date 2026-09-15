@@ -402,6 +402,7 @@ def snapshot(
 
 def _show_platform_info() -> None:
     """Shared body for ``info``-platform / ``platform-info`` commands."""
+    log.debug("_show_platform_info")
     r = get_app().dispatch(GetPlatformInfo())
     typer.echo(f"Distro:   {r.distro_name}")
     typer.echo(f"Install:  {r.install_method}")
@@ -544,6 +545,7 @@ def led_debug(
         stopped = {"flag": False}
 
         def _handle(*_args: object) -> None:
+            log.debug("_handle")
             stopped["flag"] = True
 
         signal.signal(signal.SIGINT, _handle)

@@ -14,9 +14,13 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 
+from ...core.logs import per_frame
 from ...core.models import OverlayElementConfig
 
 log = logging.getLogger(__name__)
+#: Per-tick readers — their records must never be CONSTRUCTED at
+#: default verbosity.  73 ns/call short-circuited, measured.
+frame_log = per_frame(__name__)
 
 # Matches the 7×6 grid (legacy UCXiTongXianShi) — at most 42 elements.
 MAX_ELEMENTS = 42
@@ -31,6 +35,7 @@ class OverlayModel:
     """
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._configs: list[OverlayElementConfig] = []
         self._selected_index: int = -1
         self._enabled: bool = True
@@ -39,6 +44,7 @@ class OverlayModel:
 
     @property
     def enabled(self) -> bool:
+        log.debug("enabled")
         return self._enabled
 
     def set_enabled(self, enabled: bool) -> None:
@@ -49,10 +55,12 @@ class OverlayModel:
 
     @property
     def selected_index(self) -> int:
+        log.debug("selected_index")
         return self._selected_index
 
     @property
     def selected_config(self) -> OverlayElementConfig | None:
+        log.debug("selected_config")
         if 0 <= self._selected_index < len(self._configs):
             return self._configs[self._selected_index]
         return None
@@ -60,6 +68,7 @@ class OverlayModel:
     def select(self, index: int) -> OverlayElementConfig | None:
         """Select an existing element; return it, or ``None`` if out of range
         (selection cleared)."""
+        log.debug("select: index=%s", index)
         if 0 <= index < len(self._configs):
             self._selected_index = index
             return self._configs[index]
@@ -67,6 +76,7 @@ class OverlayModel:
         return None
 
     def clear_selection(self) -> None:
+        log.debug("clear_selection")
         self._selected_index = -1
 
     # ── Query ─────────────────────────────────────────────────────────
@@ -76,15 +86,18 @@ class OverlayModel:
 
     def all_configs(self) -> list[OverlayElementConfig]:
         """Shallow copy of the element list (callers must not mutate internals)."""
+        log.debug("all_configs")
         return list(self._configs)
 
     def config_at(self, index: int) -> OverlayElementConfig | None:
+        log.debug("config_at: index=%s", index)
         if 0 <= index < len(self._configs):
             return self._configs[index]
         return None
 
     def find_nearest(self, x: int, y: int) -> int:
         """Index of the element nearest (x, y) by squared distance; -1 if empty."""
+        log.debug("find_nearest: x=%s y=%s", x, y)
         if not self._configs:
             return -1
         best_idx, best_dist = -1, float("inf")
@@ -108,6 +121,7 @@ class OverlayModel:
     def delete(self, index: int) -> bool:
         """Remove element at ``index``; clamp selection to the new last index
         (``-1`` when the list becomes empty)."""
+        log.debug("delete: index=%s", index)
         if not 0 <= index < len(self._configs):
             return False
         self._configs.pop(index)
@@ -117,6 +131,7 @@ class OverlayModel:
 
     def update(self, index: int, config: OverlayElementConfig) -> bool:
         """Replace the element at ``index``.  ``False`` if out of range."""
+        log.debug("update: index=%s config=%s", index, config)
         if not 0 <= index < len(self._configs):
             return False
         self._configs[index] = config
@@ -124,9 +139,11 @@ class OverlayModel:
 
     def load(self, configs: list[OverlayElementConfig]) -> None:
         """Replace the list (copied, capped at ``MAX_ELEMENTS``); clear selection."""
+        frame_log.debug("load: configs=%s", configs)
         self._configs = [replace(c) for c in configs[:MAX_ELEMENTS]]
         self._selected_index = -1
 
     def clear(self) -> None:
+        log.debug("clear")
         self._configs.clear()
         self._selected_index = -1

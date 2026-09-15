@@ -155,6 +155,7 @@ class PipeWireScreenCast:
         # The portal's half of ``persist_mode``.  Hand back the token it gave
         # us last time and it re-grants silently; omit it and the user is
         # asked again, however many times they have already said yes.
+        log.debug("__init__: restore_token=%s on_restore_token=%s", restore_token, on_restore_token)
         self._restore_token = restore_token
         self._on_restore_token = on_restore_token
         self._session_path = None
@@ -173,10 +174,12 @@ class PipeWireScreenCast:
     @property
     def available(self) -> bool:
         """Check if PipeWire capture dependencies are available."""
+        frame_log.debug("available")
         return PIPEWIRE_AVAILABLE
 
     @property
     def is_running(self) -> bool:
+        log.debug("is_running")
         return self._running
 
     def start(self, timeout: float = 30.0) -> bool:
@@ -224,6 +227,7 @@ class PipeWireScreenCast:
 
     def stop(self):
         """Stop capture and clean up all resources."""
+        log.debug("stop")
         self._running = False
         self._cleanup()
 
@@ -234,6 +238,7 @@ class PipeWireScreenCast:
             Tuple of (width, height, rgb_bytes) or None if no frame available.
             rgb_bytes is raw RGB pixel data (3 bytes per pixel).
         """
+        frame_log.debug("grab_frame")
         with self._frame_lock:
             return self._latest_frame
 
@@ -241,6 +246,7 @@ class PipeWireScreenCast:
 
     def _start_glib_loop(self):
         """Start GLib main loop in background thread for D-Bus signals."""
+        log.debug("_start_glib_loop")
         DBusGMainLoop(set_as_default=True)
         self._glib_loop = GLib.MainLoop()
         self._glib_thread = threading.Thread(
@@ -301,6 +307,7 @@ class PipeWireScreenCast:
 
     def _create_session(self):
         """Step 1: CreateSession on the ScreenCast portal."""
+        log.debug("_create_session")
         bus = dbus.SessionBus()
         portal = bus.get_object(_PORTAL_BUS, _PORTAL_PATH)
         screencast = dbus.Interface(portal, _SCREENCAST_IFACE)
@@ -338,6 +345,7 @@ class PipeWireScreenCast:
 
     def _select_sources(self):
         """Step 2: SelectSources — request monitor capture."""
+        log.debug("_select_sources")
         bus = dbus.SessionBus()
         portal = bus.get_object(_PORTAL_BUS, _PORTAL_PATH)
         screencast = dbus.Interface(portal, _SCREENCAST_IFACE)
@@ -406,6 +414,7 @@ class PipeWireScreenCast:
 
     def _start_stream(self):
         """Step 3: Start — begin PipeWire stream (triggers consent dialog)."""
+        log.debug("_start_stream")
         bus = dbus.SessionBus()
         portal = bus.get_object(_PORTAL_BUS, _PORTAL_PATH)
         screencast = dbus.Interface(portal, _SCREENCAST_IFACE)
@@ -565,6 +574,7 @@ class PipeWireScreenCast:
         self._latest_frame = None
 
     def __del__(self):
+        log.debug("__del__")
         self.stop()
 
 
@@ -578,6 +588,7 @@ def crop_rgb24(
     chose to share and a region picked against a different geometry would
     otherwise index past the end.
     """
+    log.debug("crop_rgb24: data=%s src_w=%s", data, src_w)
     x0, y0 = max(0, min(x, src_w)), max(0, min(y, src_h))
     x1, y1 = max(x0, min(x + width, src_w)), max(y0, min(y + height, src_h))
     out_w, out_h = x1 - x0, y1 - y0
@@ -641,6 +652,7 @@ class PipeWireScreenCapture(ScreenCapture):
 
     def grab_region(self, x: int, y: int, width: int, height: int) -> RawFrame:
         """The portal's frame when the session is up, else the fallback's."""
+        log.debug("grab_region: x=%s y=%s", x, y)
         frame = self._portal_region(x, y, width, height)
         if frame is not None:
             return frame

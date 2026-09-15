@@ -67,6 +67,7 @@ class ScreencastPanel(BasePanel):
     """Drive a captured screen region into the device on a timer."""
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         self._region: tuple[int, int, int, int] | None = None
         #: The device currently being cast, or None.  Replaces
         #: ``self._timer.isActive()`` now that the cadence lives in the
@@ -207,6 +208,7 @@ class ScreencastPanel(BasePanel):
 
     def _fps_interval_s(self) -> float:
         """The slider's fps as the driver's tick interval, in seconds."""
+        log.debug("_fps_interval_s")
         return max(0.033, 1.0 / max(_MIN_FPS, self._fps.value()))
 
     # ── Lifecycle ────────────────────────────────────────────────────

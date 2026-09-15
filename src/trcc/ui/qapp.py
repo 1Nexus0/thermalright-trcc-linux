@@ -44,6 +44,7 @@ def configure_qt_environment() -> None:
     would already have hit stderr.  ``setdefault`` lets a user override via
     the environment (e.g. ``QT_LOGGING_RULES=*=true`` to see everything).
     """
+    log.debug("configure_qt_environment")
     os.environ.setdefault(
         "QT_LOGGING_RULES",
         "qt.qpa.services=false;qt.qpa.theme.gnome=false",
@@ -119,6 +120,7 @@ def probe_screens(qapp: QApplication) -> None:
     GUI-only: the headless CLI/API render path never builds a windowed
     QApplication, so there are no real screens to probe there.
     """
+    log.debug("probe_screens: qapp=%s", qapp)
     for screen in qapp.screens():
         _log_screen(screen)
         screen.geometryChanged.connect(_on_screen_metrics_changed)
@@ -142,6 +144,7 @@ def build_qt_app(platform: Platform | None = None) -> App:
     ``MockPlatform``.  Returns the composed App; the QApplication is reachable
     via ``QApplication.instance()``.
     """
+    log.debug("build_qt_app: platform=%s", platform)
     configure_qt_environment()
     qapp = QApplication.instance()
     if not isinstance(qapp, QApplication):

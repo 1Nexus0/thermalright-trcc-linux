@@ -10,11 +10,15 @@ See [[project_architecture_boundary_gate]].
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Literal
 
 # Severity ladder for a single health check.
 Severity = Literal["OK", "WARN", "FAIL"]
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +37,7 @@ class HealthReport:
 
     @property
     def worst_severity(self) -> Severity:
+        log.debug("worst_severity")
         if any(c.severity == "FAIL" for c in self.checks):
             return "FAIL"
         if any(c.severity == "WARN" for c in self.checks):
@@ -41,10 +46,12 @@ class HealthReport:
 
     @property
     def fail_count(self) -> int:
+        log.debug("fail_count")
         return sum(1 for c in self.checks if c.severity == "FAIL")
 
     @property
     def warn_count(self) -> int:
+        log.debug("warn_count")
         return sum(1 for c in self.checks if c.severity == "WARN")
 
 
@@ -60,6 +67,7 @@ class DoctorResult:
 
     @property
     def is_healthy(self) -> bool:
+        log.debug("is_healthy")
         return self.exit_code == 0
 
 

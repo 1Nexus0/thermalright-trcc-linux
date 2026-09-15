@@ -220,6 +220,7 @@ class MainWindow(QMainWindow):
     def _show_platform_info(self) -> None:
         # One Query carries all three: PlatformInfoResult already flattens
         # distro/install/config_dir, so this needs no GetPaths beside it.
+        log.debug("_show_platform_info")
         info = self._app.dispatch(GetPlatformInfo())
         msg = (f"{info.distro_name}  |  install: {info.install_method}"
                f"  |  config: {info.config_dir}")
@@ -292,6 +293,7 @@ class MainWindow(QMainWindow):
 
     def _ensure_ticker_running(self) -> None:
         """Start the QTimer if there are active themes; stop it otherwise."""
+        log.debug("_ensure_ticker_running")
         if not any(d.has_active_theme
                    for d in self._app.dispatch(ListDevices()).devices):
             if self._ticker.isActive():
@@ -403,6 +405,7 @@ def launch(
     Identical to :func:`run`; kept as the historical name until the CLI router
     dispatches ``run`` directly.
     """
+    log.debug("launch: platform=%s on_ready=%s", platform, on_ready)
     return run(platform, on_ready, force_exit=force_exit,
                start_hidden=start_hidden)
 

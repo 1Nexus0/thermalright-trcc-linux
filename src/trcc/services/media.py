@@ -55,6 +55,7 @@ class VideoDecoder:
         # for user-uploaded videos so the user can pick width / height /
         # stretch.  Program/cloud assets are pre-scaled to the device's
         # canvas, so callers pass a concrete tuple for those.
+        log.debug("__init__: path=%s size=%s", path, size)
         self.path = path
         self.size = size
         self.fps = fps
@@ -185,6 +186,7 @@ def _split_jpeg_stream(data: bytes) -> list[bytes]:
 
 def _ffmpeg_available() -> bool:
     """Quick check whether ffmpeg is on PATH."""
+    log.debug("_ffmpeg_available")
     for dir_ in os.get_exec_path():
         if (Path(dir_) / "ffmpeg").exists():
             return True
@@ -253,6 +255,7 @@ class ZtDecoder:
     """
 
     def __init__(self, path: Path, size: tuple[int, int]) -> None:
+        log.debug("__init__: path=%s size=%s", path, size)
         self.path = path
         self.size = size
         self.frames: list[bytes] = []
@@ -371,6 +374,7 @@ class Playback:
 
     @property
     def frame_count(self) -> int:
+        log.debug("frame_count")
         return len(self.frames)
 
     @property
@@ -384,11 +388,13 @@ class Playback:
         ``RenderResult`` a UI paces itself from) read it here rather than each
         re-deriving ``1000 / fps``.
         """
+        log.debug("interval_ms")
         return max(1, int(1000 / (self.fps or 30)))
 
     @property
     def current(self) -> bytes | None:
         """The current frame's ENCODED bytes (decode via Renderer.decode_image)."""
+        frame_log.debug("current")
         return self.frames[self.cursor] if self.frames else None
 
     def advance(self) -> bytes | None:
@@ -446,6 +452,7 @@ class MediaService:
     """
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._playbacks: dict[str, Playback] = {}
 
     def load_video(self, device_key: str, path: Path,

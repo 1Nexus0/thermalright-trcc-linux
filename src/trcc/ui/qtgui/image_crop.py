@@ -56,6 +56,7 @@ class _CropCanvas(QWidget):
     _BG = QColor("#000000")
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        log.debug("__init__: parent=%s", parent)
         super().__init__(parent)
         self.setFixedSize(_PREVIEW_W, _PREVIEW_H)
         self.setMouseTracking(True)
@@ -70,13 +71,16 @@ class _CropCanvas(QWidget):
         self.setAutoFillBackground(True)
 
     def set_pan_callback(self, cb: Callable[[int, int], None]) -> None:
+        log.debug("set_pan_callback: cb=%s", cb)
         self._on_pan = cb
 
     def set_pixmap(self, pix: QPixmap | None) -> None:
+        log.debug("set_pixmap: pix=%s", pix)
         self._display_pixmap = pix
         self.update()
 
     def paintEvent(self, event) -> None:
+        log.debug("paintEvent: event=%s", event)
         if not self._display_pixmap or self._display_pixmap.isNull():
             return
         painter = QPainter(self)
@@ -88,6 +92,7 @@ class _CropCanvas(QWidget):
         painter.end()
 
     def mousePressEvent(self, event) -> None:
+        log.debug("mousePressEvent: event=%s", event)
         if event.button() == Qt.MouseButton.LeftButton:
             self._dragging = True
             self._drag_start = QPoint(
@@ -95,6 +100,7 @@ class _CropCanvas(QWidget):
             )
 
     def mouseMoveEvent(self, event) -> None:
+        log.debug("mouseMoveEvent: event=%s", event)
         if not self._dragging or self._on_pan is None:
             return
         x = int(event.position().x())
@@ -105,6 +111,7 @@ class _CropCanvas(QWidget):
         self._on_pan(dx, dy)
 
     def mouseReleaseEvent(self, event) -> None:
+        log.debug("mouseReleaseEvent: event=%s", event)
         self._dragging = False
 
 
@@ -124,6 +131,7 @@ class ImageCropDialog(QDialog):
     _SLIDER_CENTER: ClassVar[int] = 100
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        log.debug("__init__: parent=%s", parent)
         super().__init__(parent)
         self.setWindowTitle("Crop image")
         self.setModal(True)
@@ -171,11 +179,13 @@ class ImageCropDialog(QDialog):
 
     def cropped(self) -> QImage | None:
         """Return the cropped result at target resolution (or None)."""
+        log.debug("cropped")
         return self._render_output()
 
     # ── UI build ─────────────────────────────────────────────────────
 
     def _build(self) -> None:
+        log.debug("_build")
         toolbar = QToolBar(self)
         act_fit_w = QAction("Fit width", self)
         act_fit_h = QAction("Fit height", self)
@@ -227,12 +237,14 @@ class ImageCropDialog(QDialog):
 
     def _slider_to_zoom(self, v: int) -> float:
         # Match legacy: linear in slider → multiplicative around 1.0.
+        log.debug("_slider_to_zoom: v=%s", v)
         if v >= self._SLIDER_CENTER:
             return 1.0 + (v - self._SLIDER_CENTER) * 0.03
         denom = 1.0 + (self._SLIDER_CENTER - v) * 0.03
         return 1.0 / denom if denom > 0 else 1.0
 
     def _zoom_to_slider(self, zoom: float) -> int:
+        log.debug("_zoom_to_slider: zoom=%s", zoom)
         if zoom >= 1.0:
             return self._SLIDER_CENTER + round((zoom - 1.0) / 0.03)
         if zoom <= 0:
@@ -240,6 +252,7 @@ class ImageCropDialog(QDialog):
         return self._SLIDER_CENTER - round((1.0 / zoom - 1.0) / 0.03)
 
     def _rotated_source(self) -> QImage | None:
+        log.debug("_rotated_source")
         if self._source is None or self._source.isNull():
             return None
         if self._rotation == 0:
@@ -250,6 +263,7 @@ class ImageCropDialog(QDialog):
         )
 
     def _fit_width(self) -> None:
+        log.debug("_fit_width")
         img = self._rotated_source()
         if img is None:
             return
@@ -261,6 +275,7 @@ class ImageCropDialog(QDialog):
         self._rebuild_display()
 
     def _fit_height(self) -> None:
+        log.debug("_fit_height")
         img = self._rotated_source()
         if img is None:
             return
@@ -272,6 +287,7 @@ class ImageCropDialog(QDialog):
         self._rebuild_display()
 
     def _rotate_90(self) -> None:
+        log.debug("_rotate_90")
         self._rotation = (self._rotation + 90) % 360
         self._pan_x = 0
         self._pan_y = 0
@@ -284,6 +300,7 @@ class ImageCropDialog(QDialog):
             self._fit_width()
 
     def _reset_view(self) -> None:
+        log.debug("_reset_view")
         self._rotation = 0
         self._pan_x = 0
         self._pan_y = 0
@@ -296,6 +313,7 @@ class ImageCropDialog(QDialog):
             self._fit_width()
 
     def _sync_slider_silently(self) -> None:
+        log.debug("_sync_slider_silently")
         v = max(self._SLIDER_MIN, min(self._SLIDER_MAX,
                                        self._zoom_to_slider(self._zoom)))
         self._zoom_slider.blockSignals(True)
@@ -325,6 +343,7 @@ class ImageCropDialog(QDialog):
         self._rebuild_display()
 
     def _render_output(self) -> QImage | None:
+        log.debug("_render_output")
         img = self._rotated_source()
         if img is None or self._target_w == 0 or self._target_h == 0:
             return None
@@ -352,6 +371,7 @@ class ImageCropDialog(QDialog):
         return output
 
     def _rebuild_display(self) -> None:
+        log.debug("_rebuild_display")
         output = self._render_output()
         if output is None:
             self._canvas.set_pixmap(None)

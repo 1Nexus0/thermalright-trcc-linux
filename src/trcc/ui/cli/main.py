@@ -573,6 +573,7 @@ def _version_callback(value: bool) -> None:
     their version cheaply guesses, and "I'm on latest" has repeatedly turned
     out to be several releases stale.  (#247)
     """
+    log.debug("_version_callback: value=%s", value)
     if not value:
         return
     from ...__version__ import __version__
@@ -620,6 +621,7 @@ def _root(
     detection, transport selection, distro probing, skipped downloads — is
     written either way.
     """
+    log.debug("_root: verbose=%s version=%s", verbose, version)
     from ...adapters.infra.logging import ensure_configured
     from ...core.logs import levels_for
 
@@ -639,6 +641,7 @@ def _root(
 
 def main() -> None:
     """Entry point for console_scripts and python -m trcc.ui.cli."""
+    log.debug("main")
     app()
 
 

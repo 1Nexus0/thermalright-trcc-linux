@@ -18,9 +18,13 @@ Pure-stdlib, no project imports.
 
 from __future__ import annotations
 
+import logging
 import re
 
 _VERSION_PARTS = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
+
+
+log = logging.getLogger(__name__)
 
 
 def parse_version(version: str) -> tuple[int, int, int]:
@@ -33,6 +37,7 @@ def parse_version(version: str) -> tuple[int, int, int]:
     a real version always sort the unknown one first, which gives the
     right "no upgrade available" UX rather than a stack trace.
     """
+    log.debug("parse_version: version=%s", version)
     raw = version.lstrip("vV").strip() if version else ""
     match = _VERSION_PARTS.match(raw)
     if not match:
@@ -42,4 +47,5 @@ def parse_version(version: str) -> tuple[int, int, int]:
 
 def is_newer(remote: str, local: str) -> bool:
     """True iff *remote* parses to a higher version tuple than *local*."""
+    log.debug("is_newer: remote=%s local=%s", remote, local)
     return parse_version(remote) > parse_version(local)

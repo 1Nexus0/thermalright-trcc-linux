@@ -125,6 +125,7 @@ def parse_resolution(resolution: str) -> tuple[int, int]:
     malformed input — callers translate to their own error shape (the API
     to a 400, the GUI to a status message).
     """
+    log.debug("parse_resolution: resolution=%s", resolution)
     try:
         w_str, h_str = resolution.lower().split("x", 1)
         return int(w_str), int(h_str)
@@ -267,11 +268,13 @@ class UsbPowerState:
 
     @property
     def suspended(self) -> bool:
+        log.debug("suspended")
         return self.runtime_status == "suspended"
 
     @property
     def may_autosuspend(self) -> bool:
         """The kernel is *allowed* to suspend it AND the device can wake."""
+        log.debug("may_autosuspend")
         return self.control == "auto" and self.supports_remote_wakeup
 
 
@@ -339,6 +342,7 @@ class ProductInfo:
         Keyed by ``kind`` so a standard product declares nothing extra;
         an unknown kind yields the empty set (no Command applies).
         """
+        log.debug("capabilities")
         return CAPABILITIES_BY_KIND.get(self.kind, frozenset())
 
 
@@ -364,11 +368,13 @@ class DeviceInfo:
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return f"{self.vid:04x}:{self.pid:04x}"
 
     @property
     def quirks(self) -> DeviceQuirks:
         """Firmware-specific behavior overrides for this exact device."""
+        log.debug("quirks")
         return quirks_for(self.vid, self.pid, self.bcd_device)
 
 
@@ -408,6 +414,7 @@ DEVICE_QUIRKS: dict[tuple[int, int, int], DeviceQuirks] = {
 
 def quirks_for(vid: int, pid: int, bcd_device: int) -> DeviceQuirks:
     """Firmware quirks for an exact fingerprint, or the empty default."""
+    log.debug("quirks_for: vid=%s pid=%s", vid, pid)
     return DEVICE_QUIRKS.get((vid, pid, bcd_device), _NO_QUIRKS)
 
 
@@ -521,25 +528,31 @@ class ThemeDir:
 
     @property
     def preview(self) -> Path:
+        log.debug("preview")
         return self.path / self.PREVIEW
 
     @property
     def dc(self) -> Path:
+        log.debug("dc")
         return self.path / self.DC
 
     @property
     def json(self) -> Path:
+        log.debug("json")
         return self.path / self.JSON
 
     @property
     def legacy_json(self) -> Path:
+        log.debug("legacy_json")
         return self.path / self.LEGACY_JSON
 
     @property
     def zt(self) -> Path:
+        log.debug("zt")
         return self.path / self.ZT
 
     def __truediv__(self, other: str) -> Path:
+        log.debug("__truediv__: other=%s", other)
         return self.path / other
 
     def __str__(self) -> str:
@@ -756,6 +769,7 @@ class OverlayElement:
 
     def to_dict(self) -> dict:
         """Flat dict — the shape ``OverlayService.render`` consumes."""
+        log.debug("to_dict")
         out: dict = {
             "id": self.id,
             "type": self.type,
@@ -788,6 +802,7 @@ class OverlayElement:
         element (a bare positional index never matched the ``el_<uuid>`` /
         ``el_N`` schemes — #150/#203 click-to-highlight was fully broken).
         """
+        log.debug("from_dict: data=%s", data)
         return cls(
             id=str(data.get("id") or "") or f"el_{uuid.uuid4().hex[:8]}",
             type=data.get("type", "text"),
@@ -973,6 +988,7 @@ class MetricCatalog(Mapping[Any, Metric]):
 
     def __iter__(self) -> Iterator[tuple[int, int]]:
         """Iterate the canonical pairs — aliases are reachable, not listed."""
+        log.debug("__iter__")
         return iter(m.pair for m in self._canonical)
 
     def __len__(self) -> int:
@@ -1663,6 +1679,7 @@ class HardwareMetrics:
 
     def __contains__(self, key: Any) -> bool:
         """Whether *key* names a metric this DTO can answer."""
+        log.debug("__contains__: key=%s", key)
         return key in METRICS
     # Plural sources, faithful per-unit (single-element today; the scalar
     # fields above are their collapse).  See class docstring.
@@ -1758,9 +1775,11 @@ MEMORY_FORM_FACTOR: dict[int, str] = {
 
 def memory_type(code: int | None) -> str:
     """SMBIOS memory-type code → DRAM family name (``"Unknown"`` if unmapped)."""
+    log.debug("memory_type: code=%s", code)
     return SMBIOS_MEMORY_TYPE.get(code or 0, "Unknown")
 
 
 def memory_form_factor(code: int | None) -> str:
     """SMBIOS form-factor code → module form factor (``"Unknown"`` if unmapped)."""
+    log.debug("memory_form_factor: code=%s", code)
     return MEMORY_FORM_FACTOR.get(code or 0, "Unknown")

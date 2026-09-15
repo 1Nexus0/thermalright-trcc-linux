@@ -61,6 +61,7 @@ class SlideshowService:
     """Per-device slideshow cursor + advance logic."""
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._state: dict[str, _SlideshowState] = {}
 
     def reset(self, key: str) -> None:

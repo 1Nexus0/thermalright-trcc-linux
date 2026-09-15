@@ -100,6 +100,7 @@ def install(dry_run: bool = False) -> int:
 
 
 def _is_freebsd() -> bool:
+    log.debug("_is_freebsd")
     return sys.platform.startswith("freebsd")
 
 

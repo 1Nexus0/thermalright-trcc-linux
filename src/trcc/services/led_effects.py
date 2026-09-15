@@ -47,6 +47,7 @@ def apply_brightness(
     wire and the GUI preview observe one identical color list.  100 % is
     the identity, so callers may always route through this.
     """
+    log.debug("apply_brightness: colors=%s percent=%s", colors, percent)
     scale = max(0, min(100, percent)) / 100.0
     if scale == 1.0:
         return list(colors)
@@ -86,6 +87,7 @@ class ColorEngine:
     @classmethod
     def get_table(cls) -> tuple[tuple[int, int, int], ...]:
         """768-entry rainbow lookup table (cached after first call)."""
+        log.debug("get_table")
         if cls._TABLE is None:
             cls._TABLE = tuple(cls._generate_table())
         return cls._TABLE
@@ -93,6 +95,7 @@ class ColorEngine:
     @staticmethod
     def _generate_table() -> list[tuple[int, int, int]]:
         """Build the 768-entry HSV rainbow cycle, six 128-step phases."""
+        log.debug("_generate_table")
         table: list[tuple[int, int, int]] = []
         phase_len = 128
         for i in range(768):
@@ -120,6 +123,7 @@ class ColorEngine:
         gradient: tuple[tuple[float, tuple[int, int, int]], ...],
     ) -> tuple[int, int, int]:
         """Map *value* to an RGB color via linear interpolation between stops."""
+        log.debug("color_for_value: value=%s gradient=%s", value, gradient)
         if value <= gradient[0][0]:
             return gradient[0][1]
         if value >= gradient[-1][0]:
@@ -308,6 +312,7 @@ class LEDEffectEngine:
         Ports legacy ``_next_sync_zone``.  Returns 0 when no zone
         participates (defensive — the caller gates on ``zone_sync``).
         """
+        log.debug("next_sync_zone: zone_sync_zones=%s current=%s", zone_sync_zones, current)
         n = len(zone_sync_zones)
         if n == 0:
             return 0
@@ -338,6 +343,7 @@ class LEDEffectEngine:
         each digit reads as one color, instead of wrapping a full rainbow
         across the group (#193).  Non-spatial modes ignore it.
         """
+        log.debug("_tick_mode: mode=%s color=%s", mode, color)
         match mode:
             case LEDMode.STATIC:
                 return [color] * led_count
@@ -372,6 +378,7 @@ class LEDEffectEngine:
         it, so we don't group it — we only flatten the digits here, after the
         effect, leaving every other LED on its per-LED spread (#193).
         """
+        log.debug("cohere_digit_groups: colors=%s groups=%s", colors, groups)
         out = list(colors)
         for group in groups:
             if not group:
@@ -390,6 +397,7 @@ class LEDEffectEngine:
         colors: list[tuple[int, int, int]], brightness: int,
     ) -> list[tuple[int, int, int]]:
         """Scale a color list by a 0–100 % zone brightness (no-op at 100)."""
+        log.debug("_scale_brightness: colors=%s brightness=%s", colors, brightness)
         if brightness >= 100:
             return colors
         scale = brightness / 100.0
@@ -414,6 +422,7 @@ class LEDEffectEngine:
         Windows look, without the C#'s hand-mapped ``ledVal`` slots (#193).
         Out-of-range indices are skipped defensively.
         """
+        log.debug("_color_groups: mode=%s color=%s", mode, color)
         group_colors = self._tick_mode(
             mode, color, runtime, sensors, len(groups),
             temp_source, load_source, cohesive=True,
@@ -432,6 +441,7 @@ class LEDEffectEngine:
         led_count: int,
     ) -> list[tuple[int, int, int]]:
         """Cycle 4 bright reference colours every ``_TEST_PERIOD`` ticks."""
+        log.debug("_tick_test: runtime=%s led_count=%s", runtime, led_count)
         runtime.test_timer += 1
         if runtime.test_timer >= _TEST_PERIOD:
             runtime.test_timer = 0
@@ -473,6 +483,7 @@ class LEDEffectEngine:
         led_count: int,
     ) -> list[tuple[int, int, int]]:
         """Pulse brightness through a ``_BREATHING_PERIOD``-tick cycle."""
+        log.debug("_tick_breathing: color=%s runtime=%s", color, runtime)
         timer = runtime.breathe_phase
         half = _BREATHING_PERIOD // 2
         factor = timer / half if timer < half else (_BREATHING_PERIOD - 1 - timer) / half
@@ -493,6 +504,7 @@ class LEDEffectEngine:
     ) -> list[tuple[int, int, int]]:
         """6-phase gradient cycle.  ``step`` overrides the per-element hue
         offset (groups pass a small fixed step; a strip wraps the spectrum)."""
+        log.debug("_tick_colorful: runtime=%s led_count=%s", runtime, led_count)
         timer = runtime.colorful_phase
         seg_offset = step if step is not None else _COLORFUL_PERIOD // max(led_count, 1)
         colors: list[tuple[int, int, int]] = []
@@ -524,6 +536,7 @@ class LEDEffectEngine:
     ) -> list[tuple[int, int, int]]:
         """768-entry table shift.  ``step`` overrides the per-element table
         offset (groups pass a small fixed step; a strip wraps the spectrum)."""
+        log.debug("_tick_rainbow: runtime=%s led_count=%s", runtime, led_count)
         table = ColorEngine.get_table()
         table_len = len(table)
         timer = runtime.rainbow_phase
@@ -540,6 +553,7 @@ class LEDEffectEngine:
         source: str,
     ) -> list[tuple[int, int, int]]:
         """Color from a temperature gradient.  Holds previous color if no sensor."""
+        log.debug("_tick_temp_linked: runtime=%s sensors=%s", runtime, sensors)
         sensor_id = f"{source}:temp" if source == "cpu" else "gpu:primary:temp"
         value = sensors.get(sensor_id)
         if value is not None:
@@ -556,6 +570,7 @@ class LEDEffectEngine:
         source: str,
     ) -> list[tuple[int, int, int]]:
         """Color from CPU/GPU load gradient.  Holds previous color if no sensor."""
+        log.debug("_tick_load_linked: runtime=%s sensors=%s", runtime, sensors)
         sensor_id = "cpu:usage" if source == "cpu" else "gpu:primary:usage"
         value = sensors.get(sensor_id)
         if value is not None:

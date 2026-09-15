@@ -61,6 +61,7 @@ def _parse_metric_spec(spec: str) -> dict[str, object]:
     ``x,y``, everything before it is the key, everything after is
     ``[color[, size]]``.  That holds for any number of colons on either side.
     """
+    log.debug("_parse_metric_spec: spec=%s", spec)
     parts = spec.split(":")
     idx = next((i for i, part in enumerate(parts)
                 if _COORDS_RE.fullmatch(part.strip())), None)

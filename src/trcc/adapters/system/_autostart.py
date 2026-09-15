@@ -166,6 +166,7 @@ class XdgDesktopAutostart(AutostartManager):
                       self._path)
 
     def _render(self, target: str = DEFAULT_AUTOSTART_TARGET) -> str:
+        log.debug("_render: target=%s", target)
         return _AUTOSTART_TEMPLATE.format(
             exec_cmd=self._exec_cmd(target), target=target,
         )
@@ -179,6 +180,7 @@ class XdgDesktopAutostart(AutostartManager):
         window on every login — the long-standing autostart behaviour that
         regressed when the flag was dropped (#201).
         """
+        log.debug("_exec_cmd: target=%s", target)
         return " ".join(autostart_argv(target))
 
 
@@ -344,6 +346,7 @@ class WindowsAutostart(AutostartManager):
     ) -> None:
         """``registry`` is a winreg-compatible module-like object — duck-typed
         seam so tests can inject an in-memory fake on non-Windows boxes."""
+        log.debug("__init__")
         self._cmd = command if command is not None else _resolve_command()
         self._registry: Any = registry if registry is not None else _winreg_module()
         self._value_name = value_name
@@ -470,6 +473,7 @@ class WindowsAutostart(AutostartManager):
     # ── Internal: open the Run key in read or write mode ──────────
 
     def _open_key(self, *, write: bool) -> Any:
+        log.debug("_open_key")
         access = (self._registry.KEY_READ
                   if not write else self._registry.KEY_SET_VALUE)
         return self._registry.OpenKeyEx(
@@ -571,6 +575,7 @@ class MacOSAutostart(AutostartManager):
         label: str = _MAC_LABEL,
         uid: int | None = None,
     ) -> None:
+        log.debug("__init__")
         self._plist_path = plist_path if plist_path is not None else _DEFAULT_PLIST_PATH
         self._program_args = (
             list(program_args) if program_args is not None
@@ -585,10 +590,12 @@ class MacOSAutostart(AutostartManager):
     @property
     def _domain_target(self) -> str:
         """``gui/<uid>/<label>`` — the launchd service identifier."""
+        log.debug("_domain_target")
         return f"gui/{self._uid}/{self._label}"
 
     @property
     def _domain(self) -> str:
+        log.debug("_domain")
         return f"gui/{self._uid}"
 
     # ── AutostartManager ABC ───────────────────────────────────────

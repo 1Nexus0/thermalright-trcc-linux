@@ -109,6 +109,7 @@ class AssetBrowserPanel(BasePanel):
         is what makes the qtgui browsers legible at a glance the way the gui
         skin's are.
         """
+        log.debug("_build_asset_list")
         widget = QListWidget(self)
         widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         widget.itemDoubleClicked.connect(self._on_item_double_clicked)
@@ -127,10 +128,12 @@ class AssetBrowserPanel(BasePanel):
         A named slot rather than a lambda so the signal's item argument is
         absorbed in one obvious place instead of at every connect site.
         """
+        log.debug("_on_item_double_clicked: _item=%s", _item)
         self._on_apply()
 
     def _on_apply(self) -> None:
         """Apply the current selection — every browser defines its own."""
+        log.debug("_on_apply")
         raise NotImplementedError(
             f"{type(self).__name__} must implement _on_apply()",
         )

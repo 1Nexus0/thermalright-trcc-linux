@@ -80,6 +80,7 @@ def _probe_cache_key(vid: int, pid: int, usb_path: str = "") -> str:
     devices on different bus positions.  Caller looks up the
     specific path first, falls back to the VID/PID-only key.
     """
+    log.debug("_probe_cache_key: vid=%s pid=%s", vid, pid)
     if usb_path:
         return f"{vid:04x}_{pid:04x}_{usb_path}"
     return f"{vid:04x}_{pid:04x}"
@@ -164,6 +165,7 @@ class Led(BaseBulkDevice, wire=Wire.LED):
     _EP_WRITE = 0x02
 
     def __init__(self, info: ProductInfo, transport: BulkTransport) -> None:
+        log.debug("__init__: info=%s transport=%s", info, transport)
         super().__init__(info, transport)
         self._send_lock = threading.Lock()
         self._pm: int = 0
@@ -172,16 +174,19 @@ class Led(BaseBulkDevice, wire=Wire.LED):
 
     @property
     def is_led(self) -> bool:
+        log.debug("is_led")
         return True
 
     @property
     def led_handshake(self) -> LedHandshakeResult | None:
         """LED-specific handshake info (pm, sub_type, style)."""
+        log.debug("led_handshake")
         return self._led_handshake
 
     def _reset_state(self) -> None:
         """An LED has no canvas — its handshake product is the style, not a
         profile, so that is what a disconnect drops."""
+        log.debug("_reset_state")
         self._led_handshake = None
 
     def _probe_cache_file(self) -> Path | None:
@@ -206,6 +211,7 @@ class Led(BaseBulkDevice, wire=Wire.LED):
 
     def _handshake_detail(self, result: HandshakeResult) -> str:
         """The resolved style + model — an LED's whole identity."""
+        log.debug("_handshake_detail: result=%s", result)
         if self._led_handshake is None:
             return ""
         style = self._led_handshake.style
@@ -222,6 +228,7 @@ class Led(BaseBulkDevice, wire=Wire.LED):
         device, it's a device that already spoke.  Hence the cache path below
         rather than a hard failure.
         """
+        log.debug("_do_handshake")
         try:
             return self._handshake_retry(
                 self._build_init_packet(), _HID_REPORT_SIZE, self._parse_reply,
@@ -398,6 +405,7 @@ class Led(BaseBulkDevice, wire=Wire.LED):
 
     def _write_frame(self, frame: bytes) -> bool:
         """Stream the packet as 64-byte HID reports, zero-padding the last."""
+        log.debug("_write_frame: frame=%s", frame)
         remaining = len(frame)
         offset = 0
         while remaining > 0:
@@ -414,6 +422,7 @@ class Led(BaseBulkDevice, wire=Wire.LED):
 
     @staticmethod
     def _build_init_packet() -> bytes:
+        log.debug("_build_init_packet")
         header = bytearray(_HID_REPORT_SIZE)
         header[0:4] = _MAGIC
         header[12] = _CMD_INIT
@@ -421,6 +430,7 @@ class Led(BaseBulkDevice, wire=Wire.LED):
 
     @staticmethod
     def _build_header(payload_length: int) -> bytes:
+        log.debug("_build_header: payload_length=%s", payload_length)
         header = bytearray(_HEADER_SIZE)
         header[0:4] = _MAGIC
         header[12] = _CMD_DATA
@@ -429,6 +439,7 @@ class Led(BaseBulkDevice, wire=Wire.LED):
 
     @classmethod
     def _build_packet(cls, payload: LedPayload) -> bytes:
+        log.debug("_build_packet: payload=%s", payload)
         count = len(payload.colors)
         payload_len = count * 3
         header = cls._build_header(payload_len)

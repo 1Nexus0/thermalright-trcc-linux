@@ -75,6 +75,7 @@ class CzhordeCatalog(CloudCatalog):
         resolution: str = "320x320",
         preferred_server: Server = "international",
     ) -> None:
+        log.debug("__init__: http=%s cache_dir=%s", http, cache_dir)
         self._http = http
         self._cache_dir = cache_dir
         self._resolution = resolution
@@ -83,10 +84,12 @@ class CzhordeCatalog(CloudCatalog):
     # ── Static reads ──────────────────────────────────────────────────
 
     def categories(self) -> tuple[CloudCategory, ...]:
+        log.debug("categories")
         return _CATEGORIES
 
     def list_themes(self, category: str = "all") -> list[CloudThemeEntry]:
         """Enumerate theme IDs in *category* (or all categories)."""
+        log.debug("list_themes: category=%s", category)
         cats = (
             list(_CATEGORIES)
             if category in ("", "all")
@@ -119,6 +122,7 @@ class CzhordeCatalog(CloudCatalog):
         their own ``web/<res>`` dir.  Defaults to the construction-time
         resolution only when a caller doesn't know the device's (rare).
         """
+        log.debug("download_theme: theme_id=%s resolution=%s", theme_id, resolution)
         return self._fetch_cached(theme_id, ".mp4", resolution or self._resolution)
 
     def download_preview(
@@ -130,6 +134,7 @@ class CzhordeCatalog(CloudCatalog):
         and falls back to extracting a still from the MP4 (or shows a
         placeholder).
         """
+        log.debug("download_preview: theme_id=%s resolution=%s", theme_id, resolution)
         return self._fetch_cached(theme_id, ".png", resolution or self._resolution)
 
     # ── Internals ─────────────────────────────────────────────────────
@@ -186,6 +191,7 @@ class CzhordeCatalog(CloudCatalog):
     def _url_for(
         self, theme_id: str, suffix: str, server: Server, resolution: str,
     ) -> str:
+        log.debug("_url_for: theme_id=%s suffix=%s", theme_id, suffix)
         base = _SERVERS[server]
         res_dir = resolution.replace("x", "")
         base_url = base.replace("{resolution}", res_dir)
@@ -203,6 +209,7 @@ def _is_safe_theme_id(theme_id: str) -> bool:
     Legacy IDs are always ``<lowercase-letter><3 digits>``; we accept
     that and reject anything that could navigate the filesystem.
     """
+    log.debug("_is_safe_theme_id: theme_id=%s", theme_id)
     if not (4 <= len(theme_id) <= 8):
         return False
     if not theme_id[0].isalpha() or not theme_id[1:].isalnum():

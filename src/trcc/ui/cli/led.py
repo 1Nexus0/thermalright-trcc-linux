@@ -49,6 +49,7 @@ app = typer.Typer(help="RGB LED control.", no_args_is_help=True)
 
 def _parse_hex_color(raw: str) -> tuple[int, int, int]:
     """Parse '#rrggbb' or 'rrggbb' → (r, g, b); typer.BadParameter on miss."""
+    log.debug("_parse_hex_color: raw=%s", raw)
     try:
         r, g, b, _a = parse_hex(raw)
     except ValueError as e:
@@ -58,6 +59,7 @@ def _parse_hex_color(raw: str) -> tuple[int, int, int]:
 
 def _parse_mode(raw: str) -> LEDMode:
     """Parse a mode name (case-insensitive) into a LEDMode."""
+    log.debug("_parse_mode: raw=%s", raw)
     key = raw.upper()
     try:
         return LEDMode[key]

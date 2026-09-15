@@ -22,6 +22,7 @@ class SlideshowModel:
     """Ordered theme-name array + enabled flag + interval (no Qt)."""
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._themes: list[str] = []
         self._enabled = False
         self._interval = MIN_INTERVAL
@@ -30,25 +31,30 @@ class SlideshowModel:
 
     @property
     def enabled(self) -> bool:
+        log.debug("enabled")
         return self._enabled
 
     @property
     def interval(self) -> int:
+        log.debug("interval")
         return self._interval
 
     @property
     def themes(self) -> list[str]:
         """Theme names in slideshow order (copy)."""
+        log.debug("themes")
         return list(self._themes)
 
     def badge_position(self, name: str) -> int:
         """1-based position of ``name`` in the array, or 0 if not included."""
+        log.debug("badge_position: name=%s", name)
         return self._themes.index(name) + 1 if name in self._themes else 0
 
     # ── Mutation ──────────────────────────────────────────────────────
 
     def toggle_enabled(self) -> bool:
         """Flip slideshow mode; return the new state."""
+        log.debug("toggle_enabled")
         self._enabled = not self._enabled
         return self._enabled
 
@@ -72,6 +78,7 @@ class SlideshowModel:
 
     def remove_theme(self, name: str) -> None:
         """Drop ``name`` from the array if present (e.g. on theme delete)."""
+        log.debug("remove_theme: name=%s", name)
         if name in self._themes:
             self._themes.remove(name)
 
@@ -81,6 +88,7 @@ class SlideshowModel:
         Stores and returns the clamped value; non-numeric input falls to
         MIN_INTERVAL (matches the panel's old ``max(3, int(text))`` rule).
         """
+        log.debug("set_interval: raw=%s", raw)
         try:
             val = int(raw)  # type: ignore[arg-type]
         except (ValueError, TypeError):
@@ -92,6 +100,7 @@ class SlideshowModel:
     def restore(self, themes: list[str], enabled: bool, interval: int) -> None:
         """Restore persisted state (caller supplies an already-validated
         interval; the handler keeps its ``max(1, …)`` restore rule)."""
+        log.debug("restore: themes=%s enabled=%s", themes, enabled)
         self._themes = list(themes)[:MAX_SLIDESHOW]
         self._enabled = enabled
         self._interval = interval

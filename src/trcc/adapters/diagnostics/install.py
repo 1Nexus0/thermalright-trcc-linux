@@ -64,6 +64,7 @@ class InstallInfo:
         the code on disk — so every claim about "what version is this" is
         untrustworthy until the cache is cleared.
         """
+        log.debug("bytecode_stale")
         return (
             self.source_version != _UNKNOWN
             and self.version != self.source_version
@@ -72,10 +73,12 @@ class InstallInfo:
     @property
     def duplicates(self) -> bool:
         """More than one ``trcc`` on PATH — an upgrade can land on either."""
+        log.debug("duplicates")
         return len(self.executables) > 1
 
     @property
     def healthy(self) -> bool:
+        log.debug("healthy")
         return not self.bytecode_stale and not self.duplicates
 
 

@@ -101,6 +101,7 @@ def read_spd_block0(path: Path) -> bytes | None:
 
 def _u16(raw: bytes, off: int) -> int:
     """16-bit little-endian value at ``off``."""
+    log.debug("_u16: raw=%s off=%s", raw, off)
     return raw[off] | (raw[off + 1] << 8)
 
 
@@ -126,6 +127,7 @@ def decode_block0(raw: bytes) -> SpdTimings | None:
         return None
 
     def cycles_from_ps(off: int) -> int:
+        log.debug("cycles_from_ps: off=%s", off)
         return round(_u16(raw, off) / tck)
 
     timings = SpdTimings(

@@ -159,11 +159,13 @@ class SysInfoConfig:
         a file in the real user's config directory.  Requiring the path makes
         the bypass unrepresentable rather than merely unused.
         """
+        log.debug("__init__: config_path=%s", config_path)
         self._path = config_path
         self.panels: list[PanelConfig] = []
 
     @property
     def path(self) -> Path:
+        log.debug("path")
         return self._path
 
     def load(self) -> list[PanelConfig]:

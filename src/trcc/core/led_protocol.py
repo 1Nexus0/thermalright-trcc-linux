@@ -160,6 +160,7 @@ def resolve_model_name(model_name: str) -> PmEntry | None:
     name.  Returns ``None`` for names not carried by an override — the caller
     then falls back to the PM registry.
     """
+    log.debug("resolve_model_name: model_name=%s", model_name)
     return _OVERRIDES_BY_MODEL.get(model_name)
 
 
@@ -170,6 +171,7 @@ def is_fingerprint_header(header: bytes) -> bool:
     Magic Qube's ``DC DD AA 01``) as expected instead of logging it as an
     anomaly next to the standard ``DA DB DC DD`` magic.
     """
+    log.debug("is_fingerprint_header: header=%s", header)
     return bytes(header[:4]) in _HEADER_OVERRIDES
 
 

@@ -76,6 +76,7 @@ def _has_usb_errno(exc: BaseException, errno_val: int) -> bool:
     carries the actual errno; walking the chain catches the inner
     one no matter how many wrappers the upper transport added.
     """
+    log.debug("_has_usb_errno: exc=%s errno_val=%s", exc, errno_val)
     cur: BaseException | None = exc
     while cur is not None:
         if getattr(cur, "errno", None) == errno_val:
@@ -128,6 +129,7 @@ class RecoveryTracker:
     __slots__ = ("_failures", "_label", "_last_warn_at", "_permission_hint")
 
     def __init__(self, label: str) -> None:
+        log.debug("__init__: label=%s", label)
         self._label = label
         self._failures = 0
         self._last_warn_at = 0.0
@@ -142,6 +144,7 @@ class RecoveryTracker:
 
     @property
     def consecutive_failures(self) -> int:
+        log.debug("consecutive_failures")
         return self._failures
 
     def note_success(self) -> int:

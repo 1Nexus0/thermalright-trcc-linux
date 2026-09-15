@@ -52,6 +52,7 @@ class VariantOverride:
 
 def _v(button_image: str) -> VariantOverride:
     """Shorthand for VariantOverride rows that carry only a button image."""
+    log.debug("_v: button_image=%s", button_image)
     return VariantOverride(button_image=button_image)
 
 
@@ -194,6 +195,7 @@ def _resolve_variant(
     sub: int,
 ) -> VariantOverride | None:
     """Look up a VariantOverride by (PM key, SUB), preferring exact match."""
+    log.debug("_resolve_variant: table=%s key=%s", table, key)
     match table.get(key):
         case None:
             return None

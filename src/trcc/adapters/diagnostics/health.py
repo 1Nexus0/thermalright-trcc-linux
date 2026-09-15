@@ -213,6 +213,7 @@ def nvidia_gpu_present() -> bool:
     independently of the reader so we can advise *installing* the reader.
     Non-Linux falls back to the driver proc node.
     """
+    log.debug("nvidia_gpu_present")
     if sys.platform != "linux":
         return Path("/proc/driver/nvidia/version").exists()
     pci_root = Path("/sys/bus/pci/devices")

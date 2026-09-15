@@ -64,11 +64,13 @@ _DEFAULT_FRAME_TIMEOUT_MS = 100
 
 def _ceil_to_align(n: int, align: int = _USB_BULK_ALIGNMENT) -> int:
     """Round *n* up to the next multiple of *align*."""
+    log.debug("_ceil_to_align: n=%s align=%s", n, align)
     return (n + align - 1) // align * align
 
 
 def _frame_timeout_ms(packet_size: int) -> int:
     """Scale frame timeout with packet size (USB 2.0 ≈ 4 KB/ms + 100ms margin)."""
+    log.debug("_frame_timeout_ms: packet_size=%s", packet_size)
     return max(_DEFAULT_FRAME_TIMEOUT_MS, packet_size // 4 + 100)
 
 
@@ -94,6 +96,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
     _EP_WRITE = 0x02
 
     def __init__(self, info: ProductInfo, transport: BulkTransport) -> None:
+        log.debug("__init__: info=%s transport=%s", info, transport)
         super().__init__(info, transport)
         if info.device_type not in (2, 3):
             raise UnsupportedOperationError(
@@ -104,6 +107,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
 
     def _handshake_detail(self, result: HandshakeResult) -> str:
         """Which firmware variant answered — the two speak different packets."""
+        log.debug("_handshake_detail: result=%s", result)
         return f" (type {self.info.device_type})"
 
     def _require_connected(self) -> None:
@@ -223,6 +227,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
         """Resolve the pre-quirk geometry profile: from the FBL when known,
         else from the registry ``native_resolution`` (a streaming firmware that
         volunteered no handshake is still identified by its registry row)."""
+        log.debug("_base_profile: fbl=%s pm=%s", fbl, pm)
         if fbl is not None:
             return get_profile(fbl, pm)
         return DeviceProfile(*self.info.native_resolution)
@@ -233,6 +238,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
         pre-rotate, so the render composes upright and ships the raw raster the
         panel expects (#228).  A no-op unless the ``portrait_native`` quirk is
         set."""
+        log.debug("_portrait_native: base=%s", base)
         if not self._quirks.portrait_native:
             return base
         w, h = base.resolution
@@ -293,6 +299,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
 
     def _build_init_packet_type2(self) -> bytes:
         """Type 2 512-byte handshake: magic + command=1, zero-padded."""
+        log.debug("_build_init_packet_type2")
         header = (
             _TYPE2_MAGIC
             + b'\x00' * 8
@@ -309,6 +316,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
         #228) — the magic alone is enough to accept it; PM/SUB still parse from
         [5]/[4].
         """
+        log.debug("_validate_response_type2: resp=%s", resp)
         if not (len(resp) >= 6 and resp[0:4] == _TYPE2_MAGIC):
             return False
         if self._quirks.short_handshake:
@@ -330,6 +338,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
         panels share: a 1280×480 Trofeo Vision answering PM=128 was transposed
         to 480×1280 and never displayed (#244/#268).
         """
+        log.debug("_parse_response_type2: resp=%s", resp)
         pm = resp[5]
         sub = resp[4]
         has_serial = len(resp) > 36 and resp[16] == 0x10
@@ -358,6 +367,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
         fall back to ``info.native_resolution`` so smoke tests that build
         frames before connect() still produce a valid header.
         """
+        log.debug("_build_frame_type2: image_data=%s", image_data)
         is_jpeg = len(image_data) >= 2 and image_data[:2] == b'\xff\xd8'
         w, h = (self._profile.resolution if self._profile is not None
                 else self.info.native_resolution)
@@ -382,6 +392,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
 
     def _build_init_packet_type3(self) -> bytes:
         """Type 3 1040-byte handshake: F5 prefix + 16-byte header + 1024 zeros."""
+        log.debug("_build_init_packet_type3")
         return _f5.init_packet()
 
     def _validate_response_type3(self, resp: bytes) -> bool:
@@ -392,6 +403,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
         duplication ``_f5`` exists to prevent — so widening the set there did not
         widen it here.
         """
+        log.debug("_validate_response_type3: resp=%s", resp)
         return len(resp) >= 14 and resp[0] in _f5.VALID_IDENTITY
 
     def _parse_response_type3(self, resp: bytes) -> HandshakeResult:
@@ -399,6 +411,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
 
         Geometry comes from the FBL via ``get_profile`` (PM=FBL for Type 3).
         """
+        log.debug("_parse_response_type3: resp=%s", resp)
         serial = resp[10:14].hex().upper()
         fbl = resp[0] - 1
         # Sized from the identity at handshake, as the vendor does — a panel
@@ -417,6 +430,7 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
 
     def _build_frame_type3(self, image_data: bytes) -> bytes:
         """Type 3 frame: 16-byte prefix + exactly this panel's payload size."""
+        log.debug("_build_frame_type3: image_data=%s", image_data)
         size = getattr(self, "_f5_payload", _f5.DATA_SIZE)
         prefix = _f5.frame_header(size)
         if len(image_data) < size:
@@ -428,21 +442,25 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
     # ── Type-dispatching helpers ──────────────────────────────────────
 
     def _build_init_packet(self) -> bytes:
+        log.debug("_build_init_packet")
         return (self._build_init_packet_type2()
                 if self.info.device_type == 2
                 else self._build_init_packet_type3())
 
     def _response_size(self) -> int:
+        log.debug("_response_size")
         return (_TYPE2_RESPONSE_SIZE
                 if self.info.device_type == 2
                 else _f5.RESPONSE_SIZE)
 
     def _validate_response(self, resp: bytes) -> bool:
+        log.debug("_validate_response: resp=%s", resp)
         return (self._validate_response_type2(resp)
                 if self.info.device_type == 2
                 else self._validate_response_type3(resp))
 
     def _parse_response(self, resp: bytes) -> HandshakeResult:
+        log.debug("_parse_response: resp=%s", resp)
         return (self._parse_response_type2(resp)
                 if self.info.device_type == 2
                 else self._parse_response_type3(resp))

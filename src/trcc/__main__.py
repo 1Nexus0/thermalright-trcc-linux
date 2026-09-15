@@ -50,6 +50,7 @@ if sys.platform == 'win32':
                 pass
 
     def _safe_stream_emit(self: logging.StreamHandler, record: logging.LogRecord) -> None:
+        log.debug("_safe_stream_emit: record=%s", record)
         try:
             msg = self.format(record)
             stream = self.stream

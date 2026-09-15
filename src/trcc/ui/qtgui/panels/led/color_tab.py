@@ -41,12 +41,14 @@ class ColorTab(LedTabBase):
     """Global colour + brightness + on/off + presets."""
 
     def __init__(self, app, key_provider, parent=None) -> None:
+        log.debug("__init__: app=%s key_provider=%s", app, key_provider)
         super().__init__(app, key_provider, parent)
         self._color = QColor(255, 0, 0)
         self._build_ui()
 
     def _build_ui(self) -> None:
         # Colour wheel + selector swatch
+        log.debug("_build_ui")
         self._wheel = ColorWheel(self)
         self._wheel.setMinimumSize(220, 220)
         self._wheel.hue_changed.connect(self._on_wheel_hue)
@@ -147,12 +149,14 @@ class ColorTab(LedTabBase):
     # ── Internals ─────────────────────────────────────────────────────
 
     def _make_spin(self) -> QSpinBox:
+        log.debug("_make_spin")
         spin = QSpinBox(self)
         spin.setRange(0, 255)
         spin.setFixedWidth(60)
         return spin
 
     def _update_swatch(self) -> None:
+        log.debug("_update_swatch")
         self._swatch.setStyleSheet(
             f"background-color: {self._color.name()}; "
             "border: 1px solid #333;",
@@ -161,6 +165,7 @@ class ColorTab(LedTabBase):
     def _set_color(
         self, r: int, g: int, b: int, emit_signals: bool = True,
     ) -> None:
+        log.debug("_set_color: r=%s g=%s", r, g)
         self._color = QColor(r, g, b)
         self._update_swatch()
         # Sync RGB spinboxes without re-emitting.

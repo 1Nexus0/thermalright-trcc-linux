@@ -194,6 +194,7 @@ class BulkLcd(BaseBulkDevice, wire=Wire.BULK):
     _EP_WRITE = 0x01
 
     def __init__(self, info: ProductInfo, transport: BulkTransport) -> None:
+        log.debug("__init__: info=%s transport=%s", info, transport)
         super().__init__(info, transport)
         self._pm: int = 0
         self._sub: int = 0
@@ -243,6 +244,7 @@ class BulkLcd(BaseBulkDevice, wire=Wire.BULK):
         report we had: #262 and #203 turned out to share ``PM=11 SUB=5`` and
         nobody could see it, including me, until I read the C# catalog rule.
         """
+        log.debug("_handshake_detail: result=%s", result)
         if self._profile is None:
             return ""
         encoder = " (JPEG)" if self._profile.jpeg else " (RGB565)"
@@ -328,6 +330,7 @@ class BulkLcd(BaseBulkDevice, wire=Wire.BULK):
 
     def _write_frame(self, frame: bytes) -> bool:
         """16 KiB bulk writes, with a ZLP delimiter on 512-byte alignment."""
+        log.debug("_write_frame: frame=%s", frame)
         for offset in range(0, len(frame), _WRITE_CHUNK_SIZE):
             self._transport.write(
                 self._EP_WRITE, frame[offset:offset + _WRITE_CHUNK_SIZE],

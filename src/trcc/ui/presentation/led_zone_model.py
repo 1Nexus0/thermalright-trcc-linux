@@ -36,6 +36,7 @@ class LedZoneModel:
     """Zone enabled-state + selection + carousel mode (no Qt)."""
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._zone_count = 1
         self._select_all_style = False
         self._enabled: list[bool] = [False]
@@ -47,6 +48,7 @@ class LedZoneModel:
     def configure(self, zone_count: int, select_all_style: bool) -> None:
         """Reset for a device: zone 0 selected, carousel off (matches the
         panel's ``initialize``: zone 0 checked, others off)."""
+        log.debug("configure: zone_count=%s select_all_style=%s", zone_count, select_all_style)
         self._zone_count = zone_count
         self._select_all_style = select_all_style
         self._selected = 0
@@ -55,6 +57,7 @@ class LedZoneModel:
 
     def load_sync(self, carousel: bool, zones: list[bool]) -> None:
         """Restore carousel mode + per-zone enabled flags from saved config."""
+        log.debug("load_sync: carousel=%s zones=%s", carousel, zones)
         self._carousel = carousel
         for i in range(min(len(zones), self._zone_count)):
             self._enabled[i] = zones[i]
@@ -63,23 +66,28 @@ class LedZoneModel:
 
     @property
     def zone_count(self) -> int:
+        log.debug("zone_count")
         return self._zone_count
 
     @property
     def select_all_style(self) -> bool:
+        log.debug("select_all_style")
         return self._select_all_style
 
     @property
     def selected(self) -> int:
+        log.debug("selected")
         return self._selected
 
     @property
     def carousel(self) -> bool:
+        log.debug("carousel")
         return self._carousel
 
     @property
     def enabled(self) -> list[bool]:
         """The persisted multi-select / carousel mask (one bool per zone)."""
+        log.debug("enabled")
         return list(self._enabled)
 
     @property
@@ -91,6 +99,7 @@ class LedZoneModel:
         it is on — without disturbing the persisted multi-select ``enabled``
         mask, so turning it off restores the zones the user had picked.
         """
+        log.debug("display_enabled")
         if self._select_all_style and self._carousel:
             return [True] * self._zone_count
         return list(self._enabled)
@@ -128,6 +137,7 @@ class LedZoneModel:
 
     def _toggle_zone(self, index: int) -> ZoneEmit | None:
         """Multi-select toggle with a can't-disable-the-last-zone guard."""
+        log.debug("_toggle_zone: index=%s", index)
         if not self._enabled[index]:
             self._enabled[index] = True
             return ZoneEmit("carousel_zone", index, True)
@@ -142,6 +152,7 @@ class LedZoneModel:
 
     def toggle_carousel(self, on: bool) -> ZoneEmit:
         """Toggle carousel / select-all mode."""
+        log.debug("toggle_carousel: on=%s", on)
         self._carousel = on
         if self._select_all_style:
             # Select-all is a display/apply overlay (see ``display_enabled``):

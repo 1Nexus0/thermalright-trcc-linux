@@ -56,6 +56,7 @@ class EyedropperOverlay(BaseScreenOverlay):
         self.cancelled.emit()
 
     def paintEvent(self, event) -> None:
+        log.debug("paintEvent: event=%s", event)
         if self._screenshot.isNull():
             return
         painter = QPainter(self)
@@ -66,6 +67,7 @@ class EyedropperOverlay(BaseScreenOverlay):
         painter.end()
 
     def mouseMoveEvent(self, event) -> None:
+        log.debug("mouseMoveEvent: event=%s", event)
         self._cursor_pos = event.position().toPoint()
         self._sample_color_at_cursor()
         self.update()
@@ -80,6 +82,7 @@ class EyedropperOverlay(BaseScreenOverlay):
             self._cancel()
 
     def _sample_color_at_cursor(self) -> None:
+        log.debug("_sample_color_at_cursor")
         if self._screenshot.isNull():
             return
         x = max(0, min(self._cursor_pos.x(), self._screenshot.width() - 1))
@@ -88,6 +91,7 @@ class EyedropperOverlay(BaseScreenOverlay):
         self._current_color = QColor(img.pixel(x, y))
 
     def _draw_magnifier(self, painter: QPainter) -> None:
+        log.debug("_draw_magnifier: painter=%s", painter)
         cx, cy = self._cursor_pos.x(), self._cursor_pos.y()
         half = self.MAGNIFY_SIZE // 2
         mag_w = self.MAGNIFY_SIZE * self.MAGNIFY_SCALE

@@ -48,6 +48,7 @@ _HELP_COMMANDS: frozenset[str] = frozenset({"help", "?"})
 
 def _history_path() -> Path:
     """Persist REPL history across sessions under ``$XDG_STATE_HOME``."""
+    log.debug("_history_path")
     xdg_state = os.environ.get("XDG_STATE_HOME")
     base = Path(xdg_state) if xdg_state else Path.home() / ".local" / "state"
     target = base / "trcc"
@@ -63,6 +64,7 @@ def _build_completer() -> NestedCompleter:
     don't get completion (we'd need to introspect device keys live —
     nice-to-have, not blocking).
     """
+    log.debug("_build_completer")
     sub_apps: dict[str, typer.Typer] = {
         "device":  device.app,
         "display": display.app,
@@ -108,6 +110,7 @@ def _run_typer_line(typer_app: typer.Typer, argv: list[str]) -> int:
 
 def run_shell(typer_app: typer.Typer) -> int:
     """Launch the interactive shell.  Returns process exit code."""
+    log.debug("run_shell: typer_app=%s", typer_app)
     # Warm the App so the first command isn't slowed by a fresh build.
     _ = get_app()
 
@@ -145,6 +148,7 @@ def run_shell(typer_app: typer.Typer) -> int:
 
 def main() -> int:
     """Standalone entry point for ``python -m trcc.ui.cli.shell``."""
+    log.debug("main")
     from .main import app as typer_app
     return run_shell(typer_app)
 

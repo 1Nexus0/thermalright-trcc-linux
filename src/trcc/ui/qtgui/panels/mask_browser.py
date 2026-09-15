@@ -53,6 +53,7 @@ class MaskBrowser(AssetBrowserPanel):
     """List + apply + edit position / visibility of masks."""
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         self._picker = DevicePickerWidget(
             self.app, self._bus, kind_filter="lcd", parent=self,
         )
@@ -230,6 +231,7 @@ class MaskBrowser(AssetBrowserPanel):
         self._sync_from_snapshot()
 
     def _sync_from_snapshot(self) -> None:
+        log.debug("_sync_from_snapshot")
         key = self._picker.current_key()
         if not key:
             return

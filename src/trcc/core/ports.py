@@ -175,6 +175,7 @@ class Device(ABC, Generic[T]):
     """
 
     def __init__(self, info: ProductInfo, transport: T) -> None:
+        log.debug("__init__: info=%s transport=%s", info, transport)
         from .models import DeviceQuirks
         self.info = info
         self._transport: T = transport
@@ -226,6 +227,7 @@ class Device(ABC, Generic[T]):
         nothing about the OS; the composition root resolves the hint and hands
         it down for the recovery tracker's permission-denied warning.
         """
+        log.debug("set_permission_hint: hint=%s", hint)
         self._recovery.set_permission_hint(hint)
 
     @property
@@ -270,6 +272,7 @@ class Device(ABC, Generic[T]):
     @property
     def is_led(self) -> bool:
         """True for LED-control devices; False for LCD-frame devices."""
+        log.debug("is_led")
         return False
 
     @property
@@ -288,6 +291,7 @@ class Device(ABC, Generic[T]):
         Wires, which made a protocol choice decide whether we kept a screen
         alive — see ``ProductInfo.volatile_frames``.
         """
+        log.debug("needs_keepalive")
         return (self.info.volatile_frames or self._quirks.keepalive_stream)
 
     @property
@@ -298,6 +302,7 @@ class Device(ABC, Generic[T]):
         LED devices and pre-handshake state both return None — callers
         that build frames must fall back to ``info.native_resolution``.
         """
+        log.debug("profile")
         return None
 
     @property
@@ -310,6 +315,7 @@ class Device(ABC, Generic[T]):
         developer device inspector and ``trcc report`` read them here rather
         than re-deriving from the profile (PM isn't recoverable from FBL alone).
         """
+        log.debug("handshake")
         return self._handshake
 
     @property
@@ -322,6 +328,7 @@ class Device(ABC, Generic[T]):
         LED device" and "LED not yet handshaken" — callers gate on it
         instead of ``isinstance(device, Led)``.
         """
+        log.debug("led_handshake")
         return None
 
     @property
@@ -332,6 +339,7 @@ class Device(ABC, Generic[T]):
         (boot anim is SCSI-only regardless of connection state), instead
         of ``isinstance(device, ScsiLcd)``.  SCSI LCDs override to True.
         """
+        log.debug("can_boot_animate")
         return False
 
     def send_boot_animation(self, frames: list[bytes],
@@ -344,6 +352,7 @@ class Device(ABC, Generic[T]):
         the call site, so this base raise is defensive — no ``isinstance``
         needed.  Returns the number of frames uploaded.
         """
+        log.debug("send_boot_animation: frames=%s delays_ds=%s", frames, delays_ds)
         raise UnsupportedOperationError(
             f"{self.key} does not support boot animation (SCSI-only)"
         )
@@ -763,6 +772,7 @@ class DramSource(IdentifiedSource):
 
 def _or_zero(value: float | None) -> float:
     """None-coalesce a possibly-absent sensor reading to 0.0."""
+    log.debug("_or_zero: value=%s", value)
     return 0.0 if value is None else float(value)
 
 
@@ -891,6 +901,7 @@ class SensorEnumerator(ABC):
         stays here because it is a property of the sources (discrete-first) and
         needs no readings.
         """
+        log.debug("primary_gpu")
         gpus = self.gpus()
         match, self._warned_missing_gpu_key = _resolve_preferred(
             gpus, self._preferred_gpu_key, self._warned_missing_gpu_key, "gpu",
@@ -1671,6 +1682,7 @@ class Renderer(ABC):
         today) override; the default raises so test fakes that don't
         exercise the preview path stay minimal.
         """
+        log.debug("encode_png: surface=%s", surface)
         del surface
         raise NotImplementedError("encode_png not implemented on this Renderer")
 
@@ -1687,6 +1699,7 @@ class Renderer(ABC):
         Non-abstract — test fakes that don't exercise CLI ANSI
         previews stay minimal.
         """
+        log.debug("get_pixels_rgb: surface=%s cols=%s", surface, cols)
         del surface, cols, rows
         raise NotImplementedError(
             "get_pixels_rgb not implemented on this Renderer",
@@ -1715,6 +1728,7 @@ class Renderer(ABC):
         ``DisplayService.build_frame`` already keys on, so this is behaviour-
         preserving by construction.
         """
+        frame_log.debug("build_frame: profile=%s content=%s", profile, content)
         from .geometry import plan_orientation
         from .protocol import wire_angle
 
@@ -1793,6 +1807,7 @@ class Renderer(ABC):
         overrides with the real font database.  Lives behind the port so
         core never imports a GUI toolkit to ask "what fonts exist?".
         """
+        log.debug("list_fonts")
         return []
 
     # ── Legacy boundary (video frames) ────────────────────────────────

@@ -39,6 +39,7 @@ class ImcTimings:
 
 
 def _bits(value: int, hi: int, lo: int) -> int:
+    log.debug("_bits: value=%s hi=%s", value, hi)
     return (value >> lo) & ((1 << (hi - lo + 1)) - 1)
 
 

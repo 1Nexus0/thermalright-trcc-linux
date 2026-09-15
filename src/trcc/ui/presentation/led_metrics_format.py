@@ -26,6 +26,7 @@ _UNIT_CELSIUS = "°C"   # the temp_unit symbol the panel stores/passes
 
 def _temp_label(value: float, temp_unit: str) -> str:
     """``"NC"`` when unread (0), else ``"<v>℃"`` / ``"<v>℉"`` per unit."""
+    log.debug("_temp_label: value=%s temp_unit=%s", value, temp_unit)
     if value == 0:
         return "NC"
     glyph = _DEGREE_C if temp_unit == _UNIT_CELSIUS else _DEGREE_F

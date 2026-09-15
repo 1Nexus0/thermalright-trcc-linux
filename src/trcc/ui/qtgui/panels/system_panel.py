@@ -67,6 +67,7 @@ class SystemPanel(BasePanel):
     """Live system readout + diagnostic actions."""
 
     def _setup_ui(self) -> None:
+        log.debug("_setup_ui")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(16, 16, 16, 16)
         outer.setSpacing(12)
@@ -90,6 +91,7 @@ class SystemPanel(BasePanel):
     # ── Widget builders ───────────────────────────────────────────────
 
     def _build_platform_box(self) -> QGroupBox:
+        log.debug("_build_platform_box")
         box = QGroupBox("Platform", self)
         form = QFormLayout(box)
         self._distro_label = QLabel("…")
@@ -102,6 +104,7 @@ class SystemPanel(BasePanel):
         return box
 
     def _build_gpu_box(self) -> QGroupBox:
+        log.debug("_build_gpu_box")
         box = QGroupBox("Metric source", self)
         form = QFormLayout(box)
         self._gpu_combo = QComboBox(box)
@@ -118,6 +121,7 @@ class SystemPanel(BasePanel):
         return box
 
     def _build_maintenance_box(self) -> QGroupBox:
+        log.debug("_build_maintenance_box")
         box = QGroupBox("Maintenance", self)
         form = QFormLayout(box)
         self._autostart_check = QCheckBox("Start TRCC on login", box)
@@ -151,6 +155,7 @@ class SystemPanel(BasePanel):
         return box
 
     def _build_health_box(self) -> QGroupBox:
+        log.debug("_build_health_box")
         box = QGroupBox("Health", self)
         layout = QVBoxLayout(box)
         self._health_summary = QLabel("Running checks…", box)
@@ -166,6 +171,7 @@ class SystemPanel(BasePanel):
         return box
 
     def _build_sensors_box(self) -> QGroupBox:
+        log.debug("_build_sensors_box")
         box = QGroupBox("Sensors (live)", self)
         layout = QVBoxLayout(box)
         # Whether disk metrics reach sensor broadcasts at all.  Spinning a
@@ -309,6 +315,7 @@ class SystemPanel(BasePanel):
             self._refresh_dashboard()
 
     def _build_action_row(self) -> QHBoxLayout:
+        log.debug("_build_action_row")
         row = QHBoxLayout()
         refresh = QPushButton("Re-run health check", self)
         refresh.clicked.connect(self._refresh_health)
@@ -365,6 +372,7 @@ class SystemPanel(BasePanel):
         """Fill the GPU combo from ListGpus — self-healing, and degrades to
         a disabled 'No GPU detected' when none are present (a supported
         state, not an error)."""
+        log.debug("_populate_gpus")
         result = self.dispatch(ListGpus())
         self._gpu_combo.clear()
         if not result.ok or not result.gpus:
@@ -502,6 +510,7 @@ class SystemPanel(BasePanel):
             self._memory_list.addItem(QListWidgetItem("No DRAM slots reported"))
 
     def _save_debug_report(self) -> None:
+        log.debug("_save_debug_report")
         default_name = "trcc-debug-report.txt"
         path_str, _filter = QFileDialog.getSaveFileName(
             self,

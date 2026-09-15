@@ -205,12 +205,14 @@ class NvidiaGpu(GpuSource):
     """A single NVIDIA GPU — all readings routed through pynvml handles."""
 
     def __init__(self, index: int, handle: object) -> None:
+        log.debug("__init__: index=%s handle=%s", index, handle)
         self._index = index
         self._handle = handle
         self._name_cache: str | None = None
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return f"nvidia:{self._index}"
 
     @property
@@ -229,6 +231,7 @@ class NvidiaGpu(GpuSource):
 
     @property
     def is_discrete(self) -> bool:
+        frame_log.debug("is_discrete")
         return True
 
     def temp(self) -> float | None:

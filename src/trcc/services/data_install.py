@@ -36,6 +36,7 @@ class EnsureDataResult:
 
     @property
     def ok(self) -> bool:
+        log.debug("ok")
         return self.themes_ok and self.web_ok and self.masks_ok
 
 
@@ -45,6 +46,7 @@ class DataInstallService:
     __slots__ = ("_installer", "_paths")
 
     def __init__(self, paths: Paths, installer: DataInstaller) -> None:
+        log.debug("__init__: paths=%s installer=%s", paths, installer)
         self._paths = paths
         self._installer = installer
 

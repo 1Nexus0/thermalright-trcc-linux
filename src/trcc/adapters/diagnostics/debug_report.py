@@ -465,6 +465,7 @@ def _read_settings_file(path: Path) -> tuple[str, str]:
 
 
 def _header(timestamp: str) -> str:
+    log.debug("_header: timestamp=%s", timestamp)
     return (
         f"=========================================\n"
         f" TRCC debug report — {timestamp}\n"
@@ -477,6 +478,7 @@ def _header(timestamp: str) -> str:
 
 
 def _render_kv(title: str, table: dict[str, str]) -> str:
+    log.debug("_render_kv: title=%s table=%s", title, table)
     body = "\n".join(f"  {k:18}  {v}" for k, v in table.items())
     return f"## {title}\n{body}" if body else f"## {title}\n  (empty)"
 
@@ -489,6 +491,7 @@ def _render_install(info: InstallInfo | None) -> str:
     from the outside: a stale cache and a duplicate binary both present as
     "I upgraded and nothing changed".
     """
+    log.debug("_render_install: info=%s", info)
     if info is None:
         return "## Install\n  (unavailable)"
     rows = {
@@ -518,6 +521,7 @@ def _render_install(info: InstallInfo | None) -> str:
 
 
 def _render_devices(rows: list[dict[str, str]], error: str) -> str:
+    log.debug("_render_devices: rows=%s error=%s", rows, error)
     if error:
         return f"## Devices\n  Scan failed: {error}"
     if not rows:
@@ -543,6 +547,7 @@ def _render_devices(rows: list[dict[str, str]], error: str) -> str:
 
 def _render_handshake_log(lines: list[str]) -> str:
     """The scraped-from-log handshake fallback section (omitted when empty)."""
+    log.debug("_render_handshake_log: lines=%s", lines)
     if not lines:
         return ""
     body = "\n".join(f"  {line}" for line in lines)
@@ -550,6 +555,7 @@ def _render_handshake_log(lines: list[str]) -> str:
 
 
 def _render_sensors(rows: list[dict[str, str]], error: str) -> str:
+    log.debug("_render_sensors: rows=%s error=%s", rows, error)
     if error:
         return f"## Sensors\n  Enumeration failed: {error}"
     if not rows:
@@ -562,6 +568,7 @@ def _render_sensors(rows: list[dict[str, str]], error: str) -> str:
 
 
 def _render_powercap(rows: list[dict[str, str]]) -> str:
+    log.debug("_render_powercap: rows=%s", rows)
     if not rows:
         return ("## CPU power (RAPL)\n  No intel-rapl powercap domains — "
                 "intel_rapl_msr not loaded (or N/A on this OS).\n"
@@ -574,6 +581,7 @@ def _render_powercap(rows: list[dict[str, str]]) -> str:
 
 
 def _render_settings(text: str, error: str) -> str:
+    log.debug("_render_settings: text=%s error=%s", text, error)
     if error and not text:
         return f"## Settings\n  {error}"
     indented = "\n".join(f"  {line}" for line in text.splitlines())
@@ -594,6 +602,7 @@ def _render_state_files(files: dict[str, str]) -> str:
 
 
 def _render_health(report: HealthReport) -> str:
+    log.debug("_render_health: report=%s", report)
     if not report.checks:
         return "## Health\n  No checks ran"
     lines: list[str] = []

@@ -69,6 +69,7 @@ class MacOSPlatform(BaseOS, key="darwin"):
     # ── Per-OS internals (the add-a-new-OS interface) ────────────────────
 
     def _make_paths(self) -> Paths:
+        log.debug("_make_paths")
         return MacOSPaths()
 
     def _build_sensors(self) -> SensorEnumerator:
@@ -77,10 +78,12 @@ class MacOSPlatform(BaseOS, key="darwin"):
         Intel keys ship enabled by default; Apple Silicon keys are gated
         behind ``TRCC_NEXT_APPLE_SILICON_SMC=1`` until reporter-confirmed.
         """
+        log.debug("_build_sensors")
         from ..sensors.macos import build_macos_sensors
         return build_macos_sensors()
 
     def _build_autostart(self) -> AutostartManager:
+        log.debug("_build_autostart")
         from ._autostart import MacOSAutostart
         return MacOSAutostart()
 
@@ -91,6 +94,7 @@ class MacOSPlatform(BaseOS, key="darwin"):
         need ~250 lines of fragile ctypes or a 50 MB pyobjc dep; polling once
         a second hits the same UX (≤1 s attach/detach latency) at zero cost.
         """
+        log.debug("_build_hotplug")
         from ._hotplug import PollingHotplugMonitor
         return PollingHotplugMonitor(scan=self._scan_vid_pid_set)
 

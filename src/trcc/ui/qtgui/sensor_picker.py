@@ -50,6 +50,7 @@ class SensorPickerWidget(QWidget):
     selected = Signal(str, str)  # (sensor_id, label)
 
     def __init__(self, app: App, parent: QWidget | None = None) -> None:
+        log.debug("__init__: app=%s parent=%s", app, parent)
         super().__init__(parent)
         self._app = app
         self._all_readings: list = []
@@ -60,6 +61,7 @@ class SensorPickerWidget(QWidget):
         self._timer.start(_REFRESH_MS)
 
     def _build(self) -> None:
+        log.debug("_build")
         self._search = QLineEdit(self)
         self._search.setPlaceholderText(
             "Search by name, label, or category (e.g. 'cpu temp')…",
@@ -93,6 +95,7 @@ class SensorPickerWidget(QWidget):
 
     def selected_sensor(self) -> tuple[str, str] | None:
         """Return (sensor_id, label) for the current selection, or None."""
+        log.debug("selected_sensor")
         item = self._sensor_list.currentItem()
         if item is None:
             return None
@@ -102,6 +105,7 @@ class SensorPickerWidget(QWidget):
 
     def select_sensor_id(self, sensor_id: str) -> None:
         """Programmatically pick the row for ``sensor_id`` (if loaded)."""
+        log.debug("select_sensor_id: sensor_id=%s", sensor_id)
         for i in range(self._sensor_list.count()):
             item = self._sensor_list.item(i)
             if item.data(Qt.ItemDataRole.UserRole) == sensor_id:
@@ -118,6 +122,7 @@ class SensorPickerWidget(QWidget):
         self._update_preview()
 
     def _rebuild_categories(self) -> None:
+        log.debug("_rebuild_categories")
         seen = set()
         cats = []
         for reading in self._all_readings:
@@ -144,6 +149,7 @@ class SensorPickerWidget(QWidget):
         self._rebuild_sensor_list()
 
     def _rebuild_sensor_list(self) -> None:
+        log.debug("_rebuild_sensor_list")
         category_item = self._category_list.currentItem()
         category = category_item.text() if category_item else "All"
         query = self._search.text().strip().lower()
@@ -174,6 +180,7 @@ class SensorPickerWidget(QWidget):
         self._sensor_list.blockSignals(False)
 
     def _update_preview(self) -> None:
+        log.debug("_update_preview")
         picked = self.selected_sensor()
         if picked is None:
             return
@@ -205,6 +212,7 @@ class SensorPickerWidget(QWidget):
         self._emit_selection()
 
     def _emit_selection(self, *_args) -> None:
+        log.debug("_emit_selection")
         picked = self.selected_sensor()
         if picked is not None:
             sid, label = picked
@@ -213,6 +221,7 @@ class SensorPickerWidget(QWidget):
 
 def _matches(reading, query: str) -> bool:
     """Case-insensitive substring match across id, label, category."""
+    log.debug("_matches: reading=%s query=%s", reading, query)
     haystack = " ".join((
         reading.sensor_id,
         reading.label or "",

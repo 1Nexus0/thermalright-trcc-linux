@@ -46,6 +46,7 @@ class LedTabBase(QWidget):
         key_provider: KeyProvider,
         parent: QWidget | None = None,
     ) -> None:
+        log.debug("__init__: app=%s key_provider=%s", app, key_provider)
         super().__init__(parent)
         self._app = app
         self._key_provider = key_provider
@@ -64,12 +65,15 @@ class LedTabBase(QWidget):
         Hiding beats showing an empty editor: a device with one zone has
         nothing for the zone tab to edit, and an empty grid reads as broken.
         """
+        log.debug("has_visible_content")
         return not self._placeholder_visible
 
     def current_key(self) -> str:
+        log.debug("current_key")
         return self._key_provider()
 
     def _dispatch(self, command: Command):
+        log.debug("_dispatch: command=%s", command)
         return self._app.dispatch(command)
 
     # ── Hook for refresh ─────────────────────────────────────────────

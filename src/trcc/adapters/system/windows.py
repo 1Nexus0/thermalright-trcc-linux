@@ -120,6 +120,7 @@ def _is_elevated() -> bool:
     (assume fine, emit no warning) if ``shell32`` can't be reached — we only
     warn when we are *sure* the user lacks elevation.
     """
+    log.debug("_is_elevated")
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())  # pyright: ignore[reportAttributeAccessIssue]
     except (OSError, AttributeError):
@@ -176,6 +177,7 @@ class WindowsScsiTransport(ScsiTransport):
 
     @property
     def is_open(self) -> bool:
+        log.debug("is_open")
         return self._handle is not None
 
     def open(self) -> bool:
@@ -325,6 +327,7 @@ class _ComApartment:
             log.debug("_ComApartment: pythoncom unavailable — no-op")
 
     def __exit__(self, *exc: object) -> None:
+        log.debug("__exit__")
         return None
 
 
@@ -349,17 +352,21 @@ class WindowsPlatform(BaseOS, key="win32"):
     # ── Per-OS internals (the add-a-new-OS interface) ────────────────────
 
     def _make_paths(self) -> Paths:
+        log.debug("_make_paths")
         return WindowsPaths()
 
     def _build_sensors(self) -> SensorEnumerator:
         """Strategy chain: HWiNFO → LHM → MSAcpi → psutil/NVML baseline."""
+        log.debug("_build_sensors")
         return build_windows_sensors(thread_context=self.worker_thread_context)
 
     def _build_autostart(self) -> AutostartManager:
+        log.debug("_build_autostart")
         from ._autostart import WindowsAutostart
         return WindowsAutostart()
 
     def _build_hotplug(self) -> HotplugMonitor:
+        log.debug("_build_hotplug")
         from ._hotplug import WindowsHotplugMonitor
         return WindowsHotplugMonitor()
 
@@ -556,6 +563,7 @@ def _disk_type(disk: Any) -> str:
     WMI has no clean rotational flag, so fall back to the model and
     ``MediaType`` strings — the same heuristic legacy used.
     """
+    log.debug("_disk_type: disk=%s", disk)
     model = (getattr(disk, "Model", "") or "").upper()
     media_type = (getattr(disk, "MediaType", "") or "").upper()
     if "SSD" in model or "NVME" in model or "SOLID" in media_type:
