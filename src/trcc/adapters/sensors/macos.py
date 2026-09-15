@@ -19,6 +19,7 @@ import os
 import platform
 from collections.abc import Iterable
 
+from ...core.logs import per_frame
 from ...core.ports import CpuSource, FanSource, GpuSource
 from ._macos_hid import (
     MacosHidCpu,
@@ -45,6 +46,9 @@ from .nvml import discover_nvidia_gpus
 from .psutil_sources import PsutilCpu, PsutilMemory
 
 log = logging.getLogger(__name__)
+#: Per-tick readers — their records must never be CONSTRUCTED at
+#: default verbosity.  73 ns/call short-circuited, measured.
+frame_log = per_frame(__name__)
 
 
 _APPLE_SILICON_ENV_FLAG = "TRCC_NEXT_APPLE_SILICON_SMC"
@@ -57,10 +61,12 @@ def _apple_silicon_enabled() -> bool:
     we ship the table but keep it opt-in until a reporter confirms it
     on each chip generation.  Intel keys ship enabled by default.
     """
+    log.debug("_apple_silicon_enabled")
     return os.environ.get(_APPLE_SILICON_ENV_FLAG) == "1"
 
 
 def _select_cpu_temp_keys() -> tuple[str, ...]:
+    log.debug("_select_cpu_temp_keys")
     keys: list[str] = list(INTEL_CPU_TEMP_KEYS)
     if _apple_silicon_enabled():
         keys.extend(APPLE_SILICON_CPU_TEMP_KEYS)
@@ -68,6 +74,7 @@ def _select_cpu_temp_keys() -> tuple[str, ...]:
 
 
 def _select_gpu_temp_keys() -> tuple[str, ...]:
+    log.debug("_select_gpu_temp_keys")
     keys: list[str] = list(INTEL_GPU_TEMP_KEYS)
     if _apple_silicon_enabled():
         keys.extend(APPLE_SILICON_GPU_TEMP_KEYS)
@@ -97,6 +104,7 @@ class SmcCpu(CpuSource):
         *,
         keys: Iterable[str] | None = None,
     ) -> None:
+        log.debug("__init__: client=%s", client)
         self._client: SmcClientPort = client if client is not None else SMCClient()
         self._keys: tuple[str, ...] = (
             tuple(keys) if keys is not None else _select_cpu_temp_keys()
@@ -108,10 +116,12 @@ class SmcCpu(CpuSource):
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return "Apple SMC (CPU)"
 
     def temp(self) -> float | None:
         """Hottest valid SMC reading across the candidate keys."""
+        frame_log.debug("temp")
         if not self._client.connected:
             return None
         hottest: float | None = None
@@ -153,6 +163,7 @@ class SmcGpu(GpuSource):
         name: str = "Apple SMC (GPU)",
         discrete: bool = False,
     ) -> None:
+        log.debug("__init__: client=%s", client)
         self._client: SmcClientPort = client if client is not None else SMCClient()
         self._keys: tuple[str, ...] = (
             tuple(keys) if keys is not None else _select_gpu_temp_keys()
@@ -165,17 +176,21 @@ class SmcGpu(GpuSource):
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return self._key
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._name
 
     @property
     def is_discrete(self) -> bool:
+        frame_log.debug("is_discrete")
         return self._discrete
 
     def temp(self) -> float | None:
+        frame_log.debug("temp")
         if not self._client.connected:
             return None
         hottest: float | None = None
@@ -214,6 +229,7 @@ class SmcFan(FanSource):
         *,
         client: SmcClientPort | None = None,
     ) -> None:
+        log.debug("__init__: index=%s", index)
         self._index = index
         self._client: SmcClientPort = client if client is not None else SMCClient()
         if not self._client.connected:
@@ -221,13 +237,16 @@ class SmcFan(FanSource):
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return f"smc:fan{self._index}"
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return _FAN_NAME_TEMPLATE.format(index=self._index)
 
     def rpm(self) -> int | None:
+        frame_log.debug("rpm")
         value = self._client.read_fan_rpm(f"F{self._index}Ac")
         if value is None:
             return None

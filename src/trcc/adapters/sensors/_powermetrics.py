@@ -43,9 +43,13 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from ...core.logs import per_frame
 from ...core.ports import CpuSource, GpuSource
 
 log = logging.getLogger(__name__)
+#: Per-tick readers — their records must never be CONSTRUCTED at
+#: default verbosity.  73 ns/call short-circuited, measured.
+frame_log = per_frame(__name__)
 
 
 # ── IPC (legacy ``powermetrics_ipc.py``) ─────────────────────────────
@@ -62,6 +66,7 @@ _SNAPSHOT_TTL_SECONDS = 1.0
 
 def _powermetrics_socket_path() -> str | None:
     """Helper socket path, or None when disabled via ``TRCC_POWERMETRICS_SOCKET=``."""
+    log.debug("_powermetrics_socket_path")
     raw = os.environ.get("TRCC_POWERMETRICS_SOCKET", _DEFAULT_SOCKET)
     if not raw.strip():
         return None
@@ -69,12 +74,14 @@ def _powermetrics_socket_path() -> str | None:
 
 
 def _samplers_allowed(s: str) -> bool:
+    log.debug("_samplers_allowed: s=%s", s)
     if not s or len(s) > _MAX_SAMPLERS_LEN:
         return False
     return bool(_SAFE_SAMPLERS.fullmatch(s))
 
 
 def _read_exact(sock: socket.socket, n: int) -> bytes:
+    log.debug("_read_exact: sock=%s n=%s", sock, n)
     buf = bytearray()
     while len(buf) < n:
         chunk = sock.recv(n - len(buf))
@@ -152,6 +159,7 @@ def fetch_via_subprocess(samplers: str, *, timeout: float = 12.0) -> bytes | Non
 
 
 def _mw_to_w(mw: Any) -> float | None:
+    log.debug("_mw_to_w: mw=%s", mw)
     if isinstance(mw, bool) or not isinstance(mw, (int, float)):
         return None
     v = float(mw) / 1000.0
@@ -161,6 +169,7 @@ def _mw_to_w(mw: Any) -> float | None:
 
 
 def _freq_hz_to_mhz(hz: Any) -> float | None:
+    log.debug("_freq_hz_to_mhz: hz=%s", hz)
     if isinstance(hz, bool) or not isinstance(hz, (int, float)):
         return None
     f = float(hz)
@@ -175,6 +184,7 @@ def _freq_hz_to_mhz(hz: Any) -> float | None:
 
 def _gpu_busy_percent(gpu: dict[str, Any]) -> float | None:
     """Sum of ``used_ratio`` across all GPU DVFM states → 0..100 utilization."""
+    log.debug("_gpu_busy_percent: gpu=%s", gpu)
     states = gpu.get("dvfm_states")
     if not isinstance(states, list) or not states:
         return None
@@ -191,6 +201,7 @@ def _gpu_busy_percent(gpu: dict[str, Any]) -> float | None:
 
 
 def _max_cpu_mhz_from_processor(proc: dict[str, Any]) -> float | None:
+    log.debug("_max_cpu_mhz_from_processor: proc=%s", proc)
     clusters = proc.get("clusters")
     if not isinstance(clusters, list):
         return None
@@ -259,11 +270,13 @@ def parse_powermetrics_plist(data: bytes) -> dict[str, float] | None:
 def _geteuid_or_minus1() -> int:
     """``os.geteuid`` is Unix-only; return -1 (≠ 0) on Windows so we don't
     accidentally fall through to the subprocess path on non-macOS."""
+    log.debug("_geteuid_or_minus1")
     return getattr(os, "geteuid", lambda: -1)()
 
 
 def _default_fetcher(samplers: str) -> bytes | None:
     """Helper-first, then root-only subprocess as fallback."""
+    log.debug("_default_fetcher: samplers=%s", samplers)
     data = fetch_via_helper(samplers)
     if data is not None:
         return data
@@ -304,6 +317,7 @@ class _PowermetricsSnapshot:
 
     def get(self, key: str) -> float | None:
         """Return the cached value for ``key``, refreshing if stale."""
+        log.debug("get: key=%s", key)
         self._refresh_if_stale()
         return self._values.get(key)
 
@@ -339,16 +353,20 @@ class PowermetricsCpu(CpuSource):
     """
 
     def __init__(self, snapshot: _PowermetricsSnapshot) -> None:
+        log.debug("__init__: snapshot=%s", snapshot)
         self._snap = snapshot
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return "powermetrics (CPU)"
 
     def freq(self) -> float | None:
+        frame_log.debug("freq")
         return self._snap.get("cpu_freq")
 
     def power(self) -> float | None:
+        frame_log.debug("power")
         return self._snap.get("cpu_power")
 
 
@@ -368,27 +386,34 @@ class PowermetricsGpu(GpuSource):
         *,
         model_name: str = "Apple GPU",
     ) -> None:
+        log.debug("__init__: snapshot=%s", snapshot)
         self._snap = snapshot
         self._name = model_name
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return "apple:0"
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._name
 
     @property
     def is_discrete(self) -> bool:
+        frame_log.debug("is_discrete")
         return False
 
     def usage(self) -> float | None:
+        frame_log.debug("usage")
         return self._snap.get("gpu_busy")
 
     def clock(self) -> float | None:
+        frame_log.debug("clock")
         return self._snap.get("gpu_clock")
 
     def power(self) -> float | None:
+        frame_log.debug("power")
         return self._snap.get("gpu_power")
 

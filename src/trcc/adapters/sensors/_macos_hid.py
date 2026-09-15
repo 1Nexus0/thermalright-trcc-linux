@@ -40,9 +40,13 @@ import sys
 import time
 from collections.abc import Callable
 
+from ...core.logs import per_frame
 from ...core.ports import CpuSource, GpuSource
 
 log = logging.getLogger(__name__)
+#: Per-tick readers — their records must never be CONSTRUCTED at
+#: default verbosity.  73 ns/call short-circuited, measured.
+frame_log = per_frame(__name__)
 
 
 # ── HID page/usage + event type constants (iSMC hid/get.go) ──────────
@@ -64,6 +68,7 @@ _kCFNumberSInt32Type = 3
 
 
 def _is_apple_silicon_darwin() -> bool:
+    log.debug("_is_apple_silicon_darwin")
     return sys.platform == "darwin" and platform.machine() == "arm64"
 
 
@@ -184,6 +189,7 @@ def _try_bind_hid() -> bool:
 
 
 def hid_layer_ready() -> bool:
+    log.debug("hid_layer_ready")
     return _try_bind_hid()
 
 
@@ -191,6 +197,7 @@ def hid_layer_ready() -> bool:
 
 
 def _cfstr(s: str) -> ctypes.c_void_p | None:
+    log.debug("_cfstr: s=%s", s)
     assert _cf is not None
     return _cf.CFStringCreateWithCString(
         None, s.encode("utf-8"), _kCFStringEncodingUTF8,
@@ -198,12 +205,14 @@ def _cfstr(s: str) -> ctypes.c_void_p | None:
 
 
 def _cfnumber_i32(v: int) -> ctypes.c_void_p | None:
+    log.debug("_cfnumber_i32: v=%s", v)
     assert _cf is not None
     buf = ctypes.c_int32(v)
     return _cf.CFNumberCreate(None, _kCFNumberSInt32Type, ctypes.byref(buf))
 
 
 def _matching_dict(page: int, usage: int) -> ctypes.c_void_p | None:
+    log.debug("_matching_dict: page=%s usage=%s", page, usage)
     assert _cf is not None
     if not _kcf_key_callbacks_addr or not _kcf_value_callbacks_addr:
         return None
@@ -229,6 +238,7 @@ def _matching_dict(page: int, usage: int) -> ctypes.c_void_p | None:
 
 
 def _cfstring_to_str(ref: ctypes.c_void_p) -> str:
+    log.debug("_cfstring_to_str: ref=%s", ref)
     assert _cf is not None
     if not ref:
         return ""
@@ -239,6 +249,7 @@ def _cfstring_to_str(ref: ctypes.c_void_p) -> str:
 
 
 def _iohid_field_base(event_type: int) -> int:
+    log.debug("_iohid_field_base: event_type=%s", event_type)
     return int(event_type) << 16
 
 
@@ -252,6 +263,7 @@ def _normalize_thermal_celsius(name: str, val: float) -> float | None:
     most others report °C directly.  Out-of-range readings are
     dropped so a bad ABI call never surfaces as an absurd temp.
     """
+    log.debug("_normalize_thermal_celsius: name=%s val=%s", name, val)
     if val != val or val in (float("inf"), float("-inf")):
         return None
     v = float(val)
@@ -281,6 +293,7 @@ def _collect_names_values(
     power_scale: float,
 ) -> list[tuple[str, float]]:
     """Enumerate one HID usage page; return ``[(product_name, value), …]``."""
+    log.debug("_collect_names_values: page=%s usage=%s", page, usage)
     if not _try_bind_hid():
         return []
     assert _cf is not None and _iokit is not None
@@ -345,6 +358,7 @@ def _dedupe_by_name(
     pairs: list[tuple[str, float]],
 ) -> list[tuple[str, float]]:
     """Keep the first row per Product name (PMU channels often repeat)."""
+    log.debug("_dedupe_by_name: pairs=%s", pairs)
     seen: set[str] = set()
     out: list[tuple[str, float]] = []
     for name, val in pairs:
@@ -384,6 +398,7 @@ def _hottest_matching(
 ) -> float | None:
     """Highest reading among rows whose name matches any pattern,
     walking patterns in declared priority order."""
+    log.debug("_hottest_matching: pairs=%s patterns=%s", pairs, patterns)
     for pat in patterns:
         best: float | None = None
         for name, val in pairs:
@@ -413,6 +428,7 @@ class _HidSnapshot:
         ttl_seconds: float = 1.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        log.debug("__init__")
         self._read = reader if reader is not None else read_thermal_pairs
         self._ttl = ttl_seconds
         self._clock = clock
@@ -420,13 +436,16 @@ class _HidSnapshot:
         self._pairs: list[tuple[str, float]] = []
 
     def pairs(self) -> list[tuple[str, float]]:
+        log.debug("pairs")
         self._refresh_if_stale()
         return self._pairs
 
     def cpu_temp(self) -> float | None:
+        log.debug("cpu_temp")
         return _hottest_matching(self.pairs(), _CPU_PATTERNS)
 
     def gpu_temp(self) -> float | None:
+        log.debug("gpu_temp")
         return _hottest_matching(self.pairs(), _GPU_PATTERNS)
 
     def _refresh_if_stale(self) -> None:
@@ -460,13 +479,16 @@ class MacosHidCpu(CpuSource):
     """
 
     def __init__(self, snapshot: _HidSnapshot) -> None:
+        log.debug("__init__: snapshot=%s", snapshot)
         self._snap = snapshot
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return "Apple HID (CPU)"
 
     def temp(self) -> float | None:
+        frame_log.debug("temp")
         return self._snap.cpu_temp()
 
 class MacosHidGpu(GpuSource):
@@ -478,20 +500,25 @@ class MacosHidGpu(GpuSource):
     """
 
     def __init__(self, snapshot: _HidSnapshot) -> None:
+        log.debug("__init__: snapshot=%s", snapshot)
         self._snap = snapshot
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return "apple:0"
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return "Apple HID (GPU)"
 
     @property
     def is_discrete(self) -> bool:
+        frame_log.debug("is_discrete")
         return False
 
     def temp(self) -> float | None:
+        frame_log.debug("temp")
         return self._snap.gpu_temp()
 

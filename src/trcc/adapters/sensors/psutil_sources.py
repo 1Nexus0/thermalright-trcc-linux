@@ -33,6 +33,7 @@ class PsutilCpu(CpuSource):
     """
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._warm = False
         try:
             self._name = psutil.cpu_info()[0].name  # type: ignore[attr-defined]
@@ -41,6 +42,7 @@ class PsutilCpu(CpuSource):
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._name
 
     def temp(self) -> float | None:
@@ -111,6 +113,7 @@ class ComputedIo:
     """
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._disk_prev: tuple | None = None
         self._net_prev: tuple | None = None
 
@@ -121,6 +124,7 @@ class ComputedIo:
         self._poll_net(readings, now)
 
     def _poll_disk(self, readings: dict[str, float], now: float) -> None:
+        log.debug("_poll_disk: readings=%s now=%s", readings, now)
         try:
             disk = psutil.disk_io_counters()
         except (psutil.Error, AttributeError, OSError):
@@ -141,6 +145,7 @@ class ComputedIo:
         self._disk_prev = (disk, now)
 
     def _poll_net(self, readings: dict[str, float], now: float) -> None:
+        log.debug("_poll_net: readings=%s now=%s", readings, now)
         try:
             net = psutil.net_io_counters()
         except (psutil.Error, AttributeError, OSError):

@@ -33,7 +33,12 @@ import logging
 import struct
 from typing import Protocol
 
+from ...core.logs import per_frame
+
 log = logging.getLogger(__name__)
+#: Per-tick readers — their records must never be CONSTRUCTED at
+#: default verbosity.  73 ns/call short-circuited, measured.
+frame_log = per_frame(__name__)
 
 
 # =========================================================================
@@ -101,12 +106,14 @@ class _SMCKeyData_t(ctypes.Structure):
 
 def _smc_key_to_uint32(key: str) -> int:
     """Encode a 4-char SMC key as a big-endian uint32 ``mach_msg_id_t``."""
+    log.debug("_smc_key_to_uint32: key=%s", key)
     raw = key.encode("latin-1", errors="replace")[:4].ljust(4, b" ")
     return struct.unpack(">I", raw)[0]
 
 
 def _datatype_to_str(data_type: int) -> str:
     """Decode the 4-byte ``dataType`` field back to its FourCC string."""
+    log.debug("_datatype_to_str: data_type=%s", data_type)
     return struct.pack(">I", data_type).decode("latin-1", errors="replace")
 
 
@@ -120,6 +127,7 @@ def _decode_fan_rpm_raw(data_type: int, size: int, raw: bytes) -> float | None:
     firmware quirks) sometimes lie about the ``flt`` label — when
     the parsed float is implausible, fall back to fpe2 decoding.
     """
+    log.debug("_decode_fan_rpm_raw: data_type=%s size=%s", data_type, size)
     if size < 2 or len(raw) < 2:
         return None
     dt = _datatype_to_str(data_type).rstrip()
@@ -138,6 +146,7 @@ def _parse_smc_bytes(data_type: int, raw: bytes, size: int) -> float:
     Pure function — no ctypes I/O, no platform check.  ``raw`` is the
     leading ``size`` bytes from ``SMCKeyData_t.bytes``.
     """
+    log.debug("_parse_smc_bytes: data_type=%s raw=%s", data_type, raw)
     dt = _datatype_to_str(data_type).rstrip()
     body = bytes(raw[:size])
     if len(body) < 1:
@@ -174,6 +183,7 @@ def _parse_smc_bytes(data_type: int, raw: bytes, size: int) -> float:
 
 def _load_iokit() -> ctypes.CDLL | None:
     """Return a bound IOKit handle, or None on non-macOS / load failure."""
+    log.debug("_load_iokit")
     path = ctypes.util.find_library("IOKit")
     if not path:
         return None
@@ -237,6 +247,7 @@ def _bind_iokit(iokit: ctypes.CDLL) -> bool:
 
 def _mach_task_self() -> int:
     """Return the current process's mach task port (for IOServiceOpen)."""
+    log.debug("_mach_task_self")
     libc_path = ctypes.util.find_library("c") or "/usr/lib/libSystem.B.dylib"
     libc = ctypes.CDLL(libc_path)
     libc.mach_task_self.restype = ctypes.c_uint32
@@ -288,6 +299,7 @@ class SMCClient:
     """
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._iokit: ctypes.CDLL | None = None
         self._conn: int = 0
         self._key_cache: dict[int, _SMCKeyData_keyInfo_t] = {}
@@ -295,6 +307,7 @@ class SMCClient:
 
     @property
     def connected(self) -> bool:
+        log.debug("connected")
         return self._conn != 0
 
     def open(self) -> bool:
@@ -352,6 +365,7 @@ class SMCClient:
         return True
 
     def close(self) -> None:
+        log.debug("close")
         if self._conn and self._iokit is not None:
             self._iokit.IOServiceClose(self._conn)
         self._conn = 0
@@ -364,6 +378,7 @@ class SMCClient:
     def _smc_call(
         self, inp: _SMCKeyData_t, out: _SMCKeyData_t,
     ) -> int:
+        log.debug("_smc_call: inp=%s out=%s", inp, out)
         assert self._iokit is not None
         osize = ctypes.c_size_t(ctypes.sizeof(_SMCKeyData_t))
         return int(self._iokit.IOConnectCallStructMethod(
@@ -376,6 +391,7 @@ class SMCClient:
         self, key_uint: int, out_info: _SMCKeyData_keyInfo_t,
     ) -> int:
         """Populate *out_info* with dataType / dataSize for *key_uint*."""
+        log.debug("_get_key_info: key_uint=%s out_info=%s", key_uint, out_info)
         if key_uint in self._key_cache:
             cached = self._key_cache[key_uint]
             out_info.dataSize = cached.dataSize
@@ -406,6 +422,7 @@ class SMCClient:
 
     def read_key_float(self, key: str) -> float | None:
         """Read a 4-char SMC key and return its decoded float value."""
+        log.debug("read_key_float: key=%s", key)
         info, raw, size = self._read_key_raw(key)
         if info is None or raw is None:
             return None
@@ -413,6 +430,7 @@ class SMCClient:
 
     def read_key_uint32(self, key: str) -> int | None:
         """Read a uint8/16/32 SMC key (e.g. ``FNum`` fan count)."""
+        log.debug("read_key_uint32: key=%s", key)
         v = self.read_key_float(key)
         if v is None:
             return None
@@ -428,6 +446,7 @@ class SMCClient:
         to fpe2 decoding when the float is out of the plausible
         0-20000 RPM range.
         """
+        frame_log.debug("read_fan_rpm: key=%s", key)
         info, raw, _size = self._read_key_raw(key)
         if info is None or raw is None:
             return None
@@ -440,6 +459,7 @@ class SMCClient:
         ``(info, raw_bytes, size)`` so callers can decode according
         to the actual SMC ``dataType``.
         """
+        log.debug("_read_key_raw: key=%s", key)
         if not self._conn or self._iokit is None or len(key) < 4:
             return None, None, 0
         key_uint = _smc_key_to_uint32(key[:4])

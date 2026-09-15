@@ -37,9 +37,13 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
+from ...core.logs import per_frame
 from ...core.ports import CpuSource, GpuSource
 
 log = logging.getLogger(__name__)
+#: Per-tick readers — their records must never be CONSTRUCTED at
+#: default verbosity.  73 ns/call short-circuited, measured.
+frame_log = per_frame(__name__)
 
 
 # ── On-the-wire layout constants ─────────────────────────────────────
@@ -76,6 +80,7 @@ _SNAPSHOT_TTL_S = 0.1
 
 def _decode_cstr(blob: bytes) -> str:
     """Decode a fixed-length NUL-terminated C string (latin-1, lossless)."""
+    log.debug("_decode_cstr: blob=%s", blob)
     return blob.split(b"\x00", 1)[0].decode("latin-1", errors="replace").strip()
 
 
@@ -95,6 +100,7 @@ class _Header(NamedTuple):
 
 def _parse_header(buf: bytes) -> _Header:
     """Decode the 44-byte header.  Raises ValueError on bad magic / short buffer."""
+    log.debug("_parse_header: buf=%s", buf)
     if len(buf) < _HEADER_SIZE:
         raise ValueError(
             f"HWiNFO header too short: {len(buf)} < {_HEADER_SIZE}",
@@ -128,9 +134,11 @@ class _BytesMapping(_MappingPort):
     """Test seam — wraps a ``bytes`` buffer captured from a real MMF dump."""
 
     def __init__(self, data: bytes) -> None:
+        log.debug("__init__: data=%s", data)
         self._data = data
 
     def read(self, offset: int, length: int) -> bytes:
+        frame_log.debug("read: offset=%s length=%s", offset, length)
         return self._data[offset:offset + length]
 
     def close(self) -> None:
@@ -149,6 +157,7 @@ class _HWiNFOMapping(_MappingPort):
     _view: Any
 
     def __init__(self) -> None:
+        log.debug("__init__")
         if sys.platform != "win32":
             raise OSError("HWiNFO MMF only available on Windows")
         # ctypes calls live here, gated by sys.platform so static analyzers
@@ -175,6 +184,7 @@ class _HWiNFOMapping(_MappingPort):
             raise OSError(f"MapViewOfFile failed: WinError {err}")
 
     def read(self, offset: int, length: int) -> bytes:
+        frame_log.debug("read: offset=%s length=%s", offset, length)
         import ctypes
 
         buf = (ctypes.c_char * length)()
@@ -182,6 +192,7 @@ class _HWiNFOMapping(_MappingPort):
         return bytes(buf)
 
     def close(self) -> None:
+        log.debug("close")
         if getattr(self, "_view", None):
             self._kernel32.UnmapViewOfFile(self._view)
             self._view = None
@@ -223,6 +234,7 @@ class _Snapshot:
     """
 
     def __init__(self, mapping: _MappingPort) -> None:
+        log.debug("__init__: mapping=%s", mapping)
         self._mapping = mapping
         self._entries: list[_EntryRef] = []
         self._sensors: list[str] = []
@@ -232,6 +244,7 @@ class _Snapshot:
 
     def _index(self) -> None:
         """Walk the entries + sensors sections, cache every value offset."""
+        log.debug("_index")
         header_bytes = self._mapping.read(0, _HEADER_SIZE)
         header = _parse_header(header_bytes)
 
@@ -267,6 +280,7 @@ class _Snapshot:
         Throttled to ``_SNAPSHOT_TTL_S`` so multiple ``cpu.temp() +
         cpu.usage()`` calls in the same poll iteration share one read.
         """
+        log.debug("refresh")
         now = time.monotonic()
         if now - self._last_refresh < _SNAPSHOT_TTL_S and self._values:
             return
@@ -278,6 +292,7 @@ class _Snapshot:
     # ── Query helpers ───────────────────────────────────────────────
 
     def sensor_name(self, sensor_index: int) -> str:
+        log.debug("sensor_name: sensor_index=%s", sensor_index)
         if 0 <= sensor_index < len(self._sensors):
             return self._sensors[sensor_index]
         return ""
@@ -290,6 +305,7 @@ class _Snapshot:
         entry_name_contains: str | None = None,
     ) -> float | None:
         """First entry matching the filter, returns its live value."""
+        log.debug("find: entry_type=%s", entry_type)
         self.refresh()
         sn_needle = sensor_name_contains.lower() if sensor_name_contains else None
         en_needle = entry_name_contains.lower() if entry_name_contains else None
@@ -312,6 +328,7 @@ class _Snapshot:
         sensor_name_contains: str | None = None,
     ) -> float | None:
         """Max value across all entries of *entry_type* under a sensor row."""
+        log.debug("max_value: entry_type=%s", entry_type)
         self.refresh()
         sn_needle = sensor_name_contains.lower() if sensor_name_contains else None
         best: float | None = None
@@ -370,13 +387,16 @@ class HwinfoCpu(CpuSource):
         *,
         snapshot_factory: Callable[[], _Snapshot | None] = _shared,
     ) -> None:
+        log.debug("__init__")
         self._snapshot = snapshot_factory()
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return "HWiNFO64 (CPU)"
 
     def temp(self) -> float | None:
+        frame_log.debug("temp")
         if self._snapshot is None:
             return None
         # Prefer CPU Package; otherwise hottest core under a CPU sensor row.
@@ -386,18 +406,21 @@ class HwinfoCpu(CpuSource):
         return self._snapshot.max_value(TYPE_TEMP, sensor_name_contains="cpu")
 
     def usage(self) -> float | None:
+        frame_log.debug("usage")
         if self._snapshot is None:
             return None
         return self._snapshot.find(TYPE_USAGE, entry_name_contains="total cpu usage") \
             or self._snapshot.max_value(TYPE_USAGE, sensor_name_contains="cpu")
 
     def freq(self) -> float | None:
+        frame_log.debug("freq")
         if self._snapshot is None:
             return None
         # Highest core clock — HWiNFO publishes one entry per core.
         return self._snapshot.max_value(TYPE_CLOCK, sensor_name_contains="cpu")
 
     def power(self) -> float | None:
+        frame_log.debug("power")
         if self._snapshot is None:
             return None
         return self._snapshot.find(TYPE_POWER, entry_name_contains="cpu package") \
@@ -419,12 +442,14 @@ class HwinfoGpu(GpuSource):
         discrete: bool,
         snapshot_factory: Callable[[], _Snapshot | None] = _shared,
     ) -> None:
+        log.debug("__init__: sensor_row_name=%s", sensor_row_name)
         self._snapshot = snapshot_factory()
         self._row_name = sensor_row_name
         self._discrete = discrete
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         lowered = self._row_name.lower()
         if "nvidia" in lowered or "geforce" in lowered or "rtx" in lowered or "gtx" in lowered:
             return "nvidia:0"
@@ -436,13 +461,16 @@ class HwinfoGpu(GpuSource):
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._row_name
 
     @property
     def is_discrete(self) -> bool:
+        frame_log.debug("is_discrete")
         return self._discrete
 
     def _find(self, entry_type: int, *, entry_name_contains: str | None = None) -> float | None:
+        log.debug("_find: entry_type=%s", entry_type)
         if self._snapshot is None:
             return None
         return self._snapshot.find(
@@ -452,31 +480,38 @@ class HwinfoGpu(GpuSource):
         )
 
     def _max(self, entry_type: int) -> float | None:
+        log.debug("_max: entry_type=%s", entry_type)
         if self._snapshot is None:
             return None
         return self._snapshot.max_value(entry_type, sensor_name_contains=self._row_name)
 
     def temp(self) -> float | None:
+        frame_log.debug("temp")
         return self._find(TYPE_TEMP, entry_name_contains="gpu temperature") \
             or self._max(TYPE_TEMP)
 
     def usage(self) -> float | None:
+        frame_log.debug("usage")
         return self._find(TYPE_USAGE, entry_name_contains="gpu core load") \
             or self._max(TYPE_USAGE)
 
     def clock(self) -> float | None:
+        frame_log.debug("clock")
         return self._find(TYPE_CLOCK, entry_name_contains="gpu clock") \
             or self._max(TYPE_CLOCK)
 
     def power(self) -> float | None:
+        frame_log.debug("power")
         return self._find(TYPE_POWER, entry_name_contains="gpu power")
 
     def fan(self) -> float | None:
+        frame_log.debug("fan")
         return self._max(TYPE_FAN)
 
     def vram_used(self) -> float | None:
         # SmallData entries don't get a strong type signal in HWiNFO; the
         # entry name carries the semantics ("GPU Memory Allocated").
+        frame_log.debug("vram_used")
         if self._snapshot is None:
             return None
         return self._snapshot.find(
@@ -519,6 +554,7 @@ def discover_hwinfo_gpus(
 
 def _snapshot_from_bytes(data: bytes) -> _Snapshot:
     """Build a snapshot from a raw MMF byte buffer — used by tests."""
+    log.debug("_snapshot_from_bytes: data=%s", data)
     return _Snapshot(_BytesMapping(data))
 
 

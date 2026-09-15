@@ -67,6 +67,7 @@ _GPU_VENDOR_RANK = {"nvidia": 0, "amd": 1, "intel": 2}
 
 def _gpu_order(gpu: GpuSource) -> tuple[bool, int, str]:
     """Sort key: discrete first, then nvidia > amd > intel, then key."""
+    log.debug("_gpu_order: gpu=%s", gpu)
     vendor = gpu.key.split(":", 1)[0]
     return (not gpu.is_discrete, _GPU_VENDOR_RANK.get(vendor, 9), gpu.key)
 
@@ -75,12 +76,14 @@ def _gpu_order(gpu: GpuSource) -> tuple[bool, int, str]:
 
 
 def _store(readings: dict[str, float], key: str, value: float | None) -> None:
+    log.debug("_store: readings=%s key=%s", readings, key)
     if value is not None:
         readings[key] = float(value)
 
 
 def _cpu_keys() -> list[tuple[str, str, str]]:
     """(key, category, unit) triples for the 4 CPU readings."""
+    log.debug("_cpu_keys")
     return [
         ("cpu:temp", "temperature", "°C"),
         ("cpu:usage", "usage", "%"),
@@ -90,6 +93,7 @@ def _cpu_keys() -> list[tuple[str, str, str]]:
 
 
 def _memory_keys() -> list[tuple[str, str, str]]:
+    log.debug("_memory_keys")
     return [
         ("memory:used", "memory", "MB"),
         ("memory:available", "memory", "MB"),
@@ -101,6 +105,7 @@ def _memory_keys() -> list[tuple[str, str, str]]:
 
 
 def _gpu_reading_keys(prefix: str) -> list[tuple[str, str, str]]:
+    log.debug("_gpu_reading_keys: prefix=%s", prefix)
     return [
         (f"{prefix}:temp", "temperature", "°C"),
         (f"{prefix}:usage", "usage", "%"),
@@ -113,6 +118,7 @@ def _gpu_reading_keys(prefix: str) -> list[tuple[str, str, str]]:
 
 
 def _io_keys() -> list[tuple[str, str, str]]:
+    log.debug("_io_keys")
     return [
         ("disk:temp", "temperature", "°C"),
         ("disk:read", "disk_io", "MB/s"),
@@ -126,6 +132,7 @@ def _io_keys() -> list[tuple[str, str, str]]:
 
 
 def _time_keys() -> list[tuple[str, str, str]]:
+    log.debug("_time_keys")
     return [
         ("time:hour", "datetime", ""),
         ("time:minute", "datetime", ""),

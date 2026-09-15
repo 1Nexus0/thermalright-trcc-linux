@@ -18,9 +18,13 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from ...core.logs import per_frame
 from ...core.ports import GpuSource
 
 log = logging.getLogger(__name__)
+#: Per-tick readers — their records must never be CONSTRUCTED at
+#: default verbosity.  73 ns/call short-circuited, measured.
+frame_log = per_frame(__name__)
 
 # Name fragments that mark a dedicated card.  Anything unmatched is
 # treated as integrated (the safe default — an iGPU never claims a fan).
@@ -44,6 +48,7 @@ def _default_handle_factory() -> Any:
 
 
 def _is_discrete(name: str) -> bool:
+    log.debug("_is_discrete: name=%s", name)
     upper = name.upper()
     return any(marker in upper for marker in _DISCRETE_MARKERS)
 
@@ -52,20 +57,24 @@ class WmiVideoControllerGpu(GpuSource):
     """One ``Win32_VideoController`` adapter — name only, no telemetry."""
 
     def __init__(self, index: int, name: str) -> None:
+        log.debug("__init__: index=%s name=%s", index, name)
         self._index = index
         self._name = name
         self._discrete = _is_discrete(name)
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return f"wmi:{self._index}"
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._name
 
     @property
     def is_discrete(self) -> bool:
+        frame_log.debug("is_discrete")
         return self._discrete
 
     # Win32_VideoController carries no live sensor data — every reading is

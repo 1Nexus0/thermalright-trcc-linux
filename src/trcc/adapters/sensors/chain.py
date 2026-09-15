@@ -33,6 +33,7 @@ class CpuSourceChain(CpuSource):
     """
 
     def __init__(self, sources: Sequence[CpuSource]) -> None:
+        log.debug("__init__: sources=%s", sources)
         if not sources:
             raise ValueError("CpuSourceChain requires at least one source")
         self._sources: list[CpuSource] = list(sources)
@@ -44,6 +45,7 @@ class CpuSourceChain(CpuSource):
         Falls back to the highest-priority source's name when nothing
         has read yet (e.g. at cold boot before the first poll).
         """
+        frame_log.debug("name")
         for source in self._sources:
             if source.temp() is not None or source.usage() is not None:
                 return source.name
@@ -103,20 +105,24 @@ class GpuSourceChain(GpuSource):
     """
 
     def __init__(self, sources: Sequence[GpuSource]) -> None:
+        log.debug("__init__: sources=%s", sources)
         if not sources:
             raise ValueError("GpuSourceChain requires at least one source")
         self._sources: list[GpuSource] = list(sources)
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return self._sources[0].key
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._sources[0].name
 
     @property
     def is_discrete(self) -> bool:
+        frame_log.debug("is_discrete")
         return self._sources[0].is_discrete
 
     def provides(self, quantity: str) -> bool:
@@ -178,6 +184,7 @@ class MemorySourceChain(MemorySource):
     """Priority-ordered ``MemorySource`` chain."""
 
     def __init__(self, sources: Sequence[MemorySource]) -> None:
+        log.debug("__init__: sources=%s", sources)
         if not sources:
             raise ValueError("MemorySourceChain requires at least one source")
         self._sources: list[MemorySource] = list(sources)

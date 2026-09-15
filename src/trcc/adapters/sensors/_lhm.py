@@ -28,9 +28,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ...core.logs import per_frame
 from ...core.ports import CpuSource, DiskSource, GpuSource
 
 log = logging.getLogger(__name__)
+#: Per-tick readers — their records must never be CONSTRUCTED at
+#: default verbosity.  73 ns/call short-circuited, measured.
+frame_log = per_frame(__name__)
 
 
 _LHM_NAMESPACE = "root\\LibreHardwareMonitor"
@@ -86,6 +90,7 @@ def _lhm_exe_path() -> Path | None:
     current working directory (dev mode).  Returns ``None`` when no
     bundled exe is present — graceful degradation rather than crash.
     """
+    log.debug("_lhm_exe_path")
     candidates = [
         Path(sys.executable).parent / "lhm" / _LHM_PROCESS_NAME,
         Path.cwd() / "lhm" / _LHM_PROCESS_NAME,
@@ -148,6 +153,7 @@ def _wait_for_wmi_namespace(
     couple of seconds to wire up its WMI publisher.  DI seams on every
     blocking call keep the polling loop testable.
     """
+    log.debug("_wait_for_wmi_namespace")
     deadline = clock() + timeout_s
     while clock() < deadline:
         handle = probe()
@@ -187,6 +193,7 @@ class LhmSubprocess:
         spawn: Callable[[], subprocess.Popen[bytes] | None] = _spawn_lhm,
         wait: Callable[[], Any] = _wait_for_wmi_namespace,
     ) -> None:
+        log.debug("__init__")
         self._probe = probe
         self._spawn = spawn
         self._wait = wait
@@ -198,6 +205,7 @@ class LhmSubprocess:
 
     @property
     def namespace(self) -> Any:
+        log.debug("namespace")
         return self._namespace_handle
 
     def start(self) -> Any:
@@ -330,12 +338,14 @@ def _sensors_for(ns: Any, hw_row: Any, sensor_type: str) -> list[Any]:
 
 def _max_value(sensors: list[Any]) -> float | None:
     """Return the maximum ``Value`` field across a list of LHM sensors."""
+    log.debug("_max_value: sensors=%s", sensors)
     values = [float(s.Value) for s in sensors if s.Value is not None]
     return max(values) if values else None
 
 
 def _named_value(sensors: list[Any], name_contains: str) -> float | None:
     """First sensor whose Name contains *name_contains* (case-insensitive)."""
+    log.debug("_named_value: sensors=%s name_contains=%s", sensors, name_contains)
     needle = name_contains.lower()
     for s in sensors:
         if s.Value is None:
@@ -367,6 +377,7 @@ class LhmCpu(CpuSource):
         # thread's apartment (the poll thread), not the construction
         # thread's.  Cache only the apartment-agnostic CPU identifier +
         # display name — strings travel across threads safely.
+        log.debug("__init__")
         self._handle_factory = handle_factory
         self._name: str = "LibreHardwareMonitor (CPU)"
         self._cpu_id: str | None = None
@@ -392,10 +403,12 @@ class LhmCpu(CpuSource):
     def name(self) -> str:
         # Resolve the hardware name lazily on the asking thread — it's a
         # string, safe to cache cross-thread once found.
+        frame_log.debug("name")
         self._ensure_cpu_row(self._handle_factory())
         return self._name
 
     def _cpu_row(self, ns: Any) -> Any | None:
+        log.debug("_cpu_row: ns=%s", ns)
         self._ensure_cpu_row(ns)
         if ns is None or self._cpu_id is None:
             return None
@@ -407,6 +420,7 @@ class LhmCpu(CpuSource):
 
     def temp(self) -> float | None:
         """Hottest CPU core temperature in °C."""
+        frame_log.debug("temp")
         ns = self._handle_factory()
         if (row := self._cpu_row(ns)) is None:
             return None
@@ -414,6 +428,7 @@ class LhmCpu(CpuSource):
 
     def usage(self) -> float | None:
         """CPU total load 0-100 — LHM names this 'CPU Total'."""
+        frame_log.debug("usage")
         ns = self._handle_factory()
         if (row := self._cpu_row(ns)) is None:
             return None
@@ -423,6 +438,7 @@ class LhmCpu(CpuSource):
 
     def freq(self) -> float | None:
         """Highest CPU clock in MHz."""
+        frame_log.debug("freq")
         ns = self._handle_factory()
         if (row := self._cpu_row(ns)) is None:
             return None
@@ -430,6 +446,7 @@ class LhmCpu(CpuSource):
 
     def power(self) -> float | None:
         """Package power draw in W — LHM names this 'CPU Package'."""
+        frame_log.debug("power")
         ns = self._handle_factory()
         if (row := self._cpu_row(ns)) is None:
             return None
@@ -460,6 +477,7 @@ class LhmGpu(GpuSource):
     ) -> None:
         # Defer the handle to first read (born on the reading thread's
         # apartment).  Identity is the apartment-agnostic LHM identifier.
+        log.debug("__init__: hardware_identifier=%s display_name=%s", hardware_identifier, display_name)
         self._handle_factory = handle_factory
         self._id = hardware_identifier
         self._display_name = display_name
@@ -469,6 +487,7 @@ class LhmGpu(GpuSource):
     def key(self) -> str:
         # LHM identifiers look like "/gpu-nvidia/0" — normalize to a
         # vendor key matching the rest of next/ ("nvidia:0").
+        frame_log.debug("key")
         ident = self._id.lower().lstrip("/")
         if ident.startswith("gpu-nvidia"):
             return f"nvidia:{ident.rsplit('/', 1)[-1]}"
@@ -480,13 +499,16 @@ class LhmGpu(GpuSource):
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._display_name
 
     @property
     def is_discrete(self) -> bool:
+        frame_log.debug("is_discrete")
         return self._discrete
 
     def _row(self, ns: Any) -> Any | None:
+        log.debug("_row: ns=%s", ns)
         if ns is None:
             return None
         try:
@@ -496,6 +518,7 @@ class LhmGpu(GpuSource):
         return rows[0] if rows else None
 
     def temp(self) -> float | None:
+        frame_log.debug("temp")
         ns = self._handle_factory()
         if (row := self._row(ns)) is None:
             return None
@@ -504,6 +527,7 @@ class LhmGpu(GpuSource):
         return _named_value(temps, "core") or _max_value(temps)
 
     def usage(self) -> float | None:
+        frame_log.debug("usage")
         ns = self._handle_factory()
         if (row := self._row(ns)) is None:
             return None
@@ -511,6 +535,7 @@ class LhmGpu(GpuSource):
         return _named_value(loads, "core") or _max_value(loads)
 
     def clock(self) -> float | None:
+        frame_log.debug("clock")
         ns = self._handle_factory()
         if (row := self._row(ns)) is None:
             return None
@@ -518,18 +543,21 @@ class LhmGpu(GpuSource):
         return _named_value(clocks, "core") or _max_value(clocks)
 
     def power(self) -> float | None:
+        frame_log.debug("power")
         ns = self._handle_factory()
         if (row := self._row(ns)) is None:
             return None
         return _max_value(_sensors_for(ns, row, _TYPE_POWER))
 
     def fan(self) -> float | None:
+        frame_log.debug("fan")
         ns = self._handle_factory()
         if (row := self._row(ns)) is None:
             return None
         return _max_value(_sensors_for(ns, row, _TYPE_FAN))
 
     def vram_used(self) -> float | None:
+        frame_log.debug("vram_used")
         ns = self._handle_factory()
         if (row := self._row(ns)) is None:
             return None
@@ -538,6 +566,7 @@ class LhmGpu(GpuSource):
         )
 
     def vram_total(self) -> float | None:
+        frame_log.debug("vram_total")
         ns = self._handle_factory()
         if (row := self._row(ns)) is None:
             return None
@@ -608,6 +637,7 @@ class LhmDisk(DiskSource):
     ) -> None:
         # Defer the handle to first read (born on the reading thread's
         # apartment, #131); identity is the apartment-agnostic LHM identifier.
+        log.debug("__init__: hardware_identifier=%s display_name=%s", hardware_identifier, display_name)
         self._handle_factory = handle_factory
         self._id = hardware_identifier
         self._display_name = display_name
@@ -616,14 +646,17 @@ class LhmDisk(DiskSource):
     def key(self) -> str:
         # LHM storage identifiers look like "/nvme/0" or "/hdd/0" — flatten to
         # a stable per-drive key ("lhm:nvme:0").
+        frame_log.debug("key")
         ident = self._id.lower().lstrip("/").replace("/", ":")
         return f"lhm:{ident}"
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._display_name
 
     def _row(self, ns: Any) -> Any | None:
+        log.debug("_row: ns=%s", ns)
         if ns is None:
             return None
         try:
@@ -633,6 +666,7 @@ class LhmDisk(DiskSource):
         return rows[0] if rows else None
 
     def temp(self) -> float | None:
+        frame_log.debug("temp")
         ns = self._handle_factory()
         if (row := self._row(ns)) is None:
             return None

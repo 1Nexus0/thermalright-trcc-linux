@@ -42,9 +42,13 @@ import subprocess
 import time
 from collections.abc import Callable
 
+from ...core.logs import per_frame
 from ...core.ports import CpuSource, FanSource
 
 log = logging.getLogger(__name__)
+#: Per-tick readers — their records must never be CONSTRUCTED at
+#: default verbosity.  73 ns/call short-circuited, measured.
+frame_log = per_frame(__name__)
 
 
 # Per-OS CPU temperature regex.  The regex captures core index in
@@ -87,11 +91,13 @@ def _default_runner() -> str:
 
 
 def _pattern_for(system: str) -> re.Pattern[str] | None:
+    log.debug("_pattern_for: system=%s", system)
     return _BY_SYSTEM.get(system)
 
 
 def _hottest(output: str, pattern: re.Pattern[str]) -> float | None:
     """Parse all matches and return the max numeric value, or None."""
+    log.debug("_hottest: output=%s pattern=%s", output, pattern)
     best: float | None = None
     for match in pattern.finditer(output):
         try:
@@ -125,6 +131,7 @@ class SysctlCpu(CpuSource):
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return f"sysctl ({self._system})"
 
     def temp(self) -> float | None:
@@ -182,6 +189,7 @@ class _SysctlSnapshot:
     ) -> None:
         # Resolve runner at call time so tests can monkeypatch
         # ``_default_runner`` without rewiring construction sites.
+        log.debug("__init__")
         self._run = runner if runner is not None else _default_runner
         self._ttl = ttl_s
         self._clock = clock
@@ -189,6 +197,7 @@ class _SysctlSnapshot:
         self._cached_at: float = -1.0
 
     def output(self) -> str:
+        log.debug("output")
         now = self._clock()
         if self._cached_at >= 0 and (now - self._cached_at) < self._ttl:
             return self._cached
@@ -209,6 +218,7 @@ class SysctlFan(FanSource):
         idx: int,
         label: str | None = None,
     ) -> None:
+        log.debug("__init__: snapshot=%s driver=%s", snapshot, driver)
         self._snapshot = snapshot
         self._driver = driver
         self._idx = idx
@@ -217,13 +227,16 @@ class SysctlFan(FanSource):
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return self._key
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._label
 
     def rpm(self) -> int | None:
+        frame_log.debug("rpm")
         output = self._snapshot.output()
         for match in _OPENBSD_FAN_RE.finditer(output):
             if match.group(1) == self._driver and int(match.group(2)) == self._idx:
