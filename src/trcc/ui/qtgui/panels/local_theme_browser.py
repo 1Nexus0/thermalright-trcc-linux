@@ -164,16 +164,6 @@ class LocalThemeBrowser(AssetBrowserPanel):
         name = str(item.data(Qt.ItemDataRole.UserRole + 1))
         return path, name
 
-    def _device_key(self) -> str | None:
-        key = self._picker.current_key()
-        if not key:
-            self._status.setText(
-                "Pick a device first.  Open the Devices panel to scan "
-                "if no devices are listed.",
-            )
-            return None
-        return key
-
     def _on_apply(self) -> None:
         log.info("_on_apply")
         selected = self._selected()

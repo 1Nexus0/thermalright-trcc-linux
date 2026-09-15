@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QLabel, QListWidget
 
 from ....core.commands import DeviceState
 from ..base import BasePanel
+from ..device_picker import DevicePickerWidget
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
@@ -49,6 +50,25 @@ class AssetBrowserPanel(BasePanel):
     _abstract: ClassVar[bool] = True
 
     _status: QLabel
+    _picker: DevicePickerWidget
+
+    def _device_key(self) -> str | None:
+        """The picked device, or ``None`` having told the user what to do.
+
+        Lived verbatim in two browsers, INCLUDING the sentence the user reads.
+        A duplicated user-facing string is the worst kind: improving the
+        wording in one place leaves the other saying something else, and
+        nothing fails.
+        """
+        key = self._picker.current_key()
+        if not key:
+            log.debug("_device_key: no device picked")
+            self._status.setText(
+                "Pick a device first.  Open the Devices panel to scan "
+                "if no devices are listed.",
+            )
+            return None
+        return key
 
     def __init__(
         self,

@@ -266,10 +266,6 @@ class ZoneTab(LedTabBase):
             box.setChecked(mask[i] if i < len(mask) else True)
             box.blockSignals(False)
 
-    def has_visible_content(self) -> bool:
-        """LedPanel uses this to decide whether to surface the tab."""
-        return not self._placeholder_visible
-
     # ── Internals ─────────────────────────────────────────────────────
 
     def _show_placeholder(self, show: bool) -> None:

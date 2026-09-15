@@ -52,6 +52,20 @@ class LedTabBase(QWidget):
 
     # ── For subclasses ───────────────────────────────────────────────
 
+    #: Set by the tabs that can be EMPTY for a given device (zone, segment).
+    #: ``LedPanel`` asks only those two whether to surface their tab, so this
+    #: is a contract shared by that pair rather than a default for every tab —
+    #: a base default would answer for tabs that never manage a placeholder.
+    _placeholder_visible: bool = False
+
+    def has_visible_content(self) -> bool:
+        """Whether ``LedPanel`` should surface this tab for the current device.
+
+        Hiding beats showing an empty editor: a device with one zone has
+        nothing for the zone tab to edit, and an empty grid reads as broken.
+        """
+        return not self._placeholder_visible
+
     def current_key(self) -> str:
         return self._key_provider()
 

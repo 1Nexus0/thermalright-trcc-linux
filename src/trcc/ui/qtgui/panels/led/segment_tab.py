@@ -80,9 +80,6 @@ class SegmentTab(LedTabBase):
         self._show_placeholder(False)
         self._rebuild_checks(snapshot.segment_on)
 
-    def has_visible_content(self) -> bool:
-        return not self._placeholder_visible
-
     # ── Internals ─────────────────────────────────────────────────────
 
     def _show_placeholder(self, show: bool) -> None:
