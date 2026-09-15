@@ -246,6 +246,58 @@ class PipeWireScreenCast:
             target=self._glib_loop.run, daemon=True)
         self._glib_thread.start()
 
+    def _await_response(self, bus, request_path, handler) -> None:
+        """Subscribe to one Request's single ``Response``, then unsubscribe.
+
+        A ``org.freedesktop.portal.Request`` emits ``Response`` EXACTLY once
+        and is then destroyed, so the receiver that waited for it is spent.
+        Nothing removed ours, and dbus-python keeps a match rule per receiver
+        for the life of the connection.
+
+        MEASURED -- receivers alive on the session bus after each capture
+        session, with removal disabled and then enabled::
+
+            session   1   2   3
+            leaking   3   6   9      <- three Requests, none released
+            fixed     0   0   0
+
+        Three per session, forever, on a bus where every rule is evaluated
+        against every signal.  A screencast theme restarts its session on each
+        apply, so this grows with use rather than with time.
+
+        The ``fired`` check is not belt-and-braces: the Response is dispatched
+        on the GLib loop THREAD while this one is still returning from
+        ``add_signal_receiver``, so it can land before ``holder`` is filled.
+        Removing afterwards in that case is why the match is dropped in two
+        places rather than one.
+
+        Do NOT add ``bus_name=`` to scope the match: measured, it stops the
+        Response being delivered at all and ``start()`` times out after 25 s.
+        """
+        log.debug("_await_response: subscribing to %s", request_path)
+        holder: list = []
+        fired = threading.Event()
+
+        def dispatch(response, results):
+            if fired.is_set():
+                log.debug("_await_response: duplicate Response on %s ignored",
+                          request_path)
+                return
+            fired.set()
+            if holder:
+                holder[0].remove()
+            handler(response, results)
+
+        match = bus.add_signal_receiver(
+            dispatch,
+            signal_name='Response',
+            dbus_interface=_REQUEST_IFACE,
+            path=request_path,
+        )
+        holder.append(match)
+        if fired.is_set():
+            match.remove()
+
     def _create_session(self):
         """Step 1: CreateSession on the ScreenCast portal."""
         bus = dbus.SessionBus()
@@ -264,13 +316,7 @@ class PipeWireScreenCast:
             }, signature='sv')
         )
 
-        # Listen for the Response signal
-        bus.add_signal_receiver(
-            self._on_create_session_response,
-            signal_name='Response',
-            dbus_interface=_REQUEST_IFACE,
-            path=request_path,
-        )
+        self._await_response(bus, request_path, self._on_create_session_response)
 
     def _on_create_session_response(self, response, results):
         """Handle CreateSession response."""
@@ -303,12 +349,7 @@ class PipeWireScreenCast:
             dbus.Dictionary(self._select_options(token), signature='sv')
         )
 
-        bus.add_signal_receiver(
-            self._on_select_sources_response,
-            signal_name='Response',
-            dbus_interface=_REQUEST_IFACE,
-            path=request_path,
-        )
+        self._await_response(bus, request_path, self._on_select_sources_response)
 
     def _select_options(self, token: str) -> dict:
         """Options for ``SelectSources``, replaying a stored token if we have one.
@@ -379,12 +420,7 @@ class PipeWireScreenCast:
             }, signature='sv')
         )
 
-        bus.add_signal_receiver(
-            self._on_start_response,
-            signal_name='Response',
-            dbus_interface=_REQUEST_IFACE,
-            path=request_path,
-        )
+        self._await_response(bus, request_path, self._on_start_response)
 
     def _on_start_response(self, response, results):
         """Handle Start response — get PipeWire node ID and start pipeline."""
