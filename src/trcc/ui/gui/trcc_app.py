@@ -128,7 +128,6 @@ class ScreencastHandler:
         self._active = False
         self._x = self._y = self._w = self._h = 0
         self._border = True
-        self._pipewire_cast = None
         self._lcd_w = 0
         self._lcd_h = 0
         self._capture_warn_logged = False
@@ -202,7 +201,7 @@ class ScreencastHandler:
 
     def cleanup(self) -> None:
         self._timer.stop()
-        self._stop_pipewire()
+        self._stop_capture()
 
     def _on_bus_screencast_started(self, event: Any) -> None:
         """Bus subscriber — start the Qt capture timer for ``event.key``.
@@ -220,9 +219,6 @@ class ScreencastHandler:
         self._audio_enabled = event.audio
         self._active = True
 
-        from ..screen_overlay import is_wayland
-        if is_wayland() and self._pipewire_cast is None:
-            self._try_start_pipewire()
         self._timer.start(150)
 
     def _on_bus_screencast_stopped(self, event: Any) -> None:
@@ -235,59 +231,48 @@ class ScreencastHandler:
                  event.key)
         self._active = False
         self._timer.stop()
-        self._stop_pipewire()
+        self._stop_capture()
 
-    def _try_start_pipewire(self) -> None:
-        from .pipewire_capture import PIPEWIRE_AVAILABLE, PipeWireScreenCast
-        if not PIPEWIRE_AVAILABLE:
-            return
-        import threading
-        cast = PipeWireScreenCast()
-        self._pipewire_cast = cast
-        def _start() -> None:
-            if not cast.start(timeout=30):
-                self._pipewire_cast = None
-        threading.Thread(target=_start, daemon=True).start()
+    def _stop_capture(self) -> None:
+        """Release the capture backend's session, if it holds one.
 
-    def _stop_pipewire(self) -> None:
-        if self._pipewire_cast is not None:
-            self._pipewire_cast.stop()
-            self._pipewire_cast = None
+        The portal backend keeps a consented session open; dropping it on
+        screencast-stop means the next start asks again rather than streaming
+        a screen nobody is showing.  ``QtScreenCapture`` holds nothing, so
+        this is a no-op for it -- hence ``getattr`` rather than a type test.
+        """
+        stop = getattr(self._capture, "stop", None)
+        if callable(stop):
+            log.info("ScreencastHandler._stop_capture: releasing the session")
+            stop()
 
     def _tick(self) -> None:
         if not self._active or self._w <= 0 or self._h <= 0 or not self._lcd_w or not self._lcd_h:
             return
-        from PySide6.QtCore import QRect
         from PySide6.QtGui import QImage
         from PySide6.QtGui import Qt as QtGui_Qt
-        frame_img: QImage | None = None
 
-        if self._pipewire_cast is not None and self._pipewire_cast.is_running:
-            frame = self._pipewire_cast.grab_frame()
-            if frame is not None:
-                fw, fh, rgb_bytes = frame
-                full = QImage(rgb_bytes, fw, fh, fw * 3, QImage.Format.Format_RGB888)
-                x1, y1 = min(self._x, fw), min(self._y, fh)
-                x2, y2 = min(self._x + self._w, fw), min(self._y + self._h, fh)
-                if x2 > x1 and y2 > y1:
-                    frame_img = full.copy(QRect(x1, y1, x2 - x1, y2 - y1))
-
-        if frame_img is None:
-            # The port raises OSError when every backend failed; it has already
-            # logged which ones it tried and why each declined.
-            try:
-                raw = self._capture.grab_region(
-                    self._x, self._y, self._w, self._h)
-            except OSError as e:
-                if not self._capture_warn_logged:
-                    log.warning("Screencast: capture failed — %s", e)
-                    self._capture_warn_logged = True
-                return
-            self._capture_warn_logged = False
-            # RawFrame is RGB24 with no row padding (the port strips Qt's),
-            # so width*3 is the true stride.
-            frame_img = QImage(raw.data, raw.width, raw.height,
-                               raw.width * 3, QImage.Format.Format_RGB888)
+        # ONE call.  ``build_screen_capture`` hands back the portal backend
+        # wrapped around the Qt chain, so "PipeWire when the session is up,
+        # Qt until then" lives in the adapter -- where the CLI, the REST route
+        # and qtgui get it too.  This branch used to be here, inline, and that
+        # is why only the window had Wayland capture.
+        #
+        # The port raises OSError when every backend failed; it has already
+        # logged which ones it tried and why each declined.
+        try:
+            raw = self._capture.grab_region(
+                self._x, self._y, self._w, self._h)
+        except OSError as e:
+            if not self._capture_warn_logged:
+                log.warning("Screencast: capture failed — %s", e)
+                self._capture_warn_logged = True
+            return
+        self._capture_warn_logged = False
+        # RawFrame is RGB24 with no row padding — the Qt path strips Qt's and
+        # the portal path strips GStreamer's — so width*3 is the true stride.
+        frame_img = QImage(raw.data, raw.width, raw.height,
+                           raw.width * 3, QImage.Format.Format_RGB888)
 
         frame_img = frame_img.scaled(
             self._lcd_w, self._lcd_h,

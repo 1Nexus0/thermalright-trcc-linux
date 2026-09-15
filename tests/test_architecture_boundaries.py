@@ -1483,6 +1483,14 @@ KNOWN_UI_ADAPTER_IMPORTS: frozenset[tuple[str, str]] = frozenset({
     # ``BaseOS._build_screen_capture``, so a PipeWire backend lands for every
     # face at once.  Reaching ``app.platform.screen_capture()`` was the
     # alternative and it is an AttributeError under TRCC_DAEMON=1.
+    #
+    # 2026-09-15: that PipeWire backend landed, and this row stayed ONE row.
+    # The gui briefly imported ``adapters.screencast.pipewire`` directly to
+    # drive the portal session itself -- this gate refused it, correctly, and
+    # the fix was to stop driving it: the window now takes whatever
+    # ``build_screen_capture`` composed, like every other face.  The
+    # no-slack check then made the point again by rejecting the second entry
+    # as unnecessary.
     ("trcc/ui/gui/trcc_app.py", "trcc.adapters.screencast"),
 })
 

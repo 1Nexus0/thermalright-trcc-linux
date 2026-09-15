@@ -17,7 +17,7 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | [`HttpFetcher`](#httpfetcher) | 1 | 0 | 1 |
 | [`MissPolicy`](#misspolicy) | 1 | 0 | 2 |
 | [`Query`](#query) | 1 | 0 | 38 |
-| [`ScreenCapture`](#screencapture) | 1 | 0 | 1 |
+| [`ScreenCapture`](#screencapture) | 1 | 0 | 2 |
 | [`UserInterface`](#userinterface) | 1 | 7 | 5 |
 | [`_HidBinding`](#_hidbinding) | 1 | 0 | 2 |
 | [`_QtUI`](#_qtui) | 1 | 1 | 2 |
@@ -167,7 +167,7 @@ Port for "grab a rectangle off the desktop right now".
 grab_region(x: 'int', y: 'int', width: 'int', height: 'int') -> RawFrame
 ```
 
-**Implementations (1):** `QtScreenCapture`
+**Implementations (2):** `PipeWireScreenCapture` · `QtScreenCapture`
 
 ## UserInterface
 

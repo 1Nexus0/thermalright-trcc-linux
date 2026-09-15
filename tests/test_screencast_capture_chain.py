@@ -197,12 +197,21 @@ def test_invalid_region_is_refused(cap: QtScreenCapture) -> None:
 def test_one_place_chooses_the_backend() -> None:
     """``build_screen_capture`` is what both the OS and ``ui/gui`` call.
 
-    Two callers, one decision — so a PipeWire backend lands for every face at
-    once instead of for whichever one remembered to look for it.
+    Two callers, one decision — so the PipeWire backend lands for every face
+    at once instead of for whichever one remembered to look for it.  That is
+    no longer hypothetical: it landed on 2026-09-15, and until then it existed
+    only inside ``ui/gui``, which is why the CLI, the REST route and qtgui had
+    no Wayland capture at all.
+
+    The Qt chain is still in there — it is what answers on X11 and what the
+    portal falls back to until a user approves the consent dialog.
     """
+    from trcc.adapters.screencast.pipewire import PipeWireScreenCapture
+
     made = build_screen_capture()
     assert isinstance(made, ScreenCapture)
-    assert isinstance(made, QtScreenCapture)
+    assert isinstance(made, PipeWireScreenCapture)
+    assert isinstance(made._fallback, QtScreenCapture)
 
 
 def test_the_os_delegates_to_that_chooser(monkeypatch: pytest.MonkeyPatch) -> None:
