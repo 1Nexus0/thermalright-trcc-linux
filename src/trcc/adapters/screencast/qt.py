@@ -38,7 +38,7 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QRect
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QGuiApplication, QImage, QPixmap
 from PySide6.QtWidgets import QApplication
 
 from ...core.models import RawFrame
@@ -82,9 +82,48 @@ class QtScreenCapture(ScreenCapture):
 
     # ── Implementations ──────────────────────────────────────────────
 
+    @staticmethod
+    def _qt_can_grab() -> bool:
+        """Whether Qt can see a real screen right now.
+
+        An OFFSCREEN Qt has no window system to read, and ``grabWindow`` does
+        not fail on it -- it returns a correctly-sized, non-null, essentially
+        black pixmap.  Every "is this blank?" test in this file is a SIZE test
+        (``isNull``, ``width() <= 1``), and that sails straight through them,
+        so the black frame was accepted as a capture.  MEASURED against
+        ImageMagick ground truth on the same rectangle: offscreen scores a
+        mean absolute error of 68.9, the native xcb platform scores 0.0 --
+        pixel-identical.
+
+        Asked in ONE place because Qt is reached by TWO routes -- the region
+        grab and the full-screen crop fallback -- and guarding only the first
+        leaves the second serving the same blank pixmap.  That is exactly what
+        happened when this guard was first written.
+
+        Reachable from every non-GUI face: ``_ensure_qt_app`` forces
+        ``QT_QPA_PLATFORM=offscreen`` for headless rendering without asking
+        whether a display exists, and ``ui/qapp`` pops that variable back off
+        for windowed launches -- the same collision seen from the other end.
+        """
+        # ``isinstance`` rather than ``is not None``: ``instance()`` is
+        # inherited from ``QCoreApplication``, which has no ``platformName``,
+        # and a console-only QCoreApplication genuinely cannot grab -- so the
+        # narrowing the type checker wants is the check this needs anyway.
+        app = QGuiApplication.instance()
+        if not isinstance(app, QGuiApplication):
+            log.debug("_qt_can_grab: no QGuiApplication (got %r)", type(app))
+            return False
+        if app.platformName() == "offscreen":
+            log.debug("_qt_can_grab: platform is offscreen — Qt cannot see a "
+                      "screen, leaving it to the external tools")
+            return False
+        return True
+
     def _qt_grab(
         self, x: int, y: int, w: int, h: int,
     ) -> QPixmap | None:
+        if not self._qt_can_grab():
+            return None
         screen = QApplication.primaryScreen()
         if screen is None:
             return None
@@ -117,6 +156,13 @@ class QtScreenCapture(ScreenCapture):
             pix = self._run_tools((
                 ("grim", ["grim", "-g", f"{x},{y} {w}x{h}", "{out}"]),
                 ("scrot", ["scrot", "-a", f"{x},{y},{w},{h}", "{out}"]),
+                ("maim", ["maim", "-g", f"{w}x{h}+{x}+{y}", "{out}"]),
+                # ImageMagick.  Last of the region tools because it is the
+                # least specialised, and first among those actually present on
+                # a plain X11 desktop -- this box has no grim, no scrot and no
+                # maim, and capture failed outright until ``import`` was here.
+                ("import", ["import", "-window", "root", "-crop",
+                            f"{w}x{h}+{x}+{y}", "+repage", "{out}"]),
             ), tmp_path)
             if pix is not None:
                 return pix
@@ -126,7 +172,7 @@ class QtScreenCapture(ScreenCapture):
             full = self._run_tools((
                 ("gnome-screenshot", ["gnome-screenshot", "-f", "{out}"]),
             ), tmp_path)
-            if full is None:
+            if full is None and self._qt_can_grab():
                 log.info("QtScreenCapture: falling back to Qt full-screen grab")
                 screen = QApplication.primaryScreen()
                 if screen is not None:

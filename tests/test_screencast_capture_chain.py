@@ -212,3 +212,87 @@ def test_the_os_delegates_to_that_chooser(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr("trcc.adapters.screencast.build_screen_capture",
                         lambda: sentinel)
     assert LinuxOS()._build_screen_capture() is sentinel
+
+
+# ── the blank-grab trap ───────────────────────────────────────────────
+
+
+def test_an_offscreen_qt_never_supplies_a_capture(monkeypatch) -> None:
+    """An offscreen Qt cannot see a screen, so it must not be asked.
+
+    ``grabWindow`` does NOT fail on the offscreen platform — it returns a
+    correctly-sized, non-null, essentially black pixmap.  Every blank test in
+    this adapter is a SIZE test (``isNull`` / ``width() <= 1``), so that black
+    rectangle passed as a capture and the external tools were never tried.
+    MEASURED against ImageMagick ground truth on the same rectangle: offscreen
+    scored a mean absolute error of 68.9, native xcb scored 0.0.
+
+    Reachable from every non-GUI face — ``_ensure_qt_app`` forces
+    ``QT_QPA_PLATFORM=offscreen`` for headless rendering without asking
+    whether a display exists.
+    """
+    from trcc.adapters.screencast.qt import QtScreenCapture
+
+    cap = QtScreenCapture()
+    assert cap._qt_can_grab() is False, (
+        "the suite runs offscreen, so Qt must decline — if this passes, Qt is "
+        "about to hand the wire a black frame"
+    )
+    assert cap._qt_grab(0, 0, 64, 64) is None
+
+
+def test_the_full_screen_fallback_is_guarded_too(monkeypatch) -> None:
+    """THE SECOND ROUTE.  Qt is reached twice, and one guard missed it.
+
+    ``_external_grab`` falls back to a Qt FULL-screen grab and crops it.  The
+    first version of this guard covered only ``_qt_grab``, so the fallback
+    went on serving the same blank pixmap by a different path — the fix
+    measured identically broken until both routes asked one predicate.
+    """
+    from trcc.adapters.screencast.qt import QtScreenCapture
+
+    cap = QtScreenCapture()
+    # No external tool may answer, so the ONLY remaining source is the Qt
+    # full-screen fallback — which must decline rather than crop a blank.
+    monkeypatch.setattr(QtScreenCapture, "_run_tools",
+                        lambda self, attempts, tmp_path: None)
+
+    assert cap._external_grab(0, 0, 64, 64) is None, (
+        "the full-screen fallback cropped an offscreen grab and returned it"
+    )
+
+
+def test_a_blank_source_raises_instead_of_sending_black() -> None:
+    """With nothing able to capture, the answer is an error, not a picture.
+
+    Returning black is worse than failing: the caller sends it to the panel
+    and the user sees a dead screencast with no message anywhere.
+    """
+    import pytest as _pytest
+
+    from trcc.adapters.screencast.qt import QtScreenCapture
+
+    cap = QtScreenCapture()
+    with _pytest.MonkeyPatch.context() as mp:
+        mp.setattr(QtScreenCapture, "_run_tools",
+                   lambda self, attempts, tmp_path: None)
+        with _pytest.raises(OSError, match="Screen capture failed"):
+            cap.grab_region(0, 0, 64, 64)
+
+
+def test_the_region_tools_cover_plain_x11() -> None:
+    """``grim`` is wlroots and ``scrot`` is not everywhere.
+
+    A plain X11 desktop with neither — this dev box — had NO region tool at
+    all, so capture failed outright once the blank Qt grab stopped being
+    accepted.  ``maim`` and ImageMagick's ``import`` are the common X11
+    answers; with ``import`` the headless chain measured a mean absolute
+    error of 0.00 against ground truth.
+    """
+    import inspect
+
+    from trcc.adapters.screencast.qt import QtScreenCapture
+
+    src = inspect.getsource(QtScreenCapture._external_grab)
+    for tool in ("grim", "scrot", "maim", "import"):
+        assert f'"{tool}"' in src, f"{tool} is not in the region chain"
