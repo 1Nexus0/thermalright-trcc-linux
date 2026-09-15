@@ -2472,3 +2472,97 @@ def test_a_zero_length_video_does_not_divide_by_zero(qtbot) -> None:
 
     assert bar._ms_to_x(0) == 0
     assert bar.clip_ms() == (0, 0)
+
+
+# =========================================================================
+# CloudThemeBrowser — the error a non-technical user actually reads
+# =========================================================================
+#
+# Anchored to the strings ``adapters/repo/http.py`` REALLY raises
+# (``f"GET {url} → HTTP {e.code}"``), not to invented ones.  Driving it with a
+# plausible-looking "404 Not Found" suggested a bug that does not exist: the
+# check is ``"http 4"``, and the real message contains "HTTP 404".
+
+
+def _translate(message: str) -> str:
+    from trcc.ui.qtgui.panels.cloud_theme_browser import _user_friendly_error
+
+    return _user_friendly_error(message)
+
+
+@pytest.mark.parametrize("raw", [
+    "GET https://github.com/x/a001.zip → HTTP 404",
+    "GET https://github.com/x/a001.zip → HTTP 503",
+    "GET https://github.com/x/catalog.json → URL error: [Errno -3]",
+    "GET https://x returned HTTP 500",
+])
+def test_transport_failures_are_translated_for_the_user(raw: str) -> None:
+    """A user must never be shown ``HttpFetchError: GET ... → URL error``."""
+    out = _translate(raw)
+
+    assert out != raw, f"raw adapter text reached the user: {raw}"
+    assert "http" not in out.lower(), f"HTTP jargon survived: {out}"
+    assert "get " not in out.lower()
+
+
+def test_a_domain_error_is_passed_through_unchanged() -> None:
+    """Only TRANSPORT noise is translated.
+
+    "Theme a001 is not in the catalog" is already plain language and already
+    the most useful thing we can say — swallowing it into a generic network
+    hint would be a downgrade.
+    """
+    msg = "Theme a001 is not in the catalog"
+
+    assert _translate(msg) == msg
+
+
+def test_the_network_hint_tells_the_user_what_to_do() -> None:
+    """A message that only says what broke leaves the reader stuck."""
+    out = _translate("GET https://x/catalog.json → URL error")
+
+    assert "connection" in out.lower()
+    assert "refresh" in out.lower(), "no next step offered"
+
+
+# =========================================================================
+# DevicePanel — a PM byte of 0 is DATA, not absence
+# =========================================================================
+
+
+def _inspector_text(gui_app: App, qtbot, *, pm, sub) -> str:
+    from trcc.core.results import DeviceStateResult
+    from trcc.ui.qtgui.panels.device_panel import DevicePanel
+
+    panel = DevicePanel(gui_app, _bus(gui_app))
+    qtbot.addWidget(panel)
+    panel._current_key = lambda: "0402:3922"   # pyright: ignore[reportAttributeAccessIssue]
+    panel.dispatch = lambda cmd: DeviceStateResult(   # pyright: ignore[reportAttributeAccessIssue]
+        ok=True, key="0402:3922", wire="SCSI", native_resolution=(320, 320),
+        pm_byte=pm, sub_byte=sub, fbl=7, serial="ABC")
+    panel._refresh_inspector()
+    w = panel._inspector
+    return w.toPlainText() if hasattr(w, "toPlainText") else w.text()
+
+
+def test_a_pm_byte_of_zero_is_shown(gui_app: App, qtbot) -> None:
+    """0 is a real handshake value; ``None`` is "not handshaken yet".
+
+    ``if state.pm_byte:`` would collapse the two and hide a genuine device
+    behind "not connected" — the Result keeps them apart precisely so an
+    inspector can.
+    """
+    text = _inspector_text(gui_app, qtbot, pm=0, sub=0)
+
+    assert "Handshake" in text, "a PM byte of 0 was treated as absence"
+    assert "PM          0" in text
+
+
+def test_an_unhandshaken_device_shows_no_handshake_block(
+    gui_app: App, qtbot,
+) -> None:
+    text = _inspector_text(gui_app, qtbot, pm=None, sub=None)
+
+    assert "Handshake" not in text, (
+        "a device that never handshook reported handshake values"
+    )
