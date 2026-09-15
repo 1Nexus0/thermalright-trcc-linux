@@ -67,7 +67,21 @@ if TYPE_CHECKING:
 
 
 class BulkTransport(ABC):
-    """Abstract USB bulk/interrupt transport.  One per open device handle."""
+    """Abstract USB bulk/interrupt transport.  One per open device handle.
+
+    **Deliberately not a context manager**, though ``open``/``close`` looks like
+    one.  The handle's life is owned by the DEVICE lifecycle: ``_open_transport``
+    runs on connect and ``disconnect`` closes it, with the handshake, hundreds of
+    frames and the keepalive loop in between — different methods, different user
+    actions, minutes or hours apart.  That does not fit inside a ``with`` block,
+    and a scoped protocol here invites ``with transport:`` inside ``send()``,
+    which closes the wire mid-stream.
+
+    Both concrete transports carried ``__enter__``/``__exit__`` with ZERO callers
+    anywhere in ``src``, ``tests`` or ``dev`` (removed 2026-09-15).  They were
+    also unreachable through this port, so a caller holding the abstraction could
+    never have used them.
+    """
 
     @abstractmethod
     def open(self) -> bool:

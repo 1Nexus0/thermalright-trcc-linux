@@ -341,15 +341,6 @@ class PyUsbBulkTransport(BulkTransport):
         log.debug("PyUsbBulkTransport.ep_in: 0x%02x", self._ep_in or 0)
         return self._ep_in
 
-    def __enter__(self) -> PyUsbBulkTransport:
-        log.debug("PyUsbBulkTransport.__enter__: %04x:%04x",
-                  self._vid, self._pid)
-        self.open()
-        return self
-
-    def __exit__(self, *exc: Any) -> None:
-        log.debug("__exit__: closing transport (exc=%s)", exc[0] if exc else None)
-        self.close()
 
 
 # =========================================================================
@@ -550,11 +541,3 @@ class HidApiTransport(BulkTransport):
                         length, len(data) if data else 0)
         return bytes(data) if data else b''
 
-    def __enter__(self) -> HidApiTransport:
-        log.debug("HidApiTransport.__enter__: %04x:%04x", self._vid, self._pid)
-        self.open()
-        return self
-
-    def __exit__(self, *exc: Any) -> None:
-        log.debug("__exit__: closing transport (exc=%s)", exc[0] if exc else None)
-        self.close()
