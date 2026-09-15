@@ -85,6 +85,7 @@ def main() -> int:
 
     from trcc.adapters.render.qt import QtRenderer
     from trcc.core.models import Kind, ProductInfo, Theme, Wire
+    from trcc.services.background import BackgroundSlot
     from trcc.services.display import DisplayService
     from trcc.services.media import MediaService, Playback
     from trcc.services.overlay import OverlayService
@@ -121,6 +122,7 @@ def main() -> int:
             overlay=overlay,
             settings=settings,
             media=media,
+            backgrounds=BackgroundSlot(),
             paths=_Paths(base),
         )
 
