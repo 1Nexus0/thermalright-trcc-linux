@@ -24,10 +24,14 @@ import threading
 import time
 from pathlib import Path
 
+from ...core.logs import per_frame
 from ...core.ports import CpuSource, DiskSource, DramSource, FanSource, GpuSource
 from .psutil_sources import PsutilCpu
 
 log = logging.getLogger(__name__)
+#: Sensor readers run once per metrics tick — their records must never
+#: be CONSTRUCTED at default verbosity.  See core.logs.per_frame.
+frame_log = per_frame(__name__)
 
 
 _HWMON_ROOT = Path("/sys/class/hwmon")
@@ -58,6 +62,7 @@ _GPU_TEMP_LABELS = ("pkg", "gpu", "edge", "vram")
 
 
 def _read_text(path: Path) -> str | None:
+    frame_log.debug("_read_text: path=%s", path)
     try:
         return path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError):
@@ -65,6 +70,7 @@ def _read_text(path: Path) -> str | None:
 
 
 def _read_int(path: Path) -> int | None:
+    frame_log.debug("_read_int: path=%s", path)
     s = _read_text(path)
     if s is None:
         return None
@@ -78,6 +84,7 @@ def _read_int(path: Path) -> int | None:
 
 
 def _read_float(path: Path) -> float | None:
+    frame_log.debug("_read_float: path=%s", path)
     s = _read_text(path)
     if s is None:
         return None
@@ -94,6 +101,7 @@ def _channel_index(input_name: str, prefix: str) -> int | None:
     Single parse for every ``{prefix}*_input`` scan (temp/fan/…) so the
     filename convention lives in one place.
     """
+    frame_log.debug("_channel_index: input_name=%s prefix=%s", input_name, prefix)
     if not (input_name.startswith(prefix) and input_name.endswith("_input")):
         return None
     try:
@@ -109,11 +117,13 @@ class HwmonDevice:
     """One hwmon directory — reads tempN_input / fanN_input / powerN_average."""
 
     def __init__(self, path: Path) -> None:
+        log.debug("__init__: path=%s", path)
         self.path = path
         self.driver = _read_text(path / "name") or path.name
 
     def read_temp(self, idx: int = 1) -> float | None:
         """tempN_input reports millidegrees C."""
+        frame_log.debug("read_temp: idx=%s", idx)
         val = _read_int(self.path / f"temp{idx}_input")
         return val / 1000.0 if val is not None else None
 
@@ -161,15 +171,18 @@ class HwmonDevice:
         return None
 
     def read_fan_rpm(self, idx: int = 1) -> int | None:
+        frame_log.debug("read_fan_rpm: idx=%s", idx)
         return _read_int(self.path / f"fan{idx}_input")
 
     def read_pwm(self, idx: int = 1) -> float | None:
         """pwmN reports 0-255 duty cycle; normalize to 0-100."""
+        frame_log.debug("read_pwm: idx=%s", idx)
         val = _read_int(self.path / f"pwm{idx}")
         return (val / 255.0 * 100.0) if val is not None else None
 
     def read_power(self, idx: int = 1) -> float | None:
         """powerN_average reports μW; return W."""
+        frame_log.debug("read_power: idx=%s", idx)
         val = _read_int(self.path / f"power{idx}_average")
         return val / 1_000_000.0 if val is not None else None
 
@@ -205,6 +218,7 @@ class _RaplCpuPower:
     __slots__ = ("_last", "_lock", "_next_rediscover", "_paths")
 
     def __init__(self) -> None:
+        log.debug("__init__")
         self._paths = self._discover()
         self._last: tuple[float, float] | None = None   # (sum_uj, monotonic)
         self._lock = threading.Lock()
@@ -243,6 +257,7 @@ class _RaplCpuPower:
         ``trcc setup``), so CPU power appears without restarting the app
         (#194).  Throttled so the empty case stays cheap.  Caller holds
         ``_lock``."""
+        log.debug("_maybe_rediscover")
         now = time.monotonic()
         if now < self._next_rediscover:
             return
@@ -255,6 +270,7 @@ class _RaplCpuPower:
         Thread-safe: the read-delta-update runs under ``_lock`` so
         concurrent callers can't interleave their energy/time samples.
         """
+        frame_log.debug("read")
         with self._lock:
             if not self._paths:
                 self._maybe_rediscover()
@@ -288,28 +304,34 @@ class HwmonCpu(CpuSource):
 
     def __init__(self, psutil_cpu: PsutilCpu,
                  temp_device: HwmonDevice | None) -> None:
+        log.debug("__init__: psutil_cpu=%s temp_device=%s", psutil_cpu, temp_device)
         self._psutil = psutil_cpu
         self._temp_device = temp_device
         self._rapl = _RaplCpuPower()
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._psutil.name
 
     def temp(self) -> float | None:
+        frame_log.debug("temp")
         if self._temp_device is None:
             return None
         return self._temp_device.read_temp(1)
 
     def usage(self) -> float | None:
+        frame_log.debug("usage")
         return self._psutil.usage()
 
     def freq(self) -> float | None:
+        frame_log.debug("freq")
         return self._psutil.freq()
 
     def power(self) -> float | None:
         # CPU package power via powercap RAPL — energy-delta over the poll
         # interval (None on the first read until a baseline exists).
+        frame_log.debug("power")
         return self._rapl.read()
 
 
@@ -327,6 +349,7 @@ def find_cpu_temp_device(devices: list[HwmonDevice]) -> HwmonDevice | None:
 
 def _find_drm_card_for_hwmon(hwmon_path: Path) -> Path | None:
     """Walk sysfs to match a hwmon directory to its /sys/class/drm/cardN."""
+    log.debug("_find_drm_card_for_hwmon: hwmon_path=%s", hwmon_path)
     # hwmon_path -> ../../device points to the PCI device
     try:
         pci_dev = (hwmon_path / "device").resolve()
@@ -355,6 +378,7 @@ class AmdGpu(GpuSource):
 
     def __init__(self, index: int, hwmon: HwmonDevice,
                  drm_card: Path | None) -> None:
+        log.debug("__init__: index=%s hwmon=%s", index, hwmon)
         self._index = index
         self._hwmon = hwmon
         self._drm = drm_card
@@ -362,10 +386,12 @@ class AmdGpu(GpuSource):
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return f"amd:{self._index}"
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         if self._name_cache is not None:
             return self._name_cache
         # /sys/class/drm/cardN/device/product_name is populated by the kernel
@@ -380,28 +406,34 @@ class AmdGpu(GpuSource):
 
     @property
     def is_discrete(self) -> bool:
+        frame_log.debug("is_discrete")
         total = self.vram_total()
         return total is not None and total > 2048.0
 
     def temp(self) -> float | None:
+        frame_log.debug("temp")
         return self._hwmon.read_temp(1)
 
     def usage(self) -> float | None:
+        frame_log.debug("usage")
         if self._drm is None:
             return None
         return _read_float(self._drm / "device" / "gpu_busy_percent")
 
     def clock(self) -> float | None:
         # amdgpu freq1_input reports Hz in some kernels, MHz in others
+        frame_log.debug("clock")
         val = _read_int(self._hwmon.path / "freq1_input")
         if val is None:
             return None
         return val / 1_000_000.0 if val > 1_000_000 else float(val)
 
     def power(self) -> float | None:
+        frame_log.debug("power")
         return self._hwmon.read_power(1)
 
     def fan(self) -> float | None:
+        frame_log.debug("fan")
         rpm = self._hwmon.read_fan_rpm(1)
         if rpm is None:
             # Try PWM duty cycle as a percentage fallback
@@ -410,12 +442,14 @@ class AmdGpu(GpuSource):
         return None
 
     def vram_used(self) -> float | None:
+        frame_log.debug("vram_used")
         if self._drm is None:
             return None
         val = _read_int(self._drm / "device" / "mem_info_vram_used")
         return val / (1024 * 1024) if val is not None else None
 
     def vram_total(self) -> float | None:
+        frame_log.debug("vram_total")
         if self._drm is None:
             return None
         val = _read_int(self._drm / "device" / "mem_info_vram_total")
@@ -431,6 +465,7 @@ class IntelGpu(GpuSource):
 
     def __init__(self, index: int, hwmon: HwmonDevice | None,
                  drm_card: Path | None, driver: str) -> None:
+        log.debug("__init__: index=%s hwmon=%s", index, hwmon)
         self._index = index
         self._hwmon = hwmon
         self._drm = drm_card
@@ -438,10 +473,12 @@ class IntelGpu(GpuSource):
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return f"intel:{'arc' if self._driver == 'xe' else 'igpu'}:{self._index}"
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         if self._drm is not None:
             if (n := _read_text(self._drm / "device" / "product_name")) is not None:
                 return n
@@ -449,24 +486,29 @@ class IntelGpu(GpuSource):
 
     @property
     def is_discrete(self) -> bool:
+        frame_log.debug("is_discrete")
         return self._driver == "xe"
 
     def temp(self) -> float | None:
         # Resolve by tempN_label — the xe (Arc) driver has no temp1_input
         # (lowest channel is temp2="pkg"), so a fixed read_temp(1) reads a
         # missing file and yields None (#gpu-temp-empty).
+        frame_log.debug("temp")
         return self._hwmon.read_temp_labeled() if self._hwmon is not None else None
 
     def clock(self) -> float | None:
+        frame_log.debug("clock")
         if self._drm is None:
             return None
         return _read_float(self._drm / "gt_cur_freq_mhz")
 
     def power(self) -> float | None:
+        frame_log.debug("power")
         return self._hwmon.read_power(1) if self._hwmon is not None else None
 
     def fan(self) -> float | None:
         # Intel iGPUs don't have their own fan.  Arc discrete may.
+        frame_log.debug("fan")
         return self._hwmon.read_pwm(1) if self._hwmon is not None else None
 
 def discover_amd_gpus(devices: list[HwmonDevice]) -> list[GpuSource]:
@@ -509,22 +551,27 @@ class HwmonFan(FanSource):
     """One fan input on a hwmon device."""
 
     def __init__(self, hwmon: HwmonDevice, idx: int, label: str | None) -> None:
+        log.debug("__init__: hwmon=%s idx=%s", hwmon, idx)
         self._hwmon = hwmon
         self._idx = idx
         self._label = label or f"{hwmon.driver} fan{idx}"
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return f"hwmon:{self._hwmon.driver}:fan{self._idx}"
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._label
 
     def rpm(self) -> int | None:
+        frame_log.debug("rpm")
         return self._hwmon.read_fan_rpm(self._idx)
 
     def percent(self) -> float | None:
+        frame_log.debug("percent")
         return self._hwmon.read_pwm(self._idx)
 
 
@@ -555,6 +602,7 @@ class HwmonDisk(DiskSource):
     """One storage device's temp1 sensor on a hwmon ``nvme`` / ``drivetemp`` node."""
 
     def __init__(self, hwmon: HwmonDevice, label: str | None) -> None:
+        log.debug("__init__: hwmon=%s label=%s", hwmon, label)
         self._hwmon = hwmon
         self._label = label or f"{hwmon.driver} disk"
         self._ident = self._identity(hwmon)
@@ -590,13 +638,16 @@ class HwmonDisk(DiskSource):
 
     @property
     def key(self) -> str:
+        frame_log.debug("key")
         return f"hwmon:{self._hwmon.driver}:{self._ident}:temp1"
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._label
 
     def temp(self) -> float | None:
+        frame_log.debug("temp")
         return self._hwmon.read_temp(1)
 
 
@@ -628,6 +679,7 @@ class HwmonDram(DramSource):
     """One DIMM's temp1 sensor on a hwmon ``spd5118`` / ``jc42`` node."""
 
     def __init__(self, hwmon: HwmonDevice, label: str | None) -> None:
+        log.debug("__init__: hwmon=%s label=%s", hwmon, label)
         self._hwmon = hwmon
         self._label = label or f"{hwmon.driver} DRAM"
 
@@ -636,13 +688,16 @@ class HwmonDram(DramSource):
         # Include the hwmon dir name: matched DIMMs share a driver, so a
         # driver-only key would collide across modules (and conflate their
         # per-source read-failure bookkeeping).
+        frame_log.debug("key")
         return f"hwmon:{self._hwmon.driver}:{self._hwmon.path.name}:temp1"
 
     @property
     def name(self) -> str:
+        frame_log.debug("name")
         return self._label
 
     def temp(self) -> float | None:
+        frame_log.debug("temp")
         return self._hwmon.read_temp(1)
 
 
@@ -679,4 +734,5 @@ class SpdClock:
         log.info("SpdClock: mhz=%s", self._mhz)
 
     def clock(self) -> float | None:
+        frame_log.debug("clock")
         return self._mhz
