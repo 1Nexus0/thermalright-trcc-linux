@@ -2397,3 +2397,78 @@ def test_binding_refuses_a_panel_heading(gui_app: App, qtbot) -> None:
     panel._on_bind_sensor()
 
     assert "row" in panel._dash_status.text().lower()
+
+
+# =========================================================================
+# _TimelineBar — the video trimmer's geometry (TASK 1 leaf gate)
+# =========================================================================
+#
+# video_crop.py was 524 lines with ZERO tests touching it — the only file in
+# ui/qtgui with none.  These were written from a RECORDED run of the real
+# widget, not from arithmetic: the clamp values below (19999 / 5001) are what
+# it actually produced, which is how the 1 ms minimum clip was discovered
+# rather than assumed.
+
+
+def _bar(qtbot, duration_ms: int = 60_000):
+    from trcc.ui.qtgui.video_crop import _TimelineBar
+
+    bar = _TimelineBar()
+    qtbot.addWidget(bar)
+    bar.set_range(duration_ms)
+    return bar
+
+
+def test_the_in_handle_cannot_pass_the_out_handle(qtbot) -> None:
+    """Dragging start past end must clamp, not invert the clip.
+
+    An inverted range reaches ``ExportVideoClip`` as start > end, which is a
+    clip nobody can encode — and the dialog would have looked fine.
+    """
+    bar = _bar(qtbot)
+    bar.set_start(10_000)
+    bar.set_end(20_000)
+
+    bar.set_start(50_000)                      # shove it well past the out point
+
+    start, end = bar.clip_ms()
+    assert start < end, f"handles crossed: {start} >= {end}"
+    assert (start, end) == (19_999, 20_000), (
+        "the clamp is a 1 ms minimum clip against the out handle"
+    )
+
+
+def test_the_out_handle_cannot_pass_the_in_handle(qtbot) -> None:
+    """The same invariant from the other side."""
+    bar = _bar(qtbot)
+    bar.set_start(5_000)
+
+    bar.set_end(1_000)
+
+    start, end = bar.clip_ms()
+    assert start < end, f"handles crossed: {start} >= {end}"
+    assert (start, end) == (5_000, 5_001)
+
+
+def test_a_position_survives_the_trip_to_pixels_and_back(qtbot) -> None:
+    """ms -> x -> ms may lose only what a pixel is worth.
+
+    The timeline converts both ways on every drag; an error here walks the
+    clip a little further each time the user touches it.
+    """
+    bar = _bar(qtbot, 60_000)
+    ms_per_px = 60_000 / max(1, bar.width())
+
+    for ms in (0, 15_000, 30_000, 60_000):
+        back = bar._x_to_ms(bar._ms_to_x(ms))
+        assert abs(back - ms) <= ms_per_px, (
+            f"{ms}ms came back as {back}ms — more than one pixel of drift"
+        )
+
+
+def test_a_zero_length_video_does_not_divide_by_zero(qtbot) -> None:
+    """``set_range(0)`` is reachable: ffprobe reports 0 for a broken file."""
+    bar = _bar(qtbot, 0)
+
+    assert bar._ms_to_x(0) == 0
+    assert bar.clip_ms() == (0, 0)
