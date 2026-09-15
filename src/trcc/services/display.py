@@ -1397,16 +1397,26 @@ class DisplayService:
         theme: Theme,
         visual_size: tuple[int, int],
     ) -> tuple[Any, ...]:
-        # Mask state belongs in this key so the bg+mask layer rebuilds when
-        # ApplyMask / SetMaskPosition / SetMaskVisible run. The Commands
-        # already explicitly invalidate, but including it defends against
-        # any path that mutates Settings without going through Commands.
+        # How the composite is DRAWN, as against WHICH background it is: the
+        # mask layer, and the rule that fits the background to this canvas.
+        # ``fit_mode`` belongs here and not in the token -- it has no mask use
+        # at all (its only reader is the user-content branch of
+        # ``_build_bg_mask``), and it changes how the picture is drawn rather
+        # than which picture it is, which is exactly what lets the slot be
+        # reused across a fit change.  It sat in a tuple called ``mask_sig``
+        # until the key was split into identity + context, where the name
+        # stopped being merely odd and started being wrong.
+        #
+        # Mask state is here so the layer rebuilds when ApplyMask /
+        # SetMaskPosition / SetMaskVisible run.  Those Commands already
+        # invalidate explicitly; keying on it defends against any path that
+        # mutates Settings without going through a Command.
         s = self._settings.for_device(info.key)
-        mask_sig = (s.mask_path, s.mask_position, s.mask_visible, s.fit_mode)
+        draw_sig = (s.mask_path, s.mask_position, s.mask_visible, s.fit_mode)
         token = self._background_token(info, theme)
-        frame_log.debug("_bg_mask_key: token=%s size=%s mask=%s",
-                        token, visual_size, mask_sig)
-        return (token, visual_size, mask_sig)
+        frame_log.debug("_bg_mask_key: token=%s size=%s draw=%s",
+                        token, visual_size, draw_sig)
+        return (token, visual_size, draw_sig)
 
     def _overlay_key(
         self,

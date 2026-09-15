@@ -197,3 +197,53 @@ def test_a_mask_change_reuses_the_background_instead_of_reopening_it(
         f"the background was re-opened {len(opened)}x for a change that did "
         f"not alter WHICH background it is: {opened}"
     )
+
+
+def test_the_token_follows_the_RESOLVED_background_not_the_theme_dir(
+    display: DisplayService, tmp_home: Path,
+) -> None:
+    """A reference theme's background can live in either root — identity
+    must name the file that RESOLVED, not the directory that asked for it.
+
+    ``background_path`` follows ``theme.config["background"]`` through
+    ``_resolve_asset_ref``, which tries the USER root first and the default
+    root second.  So one unchanged theme at one unchanged path can resolve to
+    two different files, and a key naming only ``theme.path`` cannot tell them
+    apart: the user's asset appears, the key does not move, and the cache goes
+    on serving the shipped picture.
+
+    This is the same fault that shipped a black panel once already — the
+    origin read off the active theme's directory while the background came
+    from somewhere else.  That was fixed in the compositor; the cache key kept
+    it until identity moved into ``_background_token``.
+    """
+    from PySide6.QtGui import QColor, QImage
+
+    paths = FakePaths(tmp_home)
+    ref = "web/320320/shared.png"
+
+    def _asset(root: Path, colour: QColor) -> None:
+        dest = root / ref
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        img = QImage(*SIZE, QImage.Format.Format_ARGB32)
+        img.fill(colour)
+        img.save(str(dest))
+
+    _asset(paths.data_dir(), QColor(10, 20, 30))          # shipped only
+
+    d = tmp_home / "themes" / "ref"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "trcc.json").write_text(json.dumps({
+        "name": "ref", "width": SIZE[0], "height": SIZE[1],
+        "background": ref, "elements": [],
+    }), encoding="utf-8")
+    theme = FileContentStore(paths).load(d)
+
+    shipped = display._background_token(_info(), theme)
+
+    _asset(paths.user_data_dir(), QColor(200, 30, 30))    # user asset shadows it
+
+    assert display._background_token(_info(), theme) != shipped, (
+        "the token did not move when the SAME theme started resolving to a "
+        "different file — the user's background would never be painted"
+    )
