@@ -322,3 +322,87 @@ def test_the_region_tools_cover_plain_x11() -> None:
     src = inspect.getsource(QtScreenCapture._external_grab)
     for tool in ("grim", "scrot", "maim", "import"):
         assert f'"{tool}"' in src, f"{tool} is not in the region chain"
+
+
+# ── one stride loop, three producers ──────────────────────────────────
+
+#: A width whose packed row is NOT a multiple of 4, so Qt must pad it.
+#: ``85 * 3 == 255`` → stride 256, one junk byte per row.  At a width where
+#: the padding happens to be zero (1920, say) this whole family of bugs is
+#: invisible, which is how three copies of the loop survived.
+PADDED_W, PADDED_H = 85, 6
+
+
+def _row_ramp(w: int, h: int) -> Any:
+    """A QImage whose row *r* is filled with the solid grey value *r*.
+
+    Row identity is what makes shear visible: if padding is read as pixels,
+    every row starts a byte further left than the one above and the first
+    pixel of row *r* stops being *r*.  Asserting only the byte COUNT cannot
+    see that — the count is right either way once the rows are rebuilt.
+    """
+    from PySide6.QtGui import QColor, QImage
+
+    img = QImage(w, h, QImage.Format.Format_RGB888)
+    for r in range(h):
+        for x in range(w):
+            img.setPixelColor(x, r, QColor(r, r, r))
+    return img
+
+
+def _assert_tightly_packed(data: bytes, w: int, h: int, who: str) -> None:
+    assert len(data) == w * h * 3, f"{who}: {len(data)} bytes, want {w * h * 3}"
+    assert [data[r * w * 3] for r in range(h)] == list(range(h)), (
+        f"{who}: rows are misaligned — this is the diagonal shear"
+    )
+
+
+def test_qimage_producer_strips_row_padding() -> None:
+    """``qimage_to_raw_rgb24`` — the gui screencast tick and the Renderer."""
+    from trcc.adapters.render.qt import qimage_to_raw_rgb24
+
+    img = _row_ramp(PADDED_W, PADDED_H)
+    assert img.bytesPerLine() != PADDED_W * 3, (
+        "pick a width Qt actually pads, or this test proves nothing"
+    )
+
+    frame = qimage_to_raw_rgb24(img)
+
+    _assert_tightly_packed(frame.data, PADDED_W, PADDED_H, "qimage_to_raw_rgb24")
+
+
+def test_pixmap_producer_strips_row_padding() -> None:
+    """``_pixmap_to_raw_frame`` — every external region-capture rung."""
+    from PySide6.QtGui import QPixmap
+
+    from trcc.adapters.screencast.qt import _pixmap_to_raw_frame
+
+    pix = QPixmap.fromImage(_row_ramp(PADDED_W, PADDED_H))
+
+    frame = _pixmap_to_raw_frame(pix, PADDED_W, PADDED_H)
+
+    _assert_tightly_packed(frame.data, PADDED_W, PADDED_H,
+                           "_pixmap_to_raw_frame")
+
+
+def test_both_qt_producers_agree_with_the_shared_primitive() -> None:
+    """The three copies were verified identical before being collapsed.
+
+    This is the guard that keeps them that way: both Qt producers must agree
+    byte-for-byte with ``core._frames.unpad_rows`` applied by hand to the same
+    buffer.  A future "optimisation" inside either one fails here.
+    """
+    from PySide6.QtGui import QImage, QPixmap
+
+    from trcc.adapters.render.qt import qimage_to_raw_rgb24
+    from trcc.adapters.screencast.qt import _pixmap_to_raw_frame
+    from trcc.core._frames import unpad_rows
+
+    img = _row_ramp(PADDED_W, PADDED_H).convertToFormat(
+        QImage.Format.Format_RGB888)
+    by_hand = unpad_rows(bytes(img.constBits()), PADDED_W, PADDED_H,
+                         img.bytesPerLine())
+
+    assert qimage_to_raw_rgb24(img).data == by_hand
+    assert _pixmap_to_raw_frame(
+        QPixmap.fromImage(img), PADDED_W, PADDED_H).data == by_hand

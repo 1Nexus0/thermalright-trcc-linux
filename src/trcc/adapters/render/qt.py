@@ -25,6 +25,7 @@ from PySide6.QtGui import (
     QTransform,
 )
 
+from ...core._frames import unpad_rows
 from ...core.errors import TrccError
 from ...core.logs import per_frame
 from ...core.models import RawFrame
@@ -475,25 +476,17 @@ def qimage_to_raw_rgb24(image: Any) -> RawFrame:
     fires every 150 ms).
 
     Duplicating the conversion in the GUI would have scored BETTER on the
-    contract audit, which counts imports rather than duplication.  It would
-    also have meant two copies of the stride handling below, which is the one
-    genuinely subtle part.
+    contract audit, which counts imports rather than duplication.
 
     ``constBits()`` spans the whole buffer INCLUDING per-line padding — Qt
     aligns each scanline to 4 bytes, so any width whose ``*3`` is not a
-    multiple of 4 carries junk at the end of every row.  Copy the packed part
-    of each line when the stride disagrees.
+    multiple of 4 carries junk at the end of every row.  Stripping it is
+    ``core._frames.unpad_rows``, shared with both screencast adapters.
     """
     img = image.convertToFormat(QImage.Format.Format_RGB888)
     width, height = img.width(), img.height()
     stride = img.bytesPerLine()
-    raw = bytes(img.constBits())
-    if stride == width * 3:
-        data = raw
-    else:
-        data = b"".join(
-            raw[y * stride:y * stride + width * 3] for y in range(height)
-        )
     log.debug("qimage_to_raw_rgb24: %dx%d (stride=%d packed=%d)",
               width, height, stride, width * 3)
+    data = unpad_rows(bytes(img.constBits()), width, height, stride)
     return RawFrame(data=data, width=width, height=height)

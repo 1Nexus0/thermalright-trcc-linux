@@ -45,6 +45,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from ...core._frames import unpad_rows
 from ...core.logs import per_frame
 from ...core.models import RawFrame
 from ...core.ports import ScreenCapture
@@ -90,32 +91,6 @@ _PORTAL_BUS = 'org.freedesktop.portal.Desktop'
 _PORTAL_PATH = '/org/freedesktop/portal/desktop'
 _SCREENCAST_IFACE = 'org.freedesktop.portal.ScreenCast'
 _REQUEST_IFACE = 'org.freedesktop.portal.Request'
-
-
-
-def unpad_rows(data: bytes, width: int, height: int, stride: int) -> bytes:
-    """Drop GStreamer's row padding so the result is tightly packed RGB24.
-
-    GStreamer aligns each row, so a row is ``stride`` bytes of which only
-    ``width * 3`` are pixels.  A consumer that assumes ``width * 3`` reads the
-    padding as pixels and every row starts a little further left than the one
-    above -- the picture shears diagonally.  It is invisible whenever the
-    padding happens to be zero, which is why it survived: it only bites when
-    ``width * 3`` is not a multiple of 4.
-
-    MEASURED with ``GstVideo.VideoInfo`` on this box: a 1366-wide RGB frame
-    has a stride of **4100**, against ``width * 3 == 4098``.  Two bytes per
-    row, 768 rows.
-
-    A tight buffer is returned unchanged, so the common case costs one
-    comparison.
-    """
-    row = width * 3
-    if stride == row:
-        return data
-    log.debug("unpad_rows: stride=%d row=%d (%d byte(s) of padding per row)",
-              stride, row, stride - row)
-    return b"".join(data[y * stride:y * stride + row] for y in range(height))
 
 
 class PipeWireScreenCast:

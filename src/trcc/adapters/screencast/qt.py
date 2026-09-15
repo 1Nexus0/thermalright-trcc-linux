@@ -41,6 +41,7 @@ from PySide6.QtCore import QRect
 from PySide6.QtGui import QGuiApplication, QImage, QPixmap
 from PySide6.QtWidgets import QApplication
 
+from ...core._frames import unpad_rows
 from ...core.models import RawFrame
 from ...core.ports import ScreenCapture
 
@@ -240,17 +241,9 @@ def _pixmap_to_raw_frame(
     image = pix.toImage().convertToFormat(QImage.Format.Format_RGB888)
     if image.width() != target_w or image.height() != target_h:
         image = image.scaled(target_w, target_h)
-    # QImage's bits() returns memoryview-like; copy into immutable bytes
-    # for hand-off across thread/UI boundaries.
-    data = bytes(image.constBits())
-    # Qt's RGB888 buffer is row-padded to a multiple of 4; strip the
-    # pad if it's there so consumers see exactly width*height*3 bytes.
-    expected = target_w * target_h * 3
-    if len(data) != expected:
-        stride = image.bytesPerLine()
-        rows = bytearray()
-        for row in range(target_h):
-            offset = row * stride
-            rows.extend(data[offset:offset + target_w * 3])
-        data = bytes(rows)
+    # ``constBits()`` is memoryview-like and row-padded to a multiple of 4;
+    # copy to immutable bytes for the hand-off across thread/UI boundaries,
+    # then strip the pad so consumers see exactly width*height*3.
+    data = unpad_rows(bytes(image.constBits()), target_w, target_h,
+                      image.bytesPerLine())
     return RawFrame(data=data, width=target_w, height=target_h)
