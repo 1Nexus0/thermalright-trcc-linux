@@ -2566,3 +2566,176 @@ def test_an_unhandshaken_device_shows_no_handshake_block(
     assert "Handshake" not in text, (
         "a device that never handshook reported handshake values"
     )
+
+
+# =========================================================================
+# TASK 1 — qtgui leaf gates: colour wheel, crop zoom, greyscale
+# =========================================================================
+
+
+def test_the_hue_wheel_wraps_instead_of_clamping(qtbot) -> None:
+    """Hue is circular, so -1 is 359 and 360 is 0.
+
+    Clamping would stick the marker at an end of a wheel that has no ends —
+    dragging anticlockwise past red would stop dead instead of continuing.
+    """
+    from trcc.ui.qtgui.color_wheel import ColorWheel
+
+    wheel = ColorWheel()
+    qtbot.addWidget(wheel)
+
+    for given, expected in ((0, 0), (359, 359), (-1, 359), (360, 0), (720, 0)):
+        wheel.set_hue(given)
+        assert wheel.hue() == expected, f"set_hue({given}) gave {wheel.hue()}"
+
+
+def test_the_wheel_ring_excludes_its_own_centre(qtbot) -> None:
+    """The ring is an annulus — a click in the hole is not a hue pick."""
+    from trcc.ui.qtgui.color_wheel import ColorWheel
+
+    wheel = ColorWheel()
+    qtbot.addWidget(wheel)
+    wheel.resize(200, 200)
+    cx, cy = wheel._center()
+
+    assert wheel._on_ring(cx, cy) is False, "the hub answered as ring"
+    assert wheel._on_ring(cx + wheel._outer_r() - 1, cy) is True
+    assert wheel._inner_r() < wheel._outer_r()
+
+
+def test_crop_zoom_is_monotonic_and_reaches_full_size(qtbot) -> None:
+    """The slider must never zoom BACKWARDS as it is dragged right.
+
+    Recorded from the real widget: 0 -> 0.25, 50 -> 0.40, 100 -> 1.00, i.e.
+    geometric rather than linear — so asserting evenly-spaced steps would
+    encode my expectation instead of its behaviour.
+    """
+    from trcc.ui.qtgui.image_crop import ImageCropDialog
+
+    dialog = ImageCropDialog()
+    qtbot.addWidget(dialog)
+
+    zooms = [dialog._slider_to_zoom(v) for v in range(0, 101, 5)]
+    assert zooms == sorted(zooms), "zoom went backwards as the slider advanced"
+    assert zooms[0] == pytest.approx(0.25, abs=0.01)
+    assert zooms[-1] == pytest.approx(1.0, abs=0.01)
+
+
+def test_greyscale_desaturates_and_keeps_alpha(qtbot) -> None:
+    """The contract is grey + alpha, NOT a particular luminance formula.
+
+    Driving it first showed pure red -> 127, where the naive ``qGray`` says 87.
+    Both are legitimate: Qt's ``Format_Grayscale8`` is gamma-correct in linear
+    colourspace and ``qGray`` is a weighted average.  Asserting ``qGray``
+    would have failed correct code — so this gates what the docstring actually
+    promises.
+    """
+    from PySide6.QtGui import QColor, QPixmap
+
+    from trcc.ui.qtgui.assets import _greyscale
+
+    for rgba in ((255, 0, 0, 255), (0, 255, 0, 128), (100, 150, 200, 64)):
+        src = QPixmap(4, 4)
+        src.fill(QColor(*rgba))
+
+        out = _greyscale(src).toImage().pixelColor(1, 1)
+
+        assert out.red() == out.green() == out.blue(), f"{rgba} stayed coloured"
+        assert out.alpha() == rgba[3], (
+            f"{rgba} lost its alpha — transparent chrome would go opaque"
+        )
+
+
+def test_the_sensor_search_actually_narrows_the_list(gui_app: App, qtbot) -> None:
+    """Typing filters by id, label OR category — it is the only way to find a
+    sensor among 51 on a real host, and a search that silently matched
+    nothing would look identical to a host with no sensors."""
+    from trcc.ui.qtgui.sensor_picker import SensorPickerWidget
+
+    picker = SensorPickerWidget(gui_app)
+    qtbot.addWidget(picker)
+    picker._refresh()
+    everything = picker._sensor_list.count()
+    assert everything > 5, "host reported almost nothing — gate is meaningless"
+
+    picker._search.setText("cpu")
+    picker._rebuild_sensor_list()
+
+    narrowed = picker._sensor_list.count()
+    assert 0 < narrowed < everything, (
+        f"search matched {narrowed} of {everything} — it did not narrow"
+    )
+
+
+def test_selecting_a_sensor_by_id_reports_it_back(gui_app: App, qtbot) -> None:
+    """``select_sensor_id`` -> ``selected_sensor`` is the round-trip the
+    dashboard editor relies on to show a row's current binding."""
+    from trcc.ui.qtgui.sensor_picker import SensorPickerWidget
+
+    picker = SensorPickerWidget(gui_app)
+    qtbot.addWidget(picker)
+    picker._refresh()
+    assert picker.selected_sensor() is None, "something was pre-selected"
+
+    picker.select_sensor_id("cpu:temp")
+
+    picked = picker.selected_sensor()
+    assert picked is not None and picked[0] == "cpu:temp"
+
+
+def test_a_led_tab_shows_itself_unless_it_says_otherwise() -> None:
+    """The default must be VISIBLE.
+
+    ``LedPanel`` asks only the optional tabs; a default of "hidden" would make
+    a tab that forgot to manage its placeholder disappear silently, which is
+    indistinguishable from a device that genuinely has no zones.
+    """
+    from trcc.ui.qtgui.panels.led._base import LedTabBase
+
+    assert LedTabBase._placeholder_visible is False
+    assert LedTabBase.has_visible_content(LedTabBase) is True  # type: ignore[arg-type]
+
+
+def test_a_panel_without_setup_ui_is_refused_at_class_creation() -> None:
+    """``BasePanel`` cannot use ``@abstractmethod``: ``QFrame`` + ``ABC`` is a
+    metaclass conflict, so the contract is enforced in ``__init_subclass__``.
+
+    Without it a panel missing ``_setup_ui`` constructs happily and renders an
+    empty frame — a blank tab with no error anywhere.
+    """
+    from trcc.ui.qtgui.base import BasePanel
+
+    with pytest.raises(TypeError, match="_setup_ui"):
+        class _Missing(BasePanel):
+            pass
+
+
+def test_an_intermediate_base_may_skip_setup_ui() -> None:
+    """``_abstract = True`` is how ``AssetBrowserPanel`` says "I have no layout
+    of my own" — enforcement must not punish the shared bases."""
+    from trcc.ui.qtgui.base import BasePanel
+
+    class _Intermediate(BasePanel):
+        _abstract = True
+
+    assert _Intermediate._abstract is True
+
+
+def test_the_shared_browser_guard_names_the_next_step(gui_app: App, qtbot) -> None:
+    """``AssetBrowserPanel._device_key`` — pulled up from two browsers, and the
+    sentence it writes is what the user reads when nothing is picked.
+
+    It was duplicated VERBATIM in two panels; a guard that only said "no
+    device" would leave a first-time user with nowhere to go.
+    """
+    from trcc.ui.qtgui.panels.local_theme_browser import LocalThemeBrowser
+
+    panel = LocalThemeBrowser(gui_app, _bus(gui_app))
+    qtbot.addWidget(panel)
+    panel._picker.current_key = lambda: ""    # pyright: ignore[reportAttributeAccessIssue]
+
+    assert panel._device_key() is None
+
+    said = panel._status.text().lower()
+    assert "pick a device" in said
+    assert "devices panel" in said, "no next step offered to a new user"
