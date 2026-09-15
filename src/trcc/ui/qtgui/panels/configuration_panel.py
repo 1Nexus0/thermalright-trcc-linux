@@ -47,6 +47,8 @@ from ....core.commands import (
     SetSplitMode,
     SetTempUnit,
     SetTimeFormat,
+    StartSlideshowDriver,
+    StopSlideshowDriver,
 )
 from ....core.models import MAX_REFRESH_INTERVAL_S, MIN_REFRESH_INTERVAL_S
 from ..base import BasePanel
@@ -322,10 +324,26 @@ class ConfigurationPanel(BasePanel):
         messages.append(r6.message)
 
         # Slideshow on/off
-        r7 = self.dispatch(SetSlideshow(
-            key=key, enabled=bool(self._slideshow_enabled.currentData()),
-        ))
+        rotating = bool(self._slideshow_enabled.currentData())
+        r7 = self.dispatch(SetSlideshow(key=key, enabled=rotating))
         messages.append(r7.message)
+
+        # ...and something has to actually ROTATE it.  ``SetSlideshow``
+        # persists the flag and resets the clock; it starts no driver, so a
+        # slideshow configured here was saved, reported back correctly and
+        # never switched a theme -- the same failure ``services/
+        # slideshow_driver`` was written for, which cli and api already fixed
+        # (``cli/display.py`` slideshow-drive, ``api/display.py`` /slideshow).
+        #
+        # The driver is dispatched HERE rather than from ``SetSlideshow`` on
+        # purpose: ``ui/gui`` rotates with its own ``QTimer``, so coupling the
+        # two would give that skin TWO rotators -- the trap
+        # ``StartScreencastDriver`` documents for screencast.
+        r8 = self.dispatch(
+            StartSlideshowDriver(key=key) if rotating
+            else StopSlideshowDriver(key=key)
+        )
+        messages.append(r8.message)
 
         self._status.setText("  |  ".join(messages))
 

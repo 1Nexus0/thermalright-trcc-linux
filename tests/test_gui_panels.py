@@ -1960,3 +1960,57 @@ def test_screencast_does_not_lock_before_a_device_is_known(qtbot) -> None:
     # as never having asked: it warns, and still declines to lock.
     scp.set_resolution(0, 0)
     assert scp._get_aspect_ratio() is None
+
+
+# =========================================================================
+# ConfigurationPanel — the slideshow has to actually ROTATE
+# =========================================================================
+
+
+def _apply_slideshow(gui_app: App, qtbot, *, enabled: bool) -> list[str]:
+    """Drive the real panel's Apply and report the Commands it dispatched.
+
+    A behaviour gate, not a construction one: ``SetSlideshow`` persists the
+    flag and resets the clock but starts NO driver, so a panel that dispatches
+    only that saves a slideshow which reports itself enabled and never
+    switches a theme.  Nothing structural can see that -- the panel builds,
+    the Command succeeds, the setting reads back correctly.
+    """
+    from trcc.ui.qtgui.panels.configuration_panel import ConfigurationPanel
+
+    panel = ConfigurationPanel(gui_app, _bus(gui_app))
+    qtbot.addWidget(panel)                    # unparented top-levels leak
+
+    sent: list[str] = []
+    real = panel.dispatch
+
+    def spy(cmd):
+        sent.append(type(cmd).__name__)
+        return real(cmd)
+
+    panel.dispatch = spy                      # pyright: ignore[reportAttributeAccessIssue]
+    panel._key = lambda: "0402:3922"          # pyright: ignore[reportAttributeAccessIssue]
+    idx = panel._slideshow_enabled.findData(enabled)
+    panel._slideshow_enabled.setCurrentIndex(idx)
+    panel._apply()
+    return sent
+
+
+def test_enabling_the_slideshow_starts_the_driver(gui_app: App, qtbot) -> None:
+    sent = _apply_slideshow(gui_app, qtbot, enabled=True)
+
+    assert "SetSlideshow" in sent, "the panel stopped persisting the flag"
+    assert "StartSlideshowDriver" in sent, (
+        "the slideshow was enabled but nothing was asked to rotate it — this "
+        "is the bug cli and api already fixed (services/slideshow_driver)"
+    )
+    assert "StopSlideshowDriver" not in sent
+
+
+def test_disabling_the_slideshow_stops_the_driver(gui_app: App, qtbot) -> None:
+    sent = _apply_slideshow(gui_app, qtbot, enabled=False)
+
+    assert "StopSlideshowDriver" in sent, (
+        "turning the slideshow off left the driver rotating"
+    )
+    assert "StartSlideshowDriver" not in sent

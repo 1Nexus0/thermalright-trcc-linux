@@ -272,13 +272,16 @@ KNOWN_UI_ASYMMETRY: dict[str, tuple[frozenset[str], str]] = {
     "LoopVideo": (frozenset({"cli", "api"}), (
         "gap: toggle whether playback wraps or sticks at the last frame"
     )),
-    "StartSlideshowDriver": (frozenset({"cli", "api"}), (
-        "gap: the GUIs rotate a slideshow from their OWN QTimer instead of the "
-        "shared driver -- a duplicated mechanism, and the CLI/API path is "
-        "the one that survives a daemon flip"
+    "StartSlideshowDriver": (frozenset({"cli", "api", "qtgui"}), (
+        "gap: ui/gui ALONE still rotates from its own QTimer instead of the "
+        "shared driver.  qtgui adopted the driver 2026-09-15 -- its panel "
+        "already dispatched ConfigureSlideshow + SetSlideshow, which persist "
+        "the config and start nothing, so a slideshow set up there reported "
+        "itself enabled and never switched a theme.  gui is now the only "
+        "duplicated mechanism left, and it goes when ui/gui does"
     )),
-    "StopSlideshowDriver": (frozenset({"cli", "api"}), (
-        "gap: the other half of the same duplicated mechanism"
+    "StopSlideshowDriver": (frozenset({"cli", "api", "qtgui"}), (
+        "gap: the other half of the same pair -- ui/gui only"
     )),
     "SetMediaPlayer": (frozenset({"cli", "api"}), (
         "gap: set the device's media-player source URI"
