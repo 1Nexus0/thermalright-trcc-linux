@@ -467,7 +467,7 @@ class FileContentStore(ContentStore):
         Raises ThemeError if the directory is missing, unreadable, or
         the config.json is invalid.
         """
-        log.info("load: %s", path)
+        log.debug("load: %s", path)
         if not path.exists():
             raise ThemeError(f"Theme directory does not exist: {path}")
         if not path.is_dir():
@@ -477,7 +477,7 @@ class FileContentStore(ContentStore):
         resolution = self._resolution_from_config(config)
         name = config.get("name") or path.name
         n_elements = len(config.get("elements") or [])
-        log.info(
+        log.debug(
             "load: %s → name=%r resolution=%s elements=%d "
             "overlay_enabled=%s mask_visible=%s mask_position=%s",
             path.name, name, resolution, n_elements,
@@ -516,7 +516,7 @@ class FileContentStore(ContentStore):
             except ThemeError as e:
                 log.warning("list: skipping invalid theme %s: %s", entry, e)
                 skipped += 1
-        log.info("list: %s → %d theme(s) (skipped=%d)",
+        log.debug("list: %s → %d theme(s) (skipped=%d)",
                  directory, len(themes), skipped)
         return themes
 
@@ -942,7 +942,7 @@ class FileContentStore(ContentStore):
         """
         json_path = ThemeDir(path).json
         if json_path.exists():
-            log.info("_load_config: %s → reading %s", path.name, ThemeDir.JSON)
+            log.debug("_load_config: %s → reading %s", path.name, ThemeDir.JSON)
             try:
                 return json.loads(json_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as e:
@@ -950,7 +950,7 @@ class FileContentStore(ContentStore):
 
         legacy_next_path = path / _PRE_CUTOVER_CONFIG_FILE
         if legacy_next_path.exists():
-            log.info("_load_config: %s → reading pre-cutover %s",
+            log.debug("_load_config: %s → reading pre-cutover %s",
                      path.name, _PRE_CUTOVER_CONFIG_FILE)
             try:
                 return json.loads(legacy_next_path.read_text(encoding="utf-8"))
@@ -977,7 +977,7 @@ class FileContentStore(ContentStore):
                     "through to DC", path.name, ThemeDir.LEGACY_JSON,
                 )
             else:
-                log.info(
+                log.debug(
                     "_load_config: %s → translating legacy %s",
                     path.name, ThemeDir.LEGACY_JSON,
                 )
@@ -985,7 +985,7 @@ class FileContentStore(ContentStore):
 
         dc_path = ThemeDir(path).dc
         if dc_path.exists():
-            log.info("_load_config: %s → reading %s (binary DC)",
+            log.debug("_load_config: %s → reading %s (binary DC)",
                      path.name, ThemeDir.DC)
             config = Dc.File(dc_path).read()
             self._try_migrate(json_path, config)

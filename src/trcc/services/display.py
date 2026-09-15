@@ -858,7 +858,7 @@ class DisplayService:
         """
         cache = self._bg_caches.get(key)
         if cache is None:
-            log.info("_bg_cache: opening a %d-byte budget for %s",
+            log.debug("_bg_cache: opening a %d-byte budget for %s",
                      RENDER_CACHE_MAX_BYTES, key)
             cache = BgMaskCache(RENDER_CACHE_MAX_BYTES)
             self._bg_caches[key] = cache
@@ -866,7 +866,7 @@ class DisplayService:
 
     def invalidate(self, key: str) -> None:
         """Drop the scene cache for *key* (called on disconnect / theme change)."""
-        log.info("invalidate: key=%s", key)
+        log.debug("invalidate: key=%s", key)
         self._scenes.pop(key, None)
         # The background cache goes too.  Its keys already carry theme,
         # mask and mode, so stale entries would simply never be asked for

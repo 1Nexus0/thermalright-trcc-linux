@@ -1535,7 +1535,7 @@ def panel_asset_dims(w: int, h: int) -> tuple[int, int]:
     Falls back to (320, 240) landscape or (240, 320) portrait when the
     resolution isn't in the table — matches the C# else branch.
     """
-    log.info("panel_asset_dims: %dx%d", w, h)
+    log.debug("panel_asset_dims: %dx%d", w, h)
     if (dims := PANEL_ASSET_DIMS.get((w, h))):
         return dims
     return (240, 320) if h > w else (320, 240)

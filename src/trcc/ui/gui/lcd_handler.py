@@ -111,6 +111,14 @@ class LCDHandler(BaseHandler):
         # then "png" for the life of the handler.  An observation, not a
         # configured mode and not a sniffed environment.
         self._preview_encode: Literal["", "png"] = ""
+        # The last directory set this handler POPULATED the shared theme
+        # browser from.  A cold boot of ten devices called
+        # ``_update_theme_directories`` 42 times and built 8,640 thumbnail
+        # widgets, because activation, brightness restore, rotation restore
+        # and reactivate each call it and none asked whether anything had
+        # changed.  Same guard ``UCDevice.update_devices`` already uses for
+        # the device list, and the same reason.
+        self._dirs_signature: tuple[object, ...] | None = None
         self.log: logging.Logger = log
 
         # Qt-free coordination model — owns the per-device DeviceState cache
@@ -327,7 +335,7 @@ class LCDHandler(BaseHandler):
         """Background data extraction finished — re-probe dirs and update UI."""
         log.info("_on_data_ready")
         self.log.info("_on_data_ready: refreshing dirs and theme lists")
-        auto_loaded = self._update_theme_directories()
+        auto_loaded = self._update_theme_directories(force=True)
         self.log.info("_on_data_ready: done, auto_loaded=%s", auto_loaded)
 
     def _update_device_info(self) -> None:
@@ -621,7 +629,7 @@ class LCDHandler(BaseHandler):
         if r.ok:
             # Re-list via ListThemes so the new theme appears with user-
             # precedence (same universal path as the initial listing).
-            self._update_theme_directories()
+            self._update_theme_directories(force=True)
         return r
 
     def export_config(self, path: Path) -> None:
@@ -638,7 +646,7 @@ class LCDHandler(BaseHandler):
         ))
         self._w['preview'].set_status(r.message)
         if r.ok:
-            self._update_theme_directories()   # re-list via ListThemes
+            self._update_theme_directories(force=True)   # re-list via ListThemes
 
     # ── DC File Loading ────────────────────────────────────────────
 
@@ -1471,9 +1479,9 @@ class LCDHandler(BaseHandler):
     def refresh_themes(self) -> None:
         """Public re-list of the local theme browser (after save / import /
         delete) — re-dispatches ListThemes through the dir-resolution refresh."""
-        self._update_theme_directories()
+        self._update_theme_directories(force=True)
 
-    def _update_theme_directories(self) -> bool:
+    def _update_theme_directories(self, *, force: bool = False) -> bool:
         """Reload theme browser directories for the current resolution.
 
         Returns True if a first-install auto-load happened (caller should
@@ -1511,6 +1519,25 @@ class LCDHandler(BaseHandler):
         user_theme_dir = Path(dirs.user_theme_dir)
         web_dir = Path(dirs.web_dir)
         masks_dir = Path(dirs.masks_dir)
+
+        # Nothing below changes unless the RESOLVED directories change (or the
+        # active panel does — the browser is shared, so becoming active means
+        # repopulating it with THIS device's catalog).  Everything after this
+        # point costs a ``ListThemes`` dispatch, three directory scans and
+        # ~250 Qt widgets, so re-running it for an identical answer is the
+        # whole cost.  ``force`` is for the callers where the DIRECTORIES are
+        # unchanged but their CONTENT is not: a theme saved, a config
+        # imported, the background data download landing.
+        signature = (bw, bh, theme_dir, user_theme_dir, masks_dir,
+                     web_dir, self._pm.ui_active)
+        if not force and signature == self._dirs_signature:
+            self.log.debug(
+                "_update_theme_directories: %s unchanged (catalog=%dx%d "
+                "active=%s) — skipping the browser rebuild",
+                self._device_key, bw, bh, self._pm.ui_active,
+            )
+            return False
+        self._dirs_signature = signature
 
         self.log.info(
             "_update_theme_directories: catalog=%dx%d theme_dir=%s "

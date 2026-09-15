@@ -246,7 +246,7 @@ class UCPreview(BasePanel):
         # On-change (not per-frame) — INFO so the chosen bezel + LCD-area
         # placement is visible at the default level: this is the preview that
         # must match the device orientation.
-        log.info(
+        log.debug(
             "preview.set_resolution: lcd=%dx%d → bezel=%s area=%dx%d@(%d,%d)",
             width, height, frame_name, w, h, left, top,
         )

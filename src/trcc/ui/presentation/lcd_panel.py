@@ -109,7 +109,7 @@ def lcd_panel_for(resolution: tuple[int, int]) -> LcdPanelModel:
                     "320x320 default; add it to _PREVIEW_OFFSETS", w, h)
         offset = _DEFAULT_OFFSET
     else:
-        log.info("lcd_panel_for: %dx%d → widescreen=%s frame=%s", w, h,
+        log.debug("lcd_panel_for: %dx%d → widescreen=%s frame=%s", w, h,
                  widescreen, offset[4])
     return LcdPanelModel(
         resolution=(w, h), widescreen=widescreen, offset_info=offset,

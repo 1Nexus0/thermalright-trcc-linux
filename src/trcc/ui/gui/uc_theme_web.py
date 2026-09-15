@@ -157,7 +157,7 @@ class UCThemeWeb(DownloadableThemeBrowser):
 
     def set_web_directory(self, path):
         """Set the Web directory (bundled PNGs + downloaded MP4s) and load themes."""
-        log.info("uc_theme_web.set_web_directory: %s", path)
+        log.debug("uc_theme_web.set_web_directory: %s", path)
         self.web_directory = Path(path) if path else None
         self.load_themes()
 
