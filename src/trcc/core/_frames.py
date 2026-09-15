@@ -35,17 +35,34 @@ def unpad_rows(data: bytes, width: int, height: int, stride: int) -> bytes:
     invisible whenever the padding happens to be zero, which is why it
     survived: it only bites when ``width * 3`` is not a multiple of 4.
 
-    MEASURED with ``QImage`` and ``GstVideo.VideoInfo`` on this box: a
-    1366-wide RGB frame has a stride of **4100** against ``width * 3 == 4098``
-    (two bytes per row).  An 854-wide one — a real TRCC panel width — pads
-    2562 to **2564**, so this is device geometry, not only screencast.
+    MEASURED against the BUFFER (``GstVideoMeta`` / ``QImage``), not against a
+    caps-derived default — the earlier citation named ``GstVideo.VideoInfo``,
+    which returns the format's aligned stride and disagreed with the buffer on
+    half the backends tested (see ``_row_stride`` in the PipeWire adapter).  On
+    GNOME a 1366-wide RGB frame really does stride **4100** against
+    ``width * 3 == 4098``, and 854 — a real TRCC panel width — pads 2562 to
+    **2564**.  So this is device geometry, not only screencast.
 
     A tight buffer is returned unchanged, so the common case costs one
     comparison.
+
+    *stride* is a CLAIM about *data*, and the two can disagree.  When the
+    buffer is shorter than the claim, slicing it row by row runs off the end
+    and silently returns a short, sheared frame — which is exactly the failure
+    this function exists to prevent, arrived at from the other direction.  So
+    the claim is checked against the data and the data wins, loudly.
     """
     row = width * 3
     if stride == row:
         return data
+    if height and len(data) < stride * height:
+        log.warning(
+            "unpad_rows: buffer is %d byte(s), but stride %d x %d rows needs "
+            "%d — trusting the buffer, not the claim", len(data), stride,
+            height, stride * height)
+        stride = len(data) // height
+        if stride <= row:
+            return data
     log.debug("unpad_rows: stride=%d row=%d (%d byte(s) of padding per row)",
               stride, row, stride - row)
     return b"".join(data[y * stride:y * stride + row] for y in range(height))

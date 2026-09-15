@@ -93,6 +93,45 @@ _SCREENCAST_IFACE = 'org.freedesktop.portal.ScreenCast'
 _REQUEST_IFACE = 'org.freedesktop.portal.Request'
 
 
+def _row_stride(buf, caps, width: int) -> int:
+    """The stride the BUFFER declares — not the one the caps imply.
+
+    ``VideoInfo.new_from_caps`` returns the format's DEFAULT (aligned) stride,
+    which is not always how the buffer is laid out.  ``GstVideoMeta``, when the
+    buffer carries one, describes the actual layout and is authoritative.
+
+    MEASURED on four backend/width pairs, comparing each claim against
+    ``buffer.get_size()``::
+
+        backend  width   row    caps   meta   buffer      truth
+        wlr        854   2562   2564   2562   1_229_760   tight
+        wlr       1366   4098   4100   4098   3_147_264   tight
+        gnome      854   2562   2564   2564   1_230_720   padded
+        gnome     1366   4098   4100   4100   3_148_800   padded
+
+    **GstVideoMeta matched the buffer 4/4; VideoInfo 2/4.**
+    ``xdg-desktop-portal-wlr`` hands a tightly packed buffer while the caps
+    advertise the aligned stride, so unpadding on the caps claim slices at the
+    wrong offsets and CREATES the diagonal shear ``unpad_rows`` exists to
+    remove — a 427 px drift at 854 wide, which is a shipping TRCC panel width.
+    GNOME is genuinely padded and was never affected.
+
+    ``unpad_rows`` was never wrong here; it was being fed a lie.
+    """
+    meta = GstVideo.buffer_get_video_meta(buf)
+    if meta is not None:
+        frame_log.debug("_row_stride: GstVideoMeta says %d", meta.stride[0])
+        return meta.stride[0]
+    try:
+        stride = GstVideo.VideoInfo.new_from_caps(caps).stride[0]
+    except Exception as e:                           # pragma: no cover - guard
+        log.debug("_row_stride: no meta and no VideoInfo (%s) — tight rows", e)
+        return width * 3
+    log.debug("_row_stride: no GstVideoMeta; falling back to caps stride %d",
+              stride)
+    return stride
+
+
 class PipeWireScreenCast:
     """Portal-based screen capture using PipeWire + GStreamer.
 
@@ -425,12 +464,7 @@ class PipeWireScreenCast:
         struct = caps.get_structure(0)
         width = struct.get_int('width')[1]
         height = struct.get_int('height')[1]
-        # The TRUE stride, from the caps -- not ``width * 3``.  See unpad_rows.
-        try:
-            stride = GstVideo.VideoInfo.new_from_caps(caps).stride[0]
-        except Exception as e:                       # pragma: no cover - guard
-            log.debug("_on_new_sample: no VideoInfo (%s) — assuming tight rows", e)
-            stride = width * 3
+        stride = _row_stride(buf, caps, width)
 
         success, map_info = buf.map(Gst.MapFlags.READ)
         if not success:

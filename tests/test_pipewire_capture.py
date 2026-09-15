@@ -12,6 +12,7 @@ never block a caller on a consent dialog.
 """
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any
 
@@ -455,3 +456,52 @@ def test_select_options_omits_the_token_when_there_is_none() -> None:
 
     assert "restore_token" not in opts
     assert int(opts["types"]) == 1, "monitor capture was not requested"
+
+
+# ── the stride CLAIM can disagree with the DATA ───────────────────────
+
+
+def test_a_buffer_shorter_than_the_stride_claim_is_not_sliced_past_its_end(
+    caplog,
+) -> None:
+    """The exact shape measured against xdg-desktop-portal-wlr.
+
+    It hands a TIGHTLY PACKED 854x480 buffer (1_229_760 bytes) while the caps
+    advertise the aligned stride 2564.  Unpadding on that claim slices at the
+    wrong offsets and returns 1_228_802 bytes -- 958 short, sheared 427 px.
+
+    The data wins over the claim, and it says so.
+    """
+    w, h = 854, 480
+    row, claimed = w * 3, 2564
+    tight = b"".join(bytes([r % 200]) * row for r in range(h))
+    assert len(tight) == 1_229_760, "fixture is not the measured buffer"
+
+    with caplog.at_level(logging.WARNING, logger="trcc.core._frames"):
+        out = unpad_rows(tight, w, h, claimed)
+
+    assert out is tight, "a tight buffer must survive a wrong stride claim"
+    assert len(out) == row * h == 1_229_760
+    assert "trusting the buffer" in caplog.text, (
+        "a stride claim contradicted by the data must not be silent"
+    )
+
+
+def test_the_honest_padded_case_still_unpads() -> None:
+    """GNOME's 854x480 buffer IS padded — 2564 x 480 — and must still strip.
+
+    The guard must not 'fix' the case that was never broken.
+    """
+    w, h, stride = 854, 480, 2564
+    row = w * 3
+    # Row values stay under 200 so they can never collide with the 0xEE
+    # padding sentinel -- a fixture whose data can equal its own marker
+    # cannot tell the two apart, and this one could at row 238.
+    padded = b"".join(bytes([r % 200]) * row + b"\xEE\xEE" for r in range(h))
+    assert len(padded) == stride * h == 1_230_720
+
+    out = unpad_rows(padded, w, h, stride)
+
+    assert len(out) == row * h
+    assert b"\xEE" not in out, "padding survived into the pixels"
+    assert [out[r * row] for r in range(h)] == [r % 200 for r in range(h)]
