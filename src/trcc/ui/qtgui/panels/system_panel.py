@@ -29,21 +29,26 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
 )
 
 from ....core.commands import (
     CheckForUpdate,
+    ControlCenterSnapshot,
     DisableAutostart,
     EnableAutostart,
     GenerateDebugReport,
     GetAutostartStatus,
     GetPlatformInfo,
     ListGpus,
+    ListMemorySlots,
     ReadSensors,
     RunHealthCheck,
+    RunUpgrade,
     SetGpuDevice,
+    SetHddEnabled,
 )
 from ....core.models import AUTOSTART_TARGETS, DEFAULT_AUTOSTART_TARGET
 from ..base import BasePanel
@@ -71,6 +76,8 @@ class SystemPanel(BasePanel):
         self._refresh_platform()
         self._refresh_health()
         self._refresh_sensors()
+        self._refresh_memory()
+        self._refresh_hdd()
         self.start_periodic_updates(_SENSOR_REFRESH_MS, self._refresh_sensors)
 
     # ── Widget builders ───────────────────────────────────────────────
@@ -119,6 +126,11 @@ class SystemPanel(BasePanel):
         )
         self._update_btn = QPushButton("Check for updates", box)
         self._update_btn.clicked.connect(self._on_check_update)
+        # Checking told the user a newer release exists and then offered no way
+        # to get it -- cli has ``trcc system upgrade`` and api has the route,
+        # so qtgui users were the only ones who had to leave the app.
+        self._upgrade_btn = QPushButton("Upgrade now…", box)
+        self._upgrade_btn.clicked.connect(self._on_upgrade)
         self._maint_status = QLabel("", box)
         self._maint_status.setWordWrap(True)
         self._maint_status.setTextFormat(Qt.TextFormat.RichText)
@@ -126,6 +138,7 @@ class SystemPanel(BasePanel):
         form.addRow(self._autostart_check)
         form.addRow("Start:", self._autostart_target)
         form.addRow(self._update_btn)
+        form.addRow(self._upgrade_btn)
         form.addRow(self._maint_status)
         self._refresh_autostart()
         return box
@@ -148,11 +161,29 @@ class SystemPanel(BasePanel):
     def _build_sensors_box(self) -> QGroupBox:
         box = QGroupBox("Sensors (live)", self)
         layout = QVBoxLayout(box)
+        # Whether disk metrics reach sensor broadcasts at all.  Spinning a
+        # sleeping disk to read its temperature is a real cost, which is why
+        # the toggle exists rather than being always-on.
+        self._hdd_check = QCheckBox("Include HDD metrics in broadcasts", box)
+        self._hdd_check.toggled.connect(self._on_hdd_toggled)
+        layout.addWidget(self._hdd_check)
+
         self._sensors_list = QListWidget(box)
         self._sensors_list.setSelectionMode(
             QListWidget.SelectionMode.NoSelection,
         )
         layout.addWidget(self._sensors_list)
+
+        # DRAM identity is per-OS by nature: only Linux enriches with SPD/IMC
+        # timings, so an absent field arrives as "" and is rendered "NC" --
+        # the convention ``Platform.memory_info`` documents.
+        self._memory_list = QListWidget(box)
+        self._memory_list.setSelectionMode(
+            QListWidget.SelectionMode.NoSelection,
+        )
+        self._memory_list.setMaximumHeight(90)
+        layout.addWidget(QLabel("Memory slots:", box))
+        layout.addWidget(self._memory_list)
         return box
 
     def _build_action_row(self) -> QHBoxLayout:
@@ -281,10 +312,72 @@ class SystemPanel(BasePanel):
                 f"Update available: {r.latest_version} "
                 f"(you have {r.local_version}). "
                 f'<a href="{r.release_url}">Release notes</a> — '
-                "upgrade via your package manager.",
+                'press "Upgrade now…" to install it.',
             )
         else:
             self._maint_status.setText(f"Up to date ({r.local_version}).")
+
+    def _on_upgrade(self) -> None:
+        """Run the package-manager upgrade, after showing exactly what runs.
+
+        ``RunUpgrade`` shells out through the system package manager under
+        sudo, so it is confirmed first -- the CLI refuses the same Command
+        without ``--yes`` for this reason.  ``dry_run`` asks the Command
+        itself what it WOULD run, so the confirmation quotes the real command
+        line instead of a UI's guess at it.
+        """
+        log.info("_on_upgrade: asking the Command what it would run")
+        preview = self.dispatch(RunUpgrade(dry_run=True))
+        if not preview.ok:
+            self._maint_status.setText(f"Upgrade unavailable: {preview.message}")
+            return
+        answer = QMessageBox.question(
+            self, "Upgrade TRCC",
+            f"{preview.message}\n\nThis runs as root. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer is not QMessageBox.StandardButton.Yes:
+            log.info("_on_upgrade: declined by the user")
+            self._maint_status.setText("Upgrade cancelled.")
+            return
+        log.info("_on_upgrade: confirmed — running")
+        r = self.dispatch(RunUpgrade(dry_run=False))
+        self._maint_status.setText(
+            r.message if r.ok else f"Upgrade failed: {r.message}",
+        )
+
+    def _refresh_hdd(self) -> None:
+        """Show the PERSISTED flag, not whatever the widget last showed.
+
+        ``blockSignals`` because ``setChecked`` emits ``toggled``, and an
+        unguarded load would dispatch a write on every refresh -- the setting
+        would then be whatever the UI happened to render, not what the user
+        chose.  Same shape as ``_refresh_autostart``.
+        """
+        log.debug("_refresh_hdd")
+        snap = self.dispatch(ControlCenterSnapshot())
+        self._hdd_check.blockSignals(True)
+        self._hdd_check.setChecked(bool(snap.hdd_enabled))
+        self._hdd_check.blockSignals(False)
+
+    def _on_hdd_toggled(self, checked: bool) -> None:
+        log.info("_on_hdd_toggled: enabled=%s", checked)
+        r = self.dispatch(SetHddEnabled(enabled=checked))
+        if not r.ok:
+            log.warning("_on_hdd_toggled: refused — %s", r.message)
+
+    def _refresh_memory(self) -> None:
+        """List the DRAM slots.  Absent per-OS fields render as NC."""
+        log.debug("_refresh_memory")
+        r = self.dispatch(ListMemorySlots())
+        self._memory_list.clear()
+        for slot in r.slots:
+            parts = [slot.locator or "NC", slot.size or "NC",
+                     slot.speed or "NC", slot.manufacturer or "NC"]
+            self._memory_list.addItem(QListWidgetItem("  ".join(parts)))
+        if not r.slots:
+            self._memory_list.addItem(QListWidgetItem("No DRAM slots reported"))
 
     def _save_debug_report(self) -> None:
         default_name = "trcc-debug-report.txt"

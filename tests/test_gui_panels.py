@@ -2014,3 +2014,82 @@ def test_disabling_the_slideshow_stops_the_driver(gui_app: App, qtbot) -> None:
         "turning the slideshow off left the driver rotating"
     )
     assert "StartSlideshowDriver" not in sent
+
+
+# =========================================================================
+# SystemPanel — the surfacings cli/api had and qtgui did not
+# =========================================================================
+
+
+def _system_panel(gui_app: App, qtbot):
+    from trcc.ui.qtgui.panels.system_panel import SystemPanel
+
+    panel = SystemPanel(gui_app, _bus(gui_app))
+    qtbot.addWidget(panel)
+    return panel
+
+
+def test_system_panel_lists_memory_slots(gui_app: App, qtbot) -> None:
+    """Building the panel populates the DRAM list, or says nothing was found.
+
+    An empty widget is not proof of anything -- the list must say WHICH, so a
+    host with no SPD data reads as "reported nothing" rather than as a panel
+    that forgot to load.
+    """
+    panel = _system_panel(gui_app, qtbot)
+
+    assert panel._memory_list.count() >= 1, (
+        "memory list was never populated — _refresh_memory is not being called"
+    )
+
+
+def test_the_hdd_toggle_shows_the_persisted_flag(gui_app: App, qtbot) -> None:
+    """And loading it must NOT write it back.
+
+    ``setChecked`` emits ``toggled``; an unguarded load dispatches a write on
+    every refresh, so the setting becomes whatever the UI rendered rather than
+    what the user chose.
+    """
+    gui_app.settings.set_hdd_enabled(False)
+    panel = _system_panel(gui_app, qtbot)
+    assert panel._hdd_check.isChecked() is False
+
+    # Asserting the VALUE after a refresh cannot see this bug: the write-back
+    # writes the value we just set, so it agrees with the expectation.  What
+    # has to be observed is that a WRITE was attempted at all.
+    gui_app.settings.set_hdd_enabled(True)
+    sent: list[str] = []
+    real = panel.dispatch
+
+    def spy(cmd):
+        sent.append(type(cmd).__name__)
+        return real(cmd)
+
+    panel.dispatch = spy                      # pyright: ignore[reportAttributeAccessIssue]
+    panel._refresh_hdd()
+
+    assert panel._hdd_check.isChecked() is True
+    assert "SetHddEnabled" not in sent, (
+        "refreshing the widget DISPATCHED a write — blockSignals is missing, "
+        "so the setting becomes whatever the UI rendered"
+    )
+
+
+def test_toggling_hdd_persists_it(gui_app: App, qtbot) -> None:
+    panel = _system_panel(gui_app, qtbot)
+
+    panel._hdd_check.setChecked(not panel._hdd_check.isChecked())
+
+    assert gui_app.settings.app.hdd_enabled is panel._hdd_check.isChecked()
+
+
+def test_the_panel_offers_a_way_to_install_an_update(gui_app: App, qtbot) -> None:
+    """Checking for updates told the user one existed and stopped there.
+
+    cli has ``trcc system upgrade`` and api has the route; qtgui users were the
+    only ones who had to leave the app to act on what it told them.
+    """
+    panel = _system_panel(gui_app, qtbot)
+
+    assert hasattr(panel, "_upgrade_btn"), "no upgrade affordance at all"
+    assert panel._upgrade_btn.isEnabled()
