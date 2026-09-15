@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any
 
 import pytest
@@ -505,3 +506,61 @@ def test_the_honest_padded_case_still_unpads() -> None:
     assert len(out) == row * h
     assert b"\xEE" not in out, "padding survived into the pixels"
     assert [out[r * row] for r in range(h)] == [r % 200 for r in range(h)]
+
+
+# ── a running session that stopped delivering ─────────────────────────
+
+
+def test_a_frozen_stream_is_reported_once(caplog, monkeypatch) -> None:
+    """The wlroots shape: one frame arrives, then the SAME one forever.
+
+    ``latest is None`` never fires here -- the adapter is handed a frame every
+    time, so "no frame yet" cannot see this.  What is wrong is that it is the
+    same frame, and the only symptom the user has is a frozen panel.
+    """
+    frame = (4, 4, b"\x09" * 48)
+    cap = _capture(_Session(running=True, frame=frame), _Fallback())
+
+    clock = [1000.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    cap.grab_region(0, 0, 2, 2)                      # first sight, starts the clock
+    clock[0] += PipeWireScreenCapture.STALL_AFTER + 0.1
+
+    with caplog.at_level(logging.WARNING,
+                         logger="trcc.adapters.screencast.pipewire"):
+        cap.grab_region(0, 0, 2, 2)
+        cap.grab_region(0, 0, 2, 2)
+        cap.grab_region(0, 0, 2, 2)
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING
+                and "no new frame" in r.getMessage()]
+    assert len(warnings) == 1, (
+        f"a frozen stream must be reported exactly ONCE, got {len(warnings)}"
+    )
+
+
+def test_a_stream_that_keeps_moving_is_never_called_stalled(
+    caplog, monkeypatch,
+) -> None:
+    """A healthy 30 fps stream must not trip the watchdog.
+
+    GNOME measured 314 buffers in 10s, so a new frame object arrives far
+    inside STALL_AFTER; the clock has to restart on every one.
+    """
+    session = _Session(running=True, frame=(4, 4, b"\x00" * 48))
+    cap = _capture(session, _Fallback())
+
+    clock = [1000.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    with caplog.at_level(logging.WARNING,
+                         logger="trcc.adapters.screencast.pipewire"):
+        for i in range(30):
+            session._frame = (4, 4, bytes([i]) * 48)   # a NEW object each tick
+            clock[0] += PipeWireScreenCapture.STALL_AFTER * 0.9
+            cap.grab_region(0, 0, 2, 2)
+
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING], (
+        "a moving stream was reported as stalled"
+    )

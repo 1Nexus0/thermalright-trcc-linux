@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -606,6 +607,10 @@ class PipeWireScreenCapture(ScreenCapture):
 
     #: Where the portal's restore token is kept, under the caller's config dir.
     TOKEN_FILE = "portal-restore-token"
+    #: Seconds of an unchanging frame before we say the stream stalled.
+    #: Well above any real cadence (the panel refreshes at 15-30 fps),
+    #: so a slow source is never called a stall.
+    STALL_AFTER = 5.0
 
     def __init__(
         self,
@@ -629,6 +634,10 @@ class PipeWireScreenCapture(ScreenCapture):
         self._session: Any = None
         self._started = False
         self._lock = threading.Lock()
+        #: Last frame OBJECT handed out, held so identity comparison is safe.
+        self._last_frame: Any = None
+        self._last_change = 0.0
+        self._stall_warned = False
 
     def grab_region(self, x: int, y: int, width: int, height: int) -> RawFrame:
         """The portal's frame when the session is up, else the fallback's."""
@@ -644,11 +653,60 @@ class PipeWireScreenCapture(ScreenCapture):
         if session is None or not session.is_running:
             return None
         latest = session.grab_frame()
+        self._watch_for_stall(latest)
         if latest is None:
             frame_log.debug("_portal_region: session up but no frame yet")
             return None
         src_w, src_h, data = latest
         return crop_rgb24(data, src_w, src_h, x, y, width, height)
+
+    def _watch_for_stall(self, latest: Any) -> None:
+        """Say so, ONCE, when a running session stops delivering new frames.
+
+        ``start()`` returning True means the portal granted capture, not that
+        pixels are flowing, and the two come apart in practice.
+
+        MEASURED on xdg-desktop-portal-wlr 0.8.4 + sway 1.11, three identical
+        runs at one resolution with a 30 fps client repainting on screen and
+        the damage independently confirmed by ``grim``::
+
+            run 1   211 frames / 10s  (~21 fps)   healthy
+            run 2     1 frame  / 10s              stalled after the first
+            run 3     1 frame  / 10s              stalled after the first
+
+        So it is INTERMITTENT, not deterministic -- the same code and the same
+        compositor either stream or deliver one buffer and stop.  ``grim``
+        (``zwlr_screencopy``) captured 6/6 distinct images throughout, so the
+        compositor keeps producing and the fault is in the portal's
+        ``ext-image-copy-capture-v1`` path, not in the frames existing.
+
+        Intermittence is exactly why this warns rather than being left to a
+        reporter to characterise: two runs in three look like a broken panel.
+
+        The user-visible result is a panel frozen on its first frame, and
+        nothing in the log said so: the only line here was a per-frame DEBUG
+        that a default run never writes.  The failure is upstream, but silence
+        about it is ours, and a reporter cannot tell the two apart.
+
+        Staleness is a HELD REFERENCE compared by identity, never ``id()``:
+        CPython recycles ids of dead objects, which silently broke a cache key
+        in this project before.  A reference we hold cannot be recycled.
+        """
+        now = time.monotonic()
+        if latest is not self._last_frame or not self._last_change:
+            self._last_frame = latest
+            self._last_change = now
+            self._stall_warned = False
+            return
+        if self._stall_warned or now - self._last_change < self.STALL_AFTER:
+            return
+        log.warning(
+            "screencast: the portal session is running but has produced no "
+            "new frame for %.1fs — the panel is showing a frozen image. On "
+            "wlroots compositors this is a known upstream stall in "
+            "xdg-desktop-portal-wlr's ext-image-copy-capture path, not TRCC.",
+            now - self._last_change)
+        self._stall_warned = True
 
     def _ensure_session(self) -> Any:
         """Create and start the session ONCE, off the calling thread."""
