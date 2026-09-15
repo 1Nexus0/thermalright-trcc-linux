@@ -2324,3 +2324,76 @@ def test_releasing_the_scrubber_seeks(gui_app: App, qtbot) -> None:
     seeks = [c for c in sent if type(c).__name__ == "SeekVideo"]
     assert len(seeks) == 1, f"expected exactly one seek, got {len(seeks)}"
     assert seeks[0].frame == 120
+
+
+# =========================================================================
+# SystemPanel — the sensor-dashboard editor
+# =========================================================================
+
+
+def test_the_dashboard_shows_every_panel_and_row(gui_app: App, qtbot) -> None:
+    """Rows carry their (panel, row) address, so a rebind knows what it edits."""
+    panel = _system_panel(gui_app, qtbot)
+
+    assert panel._dash_tree.topLevelItemCount() == len(panel._dashboard)
+    if panel._dashboard:
+        top = panel._dash_tree.topLevelItem(0)
+        assert top is not None
+        assert top.childCount() == len(panel._dashboard[0].sensors)
+
+
+def test_an_unbound_row_says_so(gui_app: App, qtbot) -> None:
+    """``sensor_id=""`` is how the user says "nothing here".
+
+    Rendering it as an empty cell is indistinguishable from a column that
+    failed to populate.
+    """
+    from trcc.core.models import PanelConfig, SensorBinding
+
+    panel = _system_panel(gui_app, qtbot)
+    panel._dashboard = [PanelConfig(
+        category_id=0, name="Test",
+        sensors=[SensorBinding(label="Row", sensor_id="", unit="")],
+    )]
+    # redraw from the working layout
+    real = panel.dispatch
+    from trcc.core.results import SensorDashboardResult
+
+    panel.dispatch = lambda cmd: (                 # pyright: ignore[reportAttributeAccessIssue]
+        SensorDashboardResult(ok=True, panels=tuple(panel._dashboard))
+        if type(cmd).__name__ == "GetSensorDashboard" else real(cmd))
+    panel._refresh_dashboard()
+
+    child = panel._dash_tree.topLevelItem(0).child(0)   # pyright: ignore[reportOptionalMemberAccess]
+    assert child is not None
+    assert "unbound" in child.text(1)
+
+
+def test_saving_sends_the_whole_layout(gui_app: App, qtbot) -> None:
+    """One bulk verb, matching SetOverlayConfig — the UI holds the whole thing."""
+    panel = _system_panel(gui_app, qtbot)
+    sent: list = []
+    real = panel.dispatch
+
+    def spy(cmd):
+        if type(cmd).__name__ == "SetSensorDashboard":
+            sent.append(cmd.panels)
+        return real(cmd)
+
+    panel.dispatch = spy                       # pyright: ignore[reportAttributeAccessIssue]
+    panel._on_save_dashboard()
+
+    assert len(sent) == 1
+    assert len(sent[0]) == len(panel._dashboard)
+
+
+def test_binding_refuses_a_panel_heading(gui_app: App, qtbot) -> None:
+    """A heading has no row address — binding to it would edit row 0 silently."""
+    panel = _system_panel(gui_app, qtbot)
+    if panel._dash_tree.topLevelItemCount() == 0:
+        pytest.skip("host reported no dashboard panels")
+    panel._dash_tree.setCurrentItem(panel._dash_tree.topLevelItem(0))
+
+    panel._on_bind_sensor()
+
+    assert "row" in panel._dash_status.text().lower()
