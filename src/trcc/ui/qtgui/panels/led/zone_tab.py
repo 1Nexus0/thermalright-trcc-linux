@@ -43,6 +43,7 @@ from .....core.commands import (
     SetLedZoneMode,
     SetLedZoneSync,
     SetLedZoneSyncInterval,
+    SetLedZoneSyncZones,
     ToggleLed,
 )
 from .....core.led_models import LEDMode
@@ -202,6 +203,15 @@ class ZoneTab(LedTabBase):
         self._interval_spin.editingFinished.connect(self._on_interval_changed)
         sync_form.addRow(self._sync_check)
         sync_form.addRow("Rotation interval:", self._interval_spin)
+        # WHICH zones the carousel visits.  Without this mask it stays empty
+        # and ``next_sync_zone`` is stuck on page 0 -- the carousel never
+        # advances however the user sets the switch above, so the feature
+        # looks present and does nothing.
+        self._participation = QWidget(sync_box)
+        self._participation_layout = QHBoxLayout(self._participation)
+        self._participation_layout.setContentsMargins(0, 0, 0, 0)
+        self._participation_checks: list[QCheckBox] = []
+        sync_form.addRow("Rotate through:", self._participation)
         root.addWidget(sync_box)
 
         self._placeholder = QLabel(
@@ -247,6 +257,15 @@ class ZoneTab(LedTabBase):
         self._interval_spin.setValue(snapshot.zone_sync_interval_ticks)
         self._interval_spin.blockSignals(False)
 
+        # An empty mask is the "never configured" state, and it is the one that
+        # silently disables the carousel -- show it as every zone participating
+        # so the switch above tells the truth about what it will do.
+        mask = snapshot.zone_sync_zones or ()
+        for i, box in enumerate(self._participation_checks):
+            box.blockSignals(True)
+            box.setChecked(mask[i] if i < len(mask) else True)
+            box.blockSignals(False)
+
     def has_visible_content(self) -> bool:
         """LedPanel uses this to decide whether to surface the tab."""
         return not self._placeholder_visible
@@ -282,6 +301,25 @@ class ZoneTab(LedTabBase):
             )
             self._zones_layout.addWidget(row)
             self._zone_widgets.append(row)
+        self._rebuild_participation(count)
+
+    def _rebuild_participation(self, count: int) -> None:
+        """One checkbox per zone — the carousel's mask, rebuilt with the rows."""
+        log.debug("_rebuild_participation: count=%d", count)
+        while self._participation_layout.count():
+            item = self._participation_layout.takeAt(0)
+            if item is None:
+                break
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self._participation_checks = []
+        for i in range(count):
+            box = QCheckBox(str(i + 1), self._participation)
+            box.toggled.connect(self._on_participation_changed)
+            self._participation_layout.addWidget(box)
+            self._participation_checks.append(box)
+        self._participation_layout.addStretch(1)
 
     # ── Command dispatch ──────────────────────────────────────────────
 
@@ -325,6 +363,14 @@ class ZoneTab(LedTabBase):
             return
         log.info("_on_zone_brightness: zone=%d percent=%d", zone, percent)
         self._dispatch(SetLedZoneBrightness(key=key, zone=zone, percent=percent))
+
+    def _on_participation_changed(self, _checked: bool) -> None:
+        """Send the WHOLE mask — ``SetLedZoneSyncZones`` replaces it wholesale."""
+        mask = tuple(b.isChecked() for b in self._participation_checks)
+        log.info("_on_participation_changed: mask=%s", mask)
+        key = self.current_key()
+        if key:
+            self._dispatch(SetLedZoneSyncZones(key=key, zones=mask))
 
     def _on_sync_toggled(self, checked: bool) -> None:
         log.info("_on_sync_toggled: checked=%s", checked)

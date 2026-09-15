@@ -2191,3 +2191,59 @@ def test_the_date_format_reaches_the_bus(gui_app: App, qtbot) -> None:
     assert sent == [("SetDateFormat", "dd.MM.yyyy")], (
         f"the typed pattern did not reach the bus intact: {sent}"
     )
+
+
+def _zone_tab_with(gui_app: App, qtbot, *, zones: int, mask=()):
+    from trcc.core.results import LedZoneEntry
+    from trcc.ui.qtgui.panels.led import ZoneTab
+
+    tab = ZoneTab(gui_app, _led_key)
+    qtbot.addWidget(tab)
+    tab.refresh_from(_snap(
+        zones=tuple(LedZoneEntry(color=(255, 0, 0)) for _ in range(zones)),
+        zone_sync_zones=mask,
+    ))
+    return tab
+
+
+def test_the_carousel_says_which_zones_it_visits(gui_app: App, qtbot) -> None:
+    """One checkbox per zone, reflecting the persisted mask.
+
+    Without this mask the carousel stays empty and ``next_sync_zone`` is stuck
+    on page 0 — it never advances however the user sets the enable switch, so
+    the feature looks present and does nothing.
+    """
+    tab = _zone_tab_with(gui_app, qtbot, zones=3, mask=(True, False, True))
+
+    assert len(tab._participation_checks) == 3
+    assert [b.isChecked() for b in tab._participation_checks] == [True, False, True]
+
+
+def test_an_unconfigured_mask_shows_every_zone_participating(
+    gui_app: App, qtbot,
+) -> None:
+    """An EMPTY mask is the state that silently disables the carousel.
+
+    Rendering it as "nothing selected" would be accurate about the bytes and a
+    lie about the behaviour the switch above promises.
+    """
+    tab = _zone_tab_with(gui_app, qtbot, zones=3, mask=())
+
+    assert all(b.isChecked() for b in tab._participation_checks)
+
+
+def test_toggling_participation_sends_the_whole_mask(gui_app: App, qtbot) -> None:
+    """``SetLedZoneSyncZones`` replaces the mask wholesale, so send all of it."""
+    tab = _zone_tab_with(gui_app, qtbot, zones=3, mask=(True, True, True))
+    sent: list[tuple] = []
+    real = tab._dispatch
+
+    def spy(cmd):
+        if type(cmd).__name__ == "SetLedZoneSyncZones":
+            sent.append(cmd.zones)
+        return real(cmd)
+
+    tab._dispatch = spy                       # pyright: ignore[reportAttributeAccessIssue]
+    tab._participation_checks[1].setChecked(False)
+
+    assert sent == [(True, False, True)], f"got {sent}"
