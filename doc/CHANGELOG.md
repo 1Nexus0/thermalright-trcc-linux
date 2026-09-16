@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+**Your motherboard's temperature sensors are readable now.** If your board has
+an external probe header — ASUS calls it T_SENSOR1 — or a VRM or chipset
+sensor, TRCC never showed it. It was reading that very chip for its fan speeds
+and walking past a dozen temperature inputs on the same part. On a typical
+desktop that's twelve sensors, none of them offered. They now appear alongside
+your CPU and GPU temperatures and can go on the panel like anything else.
+Headers your board never wired are hidden rather than shown reading zero.
+
+**Some coolers displayed sideways, and now don't.** Panels that report a
+particular mount code were being sent their picture at the wrong angle, so
+landscape and portrait came out swapped. The information was in the handshake
+the whole time and simply wasn't reaching the part that rotates the image. Five
+panel sizes were affected — 1280x480, 1920x462, 1920x440, 1600x720 and 960x540.
+
+**The font you pick for an overlay is finally used.** Choosing a typeface in
+the overlay editor did nothing — text always drew in the default. Fonts that
+came with a theme worked, which is why this looked so arbitrary.
+
+**RAM speed showed the sticker, not the speed.** If you run XMP or EXPO, your
+memory reported its factory-rated number instead of what it's actually running
+at — 4800 on a kit doing 8000. It now reports the real one, and falls back to
+the rated figure when it can't tell.
+
+**A panel that needed two launches should start on the first.** Some displays
+restart when they receive the initial setup packet, which means they briefly
+vanish from USB. TRCC treated that single moment as a hard failure and told you
+to install permissions you already had. It now waits and tries again, and when
+it genuinely can't open a device it no longer blames your udev rules if they're
+present.
+
+**A partly-sent picture no longer reports success.** On one connection type the
+app confirmed it had sent a frame without checking how much of it actually
+arrived, so a half-written image looked exactly like a healthy one.
+
+**`trcc report` now includes your device's firmware revision.** It decides which
+code path a panel takes, and it was only visible deep in the log where it could
+scroll away.
+
+**Packaging:** the project advertised Python 3.9 support on PyPI while refusing
+to install on it. It now says 3.10, which is what it has required for some time.
+
 ## v9.10.0
 
 **Screen casting now works on Wayland from everywhere, not just the app
