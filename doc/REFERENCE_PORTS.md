@@ -6,7 +6,7 @@ Every abstract contract in the tree: what a new implementation must write, what 
 
 Ordered **cheapest to extend first** — the ports at the top are where this codebase welcomes a contributor, the ones at the bottom are where it does not yet.
 
-40 ports.
+41 ports.
 
 | port | implement | inherit | implementations |
 |---|---|---|---|
@@ -22,12 +22,13 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | [`_HidBinding`](#_hidbinding) | 1 | 0 | 2 |
 | [`_QtUI`](#_qtui) | 1 | 1 | 2 |
 | [`DataInstallRunner`](#datainstallrunner) | 2 | 0 | 2 |
-| [`IdentifiedSource`](#identifiedsource) | 2 | 0 | 16 |
+| [`IdentifiedSource`](#identifiedsource) | 2 | 0 | 17 |
 | [`SingleFileTheme`](#singlefiletheme) | 2 | 0 | 1 |
 | [`VideoExportRunner`](#videoexportrunner) | 2 | 0 | 2 |
 | [`_MappingPort`](#_mappingport) | 2 | 0 | 2 |
 | [`BaseBulkDevice`](#basebulkdevice) | 3 | 0 | 4 |
 | [`BaseDevice`](#basedevice) | 3 | 4 | 5 |
+| [`BoardTempSource`](#boardtempsource) | 3 | 0 | 1 |
 | [`Device`](#device) | 3 | 13 | 5 |
 | [`DiskSource`](#disksource) | 3 | 0 | 2 |
 | [`DramSource`](#dramsource) | 3 | 0 | 1 |
@@ -243,7 +244,7 @@ key() -> str
 name() -> str
 ```
 
-**Implementations (16):** `AmdGpu` · `GpuSourceChain` · `HwinfoGpu` · `HwmonDisk` · `HwmonDram` · `HwmonFan` · `IntelGpu` · `LhmDisk` · `LhmGpu` · `MacosHidGpu` · `NvidiaGpu` · `PowermetricsGpu` · `SmcFan` · `SmcGpu` · `SysctlFan` · `WmiVideoControllerGpu`
+**Implementations (17):** `AmdGpu` · `GpuSourceChain` · `HwinfoGpu` · `HwmonDisk` · `HwmonDram` · `HwmonFan` · `IntelGpu` · `LhmDisk` · `LhmGpu` · `MacosHidGpu` · `NvidiaGpu` · `PowermetricsGpu` · `PsutilBoardTemp` · `SmcFan` · `SmcGpu` · `SysctlFan` · `WmiVideoControllerGpu`
 
 ## SingleFileTheme
 
@@ -323,6 +324,22 @@ _write_frame(frame: 'bytes') -> bool
 **You inherit (4):** `connect` · `disconnect` · `profile` · `send`
 
 **Implementations (5):** `BulkLcd` · `HidLcd` · `Led` · `LyLcd` · `ScsiLcd`
+
+## BoardTempSource
+
+`core/ports.py`
+
+One motherboard / super-I/O temperature input.
+
+**You implement (3):**
+
+```python
+key() -> str
+name() -> str
+temp() -> float | None
+```
+
+**Implementations (1):** `PsutilBoardTemp`
 
 ## Device
 

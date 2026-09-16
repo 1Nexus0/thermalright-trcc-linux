@@ -29,6 +29,7 @@ from contextlib import AbstractContextManager, nullcontext
 from ...core.logs import per_frame
 from ...core.models import MIN_REFRESH_INTERVAL_S, SensorReading
 from ...core.ports import (
+    BoardTempSource,
     CpuSource,
     DiskSource,
     DramSource,
@@ -50,7 +51,12 @@ from .hwmon import (
     scan_hwmon_devices,
 )
 from .nvml import discover_nvidia_gpus
-from .psutil_sources import ComputedIo, PsutilCpu, PsutilMemory
+from .psutil_sources import (
+    ComputedIo,
+    PsutilCpu,
+    PsutilMemory,
+    discover_board_temps,
+)
 
 log = logging.getLogger(__name__)
 frame_log = per_frame(__name__)
@@ -161,6 +167,7 @@ class BaselineSensors(SensorEnumerator):
                  fans: list[FanSource] | None = None,
                  disks: list[DiskSource] | None = None,
                  dram: list[DramSource] | None = None,
+                 board_temps: list[BoardTempSource] | None = None,
                  spd_clock: SpdClock | None = None,
                  thread_context: Callable[[], AbstractContextManager[None]]
                      = nullcontext) -> None:
@@ -170,6 +177,7 @@ class BaselineSensors(SensorEnumerator):
         self._fans: list[FanSource] = fans or []
         self._disks: list[DiskSource] = disks or []
         self._dram: list[DramSource] = dram or []
+        self._board: list[BoardTempSource] = board_temps or []
         self._spd_clock = spd_clock
         # Per-thread OS setup the poll thread enters before touching OS
         # sensor APIs (Windows → COM apartment for WMI; others → no-op).
@@ -377,6 +385,17 @@ class BaselineSensors(SensorEnumerator):
                     value=current.get(key, 0.0), unit=unit, label=fan.name,
                 ))
 
+        # Board / super-I/O temperatures.  Plural and user-chosen, exactly
+        # like fans -- and read off the SAME chip, which is the part that made
+        # the gap invisible: we already opened an nct6xxx for its fans and
+        # walked past its dozen temperature inputs (#259, #282).
+        for board in self._board:
+            key = f"board:{board.key}:temp"
+            readings.append(SensorReading(
+                sensor_id=key, category="temperature",
+                value=current.get(key, 0.0), unit="°C", label=board.name,
+            ))
+
         for key, cat, unit in _io_keys() + _time_keys():
             readings.append(SensorReading(
                 sensor_id=key, category=cat,
@@ -550,6 +569,10 @@ class BaselineSensors(SensorEnumerator):
 
         # DRAM temperature — one DramSource per DIMM; the model carries a single
         # ``mem_temp`` slot, so collapse to the HOTTEST module, mirroring disk.
+        for board in self._board:
+            _store(r, f"board:{board.key}:temp",
+                   self._read(board.temp, f"board:{board.key}:temp"))
+
         dram_temps = [
             t for d in self._dram
             if (t := self._read(d.temp, f"memory:{d.key}:temp")) is not None
@@ -612,6 +635,7 @@ def build_linux_sensors() -> BaselineSensors:
     fans = discover_fans(hwmon_devices)
     disks = discover_disk_temp(hwmon_devices)
     dram = discover_dram_temp(hwmon_devices)
+    board_temps = discover_board_temps()
     spd_clock = SpdClock()
     log.info("Linux sensors: cpu_temp=%s, gpus=%d, fans=%d, disks=%d, dram=%d, "
              "mem_clock=%s",
@@ -619,4 +643,4 @@ def build_linux_sensors() -> BaselineSensors:
              len(gpus), len(fans), len(disks), len(dram), spd_clock.clock())
     return BaselineSensors(cpu=cpu, memory=PsutilMemory(),
                            gpus=gpus, fans=fans, disks=disks, dram=dram,
-                           spd_clock=spd_clock)
+                           board_temps=board_temps, spd_clock=spd_clock)

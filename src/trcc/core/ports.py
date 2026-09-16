@@ -750,6 +750,33 @@ class DiskSource(IdentifiedSource):
         """Current temperature in °C, or None."""
 
 
+class BoardTempSource(IdentifiedSource):
+    """One motherboard / super-I/O temperature input.
+
+    The sensors every other port deliberately does NOT claim.  CPU, GPU, disk
+    and DRAM temperatures are ROLE-typed -- we know what they mean -- so each
+    has its own port and its own discovery.  A board sensor has no role: it is
+    whatever the builder wired to that header, which is why the user has to be
+    the one who picks it.
+
+    That gap was invisible because the chip was already half-read.  A Nuvoton
+    ``nct6xxx`` is enumerated for its FANS (``hwmon.py`` says so in its own
+    module docstring) while its dozen ``tempN_input`` channels were passed
+    over -- so on a typical desktop we walked past ``SYSTIN``, ``CPUTIN`` and
+    five ``AUXTIN`` inputs on a chip we already had open.  ``T_SENSOR1``, the
+    external probe header ASUS boards expose, is one of those AUXTINs (#259),
+    and a Fujitsu ``sch5636`` went entirely unseen (#282).
+
+    Plural and identifiable, hence :class:`IdentifiedSource`: this is exactly
+    the set a preference can be pinned to, which is the whole reason a user
+    asks for it.
+    """
+
+    @abstractmethod
+    def temp(self) -> float | None:
+        """Current temperature in Celsius, or ``None``."""
+
+
 class DramSource(IdentifiedSource):
     """One memory module's SPD-hub thermal sensor.
 

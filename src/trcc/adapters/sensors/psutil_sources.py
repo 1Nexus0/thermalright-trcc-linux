@@ -19,7 +19,7 @@ import time
 import psutil  # pyright: ignore[reportMissingImports]
 
 from ...core.logs import per_frame
-from ...core.ports import CpuSource, MemorySource
+from ...core.ports import BoardTempSource, CpuSource, MemorySource
 
 log = logging.getLogger(__name__)
 frame_log = per_frame(__name__)
@@ -163,3 +163,114 @@ class ComputedIo:
                 readings["net:down"] = (
                     (net.bytes_recv - prev_net.bytes_recv) / (dt * 1024))
         self._net_prev = (net, now)
+
+
+# ── Motherboard / super-I/O temperatures (#259, #282) ────────────────────────
+
+#: Chips a ROLE-typed source already owns.  Skipped so a DIMM does not appear
+#: twice, once as ``memory:temp`` and once as a nameless board sensor.  Kept in
+#: step with ``hwmon._CPU_DRIVERS`` / ``_DISK_DRIVERS`` / ``_DRAM_DRIVERS`` and
+#: the GPU drivers beside them.
+_ROLE_OWNED_CHIPS = frozenset({
+    "coretemp", "k10temp", "zenpower",          # cpu
+    "amdgpu", "nouveau", "i915", "xe",          # gpu
+    "nvme", "drivetemp",                        # disk
+    "spd5118", "jc42",                          # dram
+})
+
+
+def _slug(chip: str, label: str, index: int) -> str:
+    """A stable, readable key for one board input.
+
+    The LABEL is the identity a user recognises -- they are looking for
+    ``T_SENSOR1``, and on this hardware that is an ``AUXTIN``.  Falls back to
+    the positional index only when the chip publishes no label, because a bare
+    ``temp7`` tells the user nothing and two unlabelled chips would collide.
+    """
+    log.debug("_slug: chip=%s label=%r index=%d", chip, label, index)
+    base = label.strip() or f"temp{index}"
+    cleaned = "".join(c if c.isalnum() else "_" for c in base).strip("_").lower()
+    return f"{chip}_{cleaned}" if cleaned else f"{chip}_temp{index}"
+
+
+class PsutilBoardTemp(BoardTempSource):
+    """One board temperature, read through psutil rather than raw sysfs.
+
+    psutil is already a hard dependency here (CPU, memory and network all come
+    from it), and its ``sensors_temperatures`` does two things our own hwmon
+    scanner does not:
+
+    * it globs ``/sys/class/hwmon/hwmon*/device/temp*_*`` as well as the plain
+      path -- **the exact fallback #282 asked for**, for chips that hang their
+      inputs one directory deeper (his Fujitsu ``sch5636``);
+    * it falls back to ``/sys/class/thermal/thermal_zone*`` when hwmon yields
+      nothing at all.
+
+    So this reads a wider set than a bespoke parser would, on every OS psutil
+    supports, for no new dependency.
+    """
+
+    def __init__(self, chip: str, label: str, index: int) -> None:
+        log.debug("PsutilBoardTemp: chip=%s label=%s index=%d",
+                  chip, label, index)
+        self._chip = chip
+        self._label = label
+        self._index = index
+        self._key = _slug(chip, label, index)
+
+    @property
+    def key(self) -> str:
+        frame_log.debug("key: %s", self._key)
+        return self._key
+
+    @property
+    def name(self) -> str:
+        frame_log.debug("name: %s", self._label)
+        return f"{self._label or f'temp{self._index}'} ({self._chip})"
+
+    def temp(self) -> float | None:
+        try:
+            entries = psutil.sensors_temperatures().get(self._chip, [])
+        except (psutil.Error, AttributeError, OSError) as e:
+            log.debug("PsutilBoardTemp.temp: %s unreadable (%s)", self._chip, e)
+            return None
+        for i, entry in enumerate(entries, start=1):
+            if i == self._index:
+                return float(entry.current) if entry.current else None
+        return None
+
+
+def discover_board_temps() -> list[BoardTempSource]:
+    """Every labelled board temperature the OS will admit to.
+
+    **Zero readings are dropped, and that is not cosmetic.**  On this desk the
+    ``nct6798`` publishes twelve inputs and four of them
+    (``PCH_CHIP_TEMP``, ``PCH_CPU_TEMP``, ``PCH_MCH_TEMP``,
+    ``PCH_CHIP_CPU_MAX_TEMP``) read exactly ``0.0`` -- the documented signature
+    of a header the board never wired.  lm-sensors users mask those with
+    per-board ``ignore`` directives in ``/etc/sensors.d``, which we cannot
+    ship, so the filter has to live here or every one of those users is handed
+    four dead sensors to choose between.
+
+    Exactly ``0.0`` only.  A real probe reading a cold room is a low number,
+    not a zero, so a range check would throw away the very sensor #259 is
+    asking for.
+    """
+    sources: list[BoardTempSource] = []
+    try:
+        chips = psutil.sensors_temperatures()
+    except (psutil.Error, AttributeError, OSError) as e:
+        log.info("discover_board_temps: unavailable (%s)", e)
+        return sources
+    for chip, entries in sorted(chips.items()):
+        if chip in _ROLE_OWNED_CHIPS:
+            continue
+        for index, entry in enumerate(entries, start=1):
+            if not entry.current:
+                log.debug("discover_board_temps: %s/%s reads 0 — unconnected "
+                          "header, skipped", chip, entry.label or index)
+                continue
+            sources.append(PsutilBoardTemp(chip, entry.label or "", index))
+    log.info("discover_board_temps: %d board sensor(s) across %d chip(s)",
+             len(sources), len(chips))
+    return sources
