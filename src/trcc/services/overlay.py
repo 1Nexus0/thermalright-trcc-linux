@@ -139,14 +139,26 @@ def effective_overlay_layout(
 def _element_family(element: dict[str, Any]) -> str:
     """The element's own font family, or "" for the renderer's theme default.
 
-    Both parsers have always written it under ``name`` (``_dc.py`` for DC
-    themes, ``theme.py`` for the JSON/legacy shape) and nothing ever read it,
-    so every overlay drew in the theme default no matter what the DC stored or
-    the user picked.  ``name`` is the established key -- the serializer round-
-    trips it (``ui/presentation/overlay_serialization.py``) -- so it stays, and
-    this is the one place that reads it.
+    **Two producers, two shapes, and reading one of them was a silent bug.**
+
+    * ``_dc.py`` spreads the font dict FLAT onto the element (``**font``), so a
+      DC theme's family arrives as ``element["name"]``.
+    * ``ui/presentation/overlay_serialization.py`` NESTS it -- ``element
+      ["font"]["name"]`` -- which is the shape every user edit takes.
+
+    This read only the flat key, so theme fonts applied and the font the user
+    picked in the overlay editor never did: ``_element_family`` returned ``""``
+    and the renderer fell back to its default family.  Reported by @ocarinal
+    (#291) against v9.9.11, with a patch, and reproduced here from the
+    serializer's own output before fixing.
+
+    Reading both shapes is deliberately the SMALL fix.  Making the two
+    producers agree on one shape is the right cleanup and a separate change --
+    it moves a format both a DC parser and a saved-theme round-trip depend on.
     """
-    family = str(element.get("name", ""))
+    font = element.get("font")
+    nested = font.get("name", "") if isinstance(font, dict) else ""
+    family = str(element.get("name", "") or nested)
     frame_log.debug("_element_family: %r", family)
     return family
 

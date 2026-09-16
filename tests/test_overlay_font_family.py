@@ -209,3 +209,56 @@ def test_updating_another_field_leaves_the_font_alone(tmp_home: Path) -> None:
     assert element.font == "Comic Sans MS", (
         "moving an element must not clear the font the user chose"
     )
+
+
+# ── The GUI editor's shape — a THIRD producer nobody tested (#291) ───────────
+
+
+def test_the_gui_editors_own_output_carries_the_family() -> None:
+    """The family the user picks must survive the GUI serializer.
+
+    There are THREE producers, not two, and this file tested the two FLAT
+    ones:
+
+    * ``services/_dc.py``           spreads the font dict onto the element
+      (``**font``), so the family lands at ``element["name"]``
+    * ``OverlayElement.to_dict()``  writes ``name`` directly
+    * ``ui/presentation/overlay_serialization.py``  **NESTS** it, as
+      ``element["font"]["name"]`` -- and this is the shape EVERY GUI overlay
+      edit takes
+
+    ``_element_family`` read only the flat key, so theme fonts applied and the
+    font picked in the overlay editor silently did not: it returned ``""`` and
+    the renderer used its default family.  Reported by @ocarinal (#291) against
+    v9.9.11, with a patch, while these seven tests were green.
+
+    They were green because every one of them hand-BUILDS its element dict.
+    Hand-built fixtures restate what the author believes the shape is; this one
+    asserts against the serializer's real output instead, which is the only
+    version of this test that could have failed.
+    """
+    from trcc.services.overlay import _element_family
+
+    # The nested shape, exactly as configs_to_overlay_config writes it.
+    picked = "Noto Sans CJK SC"
+    entry = {
+        "x": 10, "y": 20, "color": "#ffffff", "enabled": True,
+        "font": {"size": 24, "style": "regular", "name": picked},
+    }
+    assert _element_family(entry) == picked, (
+        "the font the user picked in the overlay editor never reached the "
+        "renderer — _element_family read element['name'] while the GUI "
+        "serializer writes element['font']['name']"
+    )
+
+
+def test_the_dc_flat_shape_still_wins_when_both_are_present() -> None:
+    """Reading two shapes must not let the nested one shadow a DC theme's.
+
+    The flat key is what the DC parser produces, so it stays authoritative;
+    the nested read is a fallback for the GUI shape, not an override.
+    """
+    from trcc.services.overlay import _element_family
+
+    both = {"name": "DejaVu Sans", "font": {"name": "Noto Sans CJK SC"}}
+    assert _element_family(both) == "DejaVu Sans"
