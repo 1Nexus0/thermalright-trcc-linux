@@ -493,7 +493,20 @@ class PipeWireScreenCast:
         then the session drops and the panel stays black.  Nothing in that
         sequence points at a missing plugin, and ``parse_launch``'s own
         message (``no element "pipewiresrc"``) names the element but not the
-        package to install.  This is issue #280.
+        package to install.
+
+        That shape MATCHES issue #280's description, and this guard is NOT
+        evidence it is #280's cause.  The reporter's log carries no GStreamer,
+        portal or pipewire failure line at all -- the one screencast line in
+        it fires during the consent window, before any pipeline is built, and
+        says nothing about plugins.  The match was read off their prose, not
+        their log.  What settles it is one command, ``gst-inspect-1.0
+        pipewiresrc``, which nobody has run on that machine yet.
+
+        The guard earns its place regardless: the packaging gap it names is
+        measured, not inferred, and GUIDE_TROUBLESHOOTING listed the plugin
+        on no distro while telling Arch users to install a package that does
+        not exist.
         """
         if Gst.ElementFactory.find("pipewiresrc") is None:
             raise RuntimeError(
