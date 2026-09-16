@@ -481,8 +481,8 @@ def probe_canvas_size_stable(_platform, info: ProductInfo) -> ProbeResult:
 
     if info.fbl is None:
         return _skip(f"{info.key} has no static FBL (resolution is handshake-derived)")
-    a = fbl_to_resolution(info.fbl, 0)
-    b = fbl_to_resolution(info.fbl, 0)
+    a = fbl_to_resolution(info.fbl, REPORT_PM)
+    b = fbl_to_resolution(info.fbl, REPORT_PM)
     if a != b:
         return _bad(f"FBL={info.fbl} drifted: {a} → {b}")
     if a[0] == 0 or a[1] == 0:
@@ -650,6 +650,35 @@ def _select_devices(spec: str) -> list[tuple[tuple[int, int], ProductInfo]]:
 # and every registry-known VID:PID for the device matrix.
 
 
+#: PM byte lifted from a ``--from-report`` dump.  0 means "not known", which
+#: is what every non-report run has always passed.
+REPORT_PM: int = 0
+
+
+def _pm_from_report(text: str) -> int:
+    """The panel-model byte the reporter's own hardware announced.
+
+    A report carries this -- the handshake logs it and the device table
+    prints it -- and the harness used to throw it away and pass 0.  For the
+    FBL 192/224 families PM is what *disambiguates* the resolution, so
+    passing 0 made the tool print "UNKNOWN PM=0 ... assuming 1920x462"
+    against hardware whose PM is right there in the file.  That is a
+    fabricated condition, not the reporter's, and it is worse than no
+    answer because it looks like a finding.
+
+    Takes the most frequent value: a report's log tail repeats the live PM
+    on every handshake, so frequency beats first-seen when an older line
+    from a previous run is still in the rotation.
+    """
+    hits = re.findall(r"\bPM[= ]+(\d{1,3})\b", text, re.IGNORECASE)
+    if not hits:
+        return 0
+    counts: dict[str, int] = {}
+    for h in hits:
+        counts[h] = counts.get(h, 0) + 1
+    return int(max(counts, key=lambda k: counts[k]))
+
+
 def _os_from_report(text: str) -> str:
     """Map the report's ``system`` / ``distro`` fields to an OS label."""
     system_match = re.search(r"^\s*system\s+(.+)$", text, re.MULTILINE)
@@ -684,7 +713,9 @@ def _select_devices_from_report(
 ) -> tuple[str, list[tuple[tuple[int, int], ProductInfo]]]:
     """Run probes against every registered device the report mentions."""
     text = report_path.read_text(encoding="utf-8", errors="replace")
+    global REPORT_PM
     os_label = _os_from_report(text)
+    REPORT_PM = _pm_from_report(text)
     pairs = _vid_pids_from_report(text)
     matched = [(vp, ALL_DEVICES[vp]) for vp in pairs if vp in ALL_DEVICES]
 
