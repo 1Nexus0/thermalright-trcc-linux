@@ -410,7 +410,12 @@ def test_linux_memory_reports_only_populated_slots() -> None:
     assert [s["locator"] for s in slots] == ["DIMM 0", "DIMM 2"]
     first = slots[0]
     assert first["type"] == "DDR5"
-    assert first["speed"] == "6000 MT/s"
+    # The fixture is a real G.Skill F5-6000 kit with XMP OFF: rated 6000,
+    # `Configured Memory Speed: 4800`.  It is genuinely RUNNING at 4800, and
+    # that is what we report now (#279).  This asserted the 6000 nameplate
+    # until 2026-09-15 -- the same wrong half a reporter hit from the other
+    # direction, with 8000 sticks showing 4800.
+    assert first["speed"] == "4800 MT/s"
     assert first["configured_memory_speed"] == "4800 MT/s"
     assert first["part_number"] == "F5-6000J3038F16G"
     # `Array Handle` is not in _DMI_MEMORY_FIELDS and must be dropped.
@@ -431,3 +436,42 @@ def test_linux_memory_falls_back_to_psutil(output: str, returncode: int) -> None
     assert len(slots) == 1
     assert slots[0]["type"] == slots[0]["manufacturer"] == "Unknown"
     assert slots[0]["size"].endswith(" GB")
+
+
+# ── The speed the controller RUNS, not the nameplate (#279) ──────────────────
+
+
+def test_the_configured_speed_wins_over_the_nameplate() -> None:
+    """DDR5 at XMP must report its real rate, not its JEDEC nameplate.
+
+    ``dmidecode`` Type 17 carries both and we displayed the wrong one: a
+    reporter with 8000 MT/s DDR5, verified with their own ``dmidecode -t17``,
+    saw 4800 (#279).  4800 is what EVERY DDR5 stick's SPD says, by spec, so the
+    panel was showing a number that is true about the part and useless about
+    the machine.
+    """
+    from trcc.adapters.system.linux import _prefer_configured_speed
+
+    slots = [{"locator": "DIMM_A1", "speed": "4800 MT/s",
+              "configured_memory_speed": "8000 MT/s"}]
+    _prefer_configured_speed(slots)
+    assert slots[0]["speed"] == "8000 MT/s"
+
+
+@pytest.mark.parametrize("configured", ["4800 MT/s", "Unknown", "", None])
+def test_the_nameplate_stands_when_there_is_nothing_better(
+    configured: str | None,
+) -> None:
+    """Fall back, never blank.
+
+    A JEDEC machine reports the same number twice; an older ``dmidecode`` omits
+    the field; some boards answer ``Unknown``.  None of those may lose the
+    speed we already had -- that would trade a wrong number for no number.
+    """
+    from trcc.adapters.system.linux import _prefer_configured_speed
+
+    slot: dict[str, str] = {"locator": "DIMM_A1", "speed": "4800 MT/s"}
+    if configured is not None:
+        slot["configured_memory_speed"] = configured
+    _prefer_configured_speed([slot])
+    assert slot["speed"] == "4800 MT/s"

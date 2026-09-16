@@ -1111,6 +1111,39 @@ def _parse_dmi_memory(output: str) -> list[dict[str, str]]:
     return slots
 
 
+def _prefer_configured_speed(slots: list[dict[str, str]]) -> None:
+    """Report the speed the controller RUNS, not the stick's nameplate.
+
+    ``dmidecode`` Type 17 carries two different numbers and we kept both while
+    displaying the wrong one:
+
+        Speed:                     the SPD/JEDEC nameplate  (DDR5: 4800 MT/s)
+        Configured Memory Speed:   what the IMC actually runs (XMP/EXPO)
+
+    A reporter with 8000 MT/s DDR5, verified by their own ``dmidecode -t17``,
+    saw 4800 on the panel (#279).  Both numbers were already in
+    ``_DMI_MEMORY_FIELDS``; ``configured_memory_speed`` was parsed and then
+    consumed by nothing.
+
+    This is what the Windows adapter has always done -- ``ConfiguredClockSpeed
+    or Speed`` (``windows.py``) -- so Linux now matches rather than inventing a
+    second rule.  Falls back to the nameplate whenever the configured value is
+    absent or unknown, which is what a JEDEC-speed machine reports anyway.
+
+    No new privilege: this reads a field the same ``dmidecode`` call already
+    returned.
+    """
+    for slot in slots:
+        configured = slot.get("configured_memory_speed", "").strip()
+        if not configured or configured.lower().startswith("unknown"):
+            continue
+        nameplate = slot.get("speed", "").strip()
+        if configured != nameplate:
+            log.info("_prefer_configured_speed: %s runs at %s (nameplate %s)",
+                     slot.get("locator", "?"), configured, nameplate or "NC")
+        slot["speed"] = configured
+
+
 def _linux_memory_info() -> list[dict[str, str]]:
     """Get DRAM slot info via dmidecode; falls back to psutil for totals."""
     log.debug("_linux_memory_info: called")
@@ -1129,6 +1162,7 @@ def _linux_memory_info() -> list[dict[str, str]]:
     except (OSError, subprocess.SubprocessError) as e:
         log.debug("dmidecode -t memory failed: %s", type(e).__name__)
 
+    _prefer_configured_speed(slots)
     _enrich_with_spd_timings(slots)
     _enrich_with_live_imc_timings(slots)
 
