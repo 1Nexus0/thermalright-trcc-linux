@@ -564,3 +564,51 @@ def test_a_stream_that_keeps_moving_is_never_called_stalled(
     assert not [r for r in caplog.records if r.levelno == logging.WARNING], (
         "a moving stream was reported as stalled"
     )
+
+
+# ── The missing GStreamer plugin (issue #280) ────────────────────────────────
+
+
+class _NoPipewireSrc:
+    """A GStreamer whose plugin set is missing ``pipewiresrc``."""
+
+    class ElementFactory:
+        @staticmethod
+        def find(name: str) -> Any:
+            return None if name == "pipewiresrc" else object()
+
+    @staticmethod
+    def parse_launch(_desc: str) -> Any:        # pragma: no cover - must not run
+        raise AssertionError(
+            "the pipeline was built despite pipewiresrc being absent",
+        )
+
+
+def test_a_missing_pipewiresrc_names_the_package_to_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The element lives in its own package on every distro, and the
+    failure it produces otherwise looks like anything but a missing plugin:
+    the portal grant SUCCEEDS, the desktop shows "screen is being shared",
+    then the session drops and the panel stays black (issue #280).
+
+    ``parse_launch`` would say ``no element "pipewiresrc"`` — the element,
+    never the package — so the guard has to carry the install hint itself.
+    """
+    monkeypatch.setattr(pw, "Gst", _NoPipewireSrc, raising=False)
+    cast = pw.PipeWireScreenCast()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        cast._start_gstreamer()
+
+    message = str(excinfo.value)
+    for package in ("pipewire-gstreamer",          # Fedora
+                    "gstreamer1.0-pipewire",       # Debian / Ubuntu
+                    "gst-plugin-pipewire"):        # Arch
+        assert package in message, (
+            f"the error must name {package} — a user cannot act on "
+            f"'no element pipewiresrc' alone. Got: {message}"
+        )
+    assert "gst-inspect-1.0 pipewiresrc" in message, (
+        "the error must say how to confirm the fix worked"
+    )

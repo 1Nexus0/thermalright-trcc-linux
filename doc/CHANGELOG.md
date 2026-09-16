@@ -20,6 +20,15 @@ stops. That is a bug in the system component, not in TRCC, and the log now
 says so plainly instead of leaving you to guess. There is an entry in the
 troubleshooting guide with what to try.
 
+**If casting needs a package you haven't got, TRCC now says which one.** The
+part that reads the screen — GStreamer's `pipewiresrc` — ships in its own
+package that nothing else pulls in. Without it you got the permission prompt,
+approved it, saw your desktop say "screen is being shared" for a second, and
+then a black panel with nothing useful in the log. It now names the package to
+install for your distro. The troubleshooting guide was also missing that
+package for **every** distro it lists, and its Arch command named a package
+that does not exist; both are corrected.
+
 **The captured region now matches your panel's shape.** Drag any rectangle and
 it is fitted to the display's proportions, the way the Windows app always did
 — so what you framed is what appears, instead of being squashed to fit.

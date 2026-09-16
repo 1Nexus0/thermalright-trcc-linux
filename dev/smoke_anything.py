@@ -364,26 +364,49 @@ def probe_video_size_zero(_platform, _info) -> ProbeResult:
 
 
 def probe_video_size_portrait(_platform, _info) -> ProbeResult:
-    """Portrait ``size`` decodes the expected frame count without collapse."""
+    """Portrait ``size`` decodes the expected frame count without collapse.
+
+    The payload must be shaped like what ffmpeg ACTUALLY emits.  This probe
+    fed ``b"\\x00" * (w*h*3)`` -- one raw RGB24 frame -- until 2026-09-15, and
+    reported ``pipeline drops portrait`` on all five devices.  The pipeline
+    drops nothing: ``VideoDecoder`` asks for ``-c:v mjpeg -f image2pipe`` and
+    splits the stream on JPEG SOI/EOI markers (#264, #256), so a buffer of
+    zero bytes carries no frame to find and the decoder was right to return
+    none.  Landscape failed identically, which is the tell that orientation
+    was never involved.
+
+    A stale harness that accuses the product is worse than no harness -- see
+    ``memory/project_the_mock_did_the_apps_job.md``.  Both orientations are
+    checked now, so the next encoding change fails loudly instead of being
+    reported as a portrait bug.
+    """
     from unittest.mock import patch
 
     from trcc.services.media import VideoDecoder
 
+    wanted = 3
+    mjpeg = (b"\xff\xd8" + b"jpeg-body" + b"\xff\xd9") * wanted
+
     def _fake_run(*_a, **_k):
         class _R:
             returncode = 0
-            stdout = b"\x00" * (320 * 480 * 3)  # one 320x480 RGB24 frame
+            stdout = mjpeg
             stderr = b""
         return _R()
 
     try:
-        with patch("trcc.services.media.subprocess.run", side_effect=_fake_run), \
-             patch("trcc.services.media._ffmpeg_available", return_value=True), \
-             patch.object(Path, "exists", return_value=True):
-            frames = VideoDecoder(Path("/tmp/x.mp4"), size=(320, 480)).decode()
-        if len(frames) == 0:
-            return _bad("portrait 320x480 decoded zero frames — pipeline drops portrait")
-        return _ok(f"portrait 320x480 → {len(frames)} frame(s)")
+        for label, size in (("portrait", (320, 480)),
+                            ("landscape", (480, 320))):
+            with patch("trcc.services.media.subprocess.run", side_effect=_fake_run), \
+                 patch("trcc.services.media._ffmpeg_available", return_value=True), \
+                 patch.object(Path, "exists", return_value=True):
+                frames = VideoDecoder(Path("/tmp/x.mp4"), size=size).decode()
+            if len(frames) != wanted:
+                return _bad(
+                    f"{label} {size[0]}x{size[1]} decoded {len(frames)} "
+                    f"frame(s), expected {wanted}",
+                )
+        return _ok(f"portrait + landscape → {wanted} frame(s) each")
     except Exception as e:
         return _err(f"{type(e).__name__}: {e}")
 

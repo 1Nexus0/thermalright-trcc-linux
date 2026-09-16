@@ -478,7 +478,30 @@ class PipeWireScreenCast:
     # --- Internal: GStreamer pipeline ---
 
     def _start_gstreamer(self):
-        """Create and start GStreamer pipeline to read PipeWire frames."""
+        """Create and start GStreamer pipeline to read PipeWire frames.
+
+        The ``pipewiresrc`` check is worth a named guard rather than being
+        left to ``parse_launch``.  The plugin lives in its OWN package on
+        every distro -- ``pipewire-gstreamer`` (Fedora),
+        ``gstreamer1.0-pipewire`` (Debian/Ubuntu), ``gst-plugin-pipewire``
+        (Arch) -- and none of them is pulled in by the GStreamer Python
+        bindings, so a user who installs what the guide used to list gets
+        every other piece and not this one.
+
+        The failure that produces is badly misleading: the portal grant
+        SUCCEEDS, the desktop shows "screen is being shared" for a moment,
+        then the session drops and the panel stays black.  Nothing in that
+        sequence points at a missing plugin, and ``parse_launch``'s own
+        message (``no element "pipewiresrc"``) names the element but not the
+        package to install.  This is issue #280.
+        """
+        if Gst.ElementFactory.find("pipewiresrc") is None:
+            raise RuntimeError(
+                "the GStreamer 'pipewiresrc' element is missing — install "
+                "pipewire-gstreamer (Fedora), gstreamer1.0-pipewire "
+                "(Debian/Ubuntu) or gst-plugin-pipewire (Arch), then check "
+                "it with: gst-inspect-1.0 pipewiresrc",
+            )
         # Pipeline: pipewiresrc → videoconvert → RGB → appsink
         pipeline_str = (
             f"pipewiresrc fd={self._pipewire_fd} path={self._node_id} "

@@ -376,14 +376,31 @@ sudo pacman -S ffmpeg
 
 ```bash
 # Fedora
-sudo dnf install python3-gobject python3-dbus pipewire-devel
+sudo dnf install python3-gobject python3-dbus \
+    gstreamer1-plugins-base pipewire-gstreamer
 
 # Ubuntu / Debian
-sudo apt install python3-gi python3-dbus python3-gst-1.0
+sudo apt install python3-gi python3-dbus python3-gst-1.0 \
+    gir1.2-gst-plugins-base-1.0 gstreamer1.0-pipewire
 
 # Arch
-sudo pacman -S python-gobject python-dbus python-gst
+sudo pacman -S python-gobject python-dbus gst-python \
+    gst-plugins-base gst-plugin-pipewire
 ```
+
+> **The GStreamer PipeWire plugin is the one people miss.** TRCC reads the
+> portal's video through a `pipewiresrc` element, which lives in its own
+> package — `pipewire-gstreamer`, `gstreamer1.0-pipewire` or
+> `gst-plugin-pipewire` above. Without it the permission dialog appears, you
+> approve it, your desktop briefly shows "screen is being shared", and then the
+> session drops and the panel stays black. Check you have it with:
+>
+> ```bash
+> gst-inspect-1.0 pipewiresrc
+> ```
+>
+> `gst-plugins-base` also matters: it carries the `GstVideo` typelib TRCC uses
+> to read each frame's true row layout.
 
 > On X11 no portal is involved — capture goes through `grim`/`scrot`/`maim`/`import`.
 > On **every** Wayland compositor, including wlroots ones, capture goes through the
