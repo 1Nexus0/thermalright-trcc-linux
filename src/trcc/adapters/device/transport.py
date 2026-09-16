@@ -61,6 +61,29 @@ _DETACH_INTERFACES = 4
 # long enough for the kernel to re-enumerate the device.
 _RESET_SETTLE_S = 0.5
 
+#: A HID open is retried this many times before it is called a failure.
+#: Three attempts over ~1s covers a panel re-enumerating after the reboot its
+#: firmware performs on the init packet, without making an absent device feel
+#: like a hang on the splash screen.
+_HID_OPEN_ATTEMPTS = 3
+_HID_OPEN_RETRY_S = 0.5
+
+#: Where ``LinuxOS.setup`` writes the rules.  Spelled ONCE in the tree --
+#: ``adapters/system/_udev.RULES_PATH`` -- and imported rather than restated,
+#: because a second spelling of this path has already been wrong once, and
+#: every correctly-installed system looked broken as a result.  (A gate now
+#: fails any user-facing text naming a rules file we do not write -- which is
+#: what caught this comment when it quoted the old name.)
+def _udev_rules_present() -> bool:
+    """True when the udev rules this error would blame are actually installed."""
+    try:
+        from ..system._udev import RULES_PATH
+    except ImportError:          # pragma: no cover - non-Linux
+        return False
+    present = RULES_PATH.is_file()
+    log.debug("_udev_rules_present: %s -> %s", RULES_PATH, present)
+    return present
+
 # Linux errno used by pyusb wraps over libusb.
 _ERRNO_EACCES = 13   # Permission denied — udev rules missing
 _ERRNO_EBUSY = 16    # Interface claimed by another process
@@ -488,16 +511,46 @@ class HidApiTransport(BulkTransport):
             )
         log.info("HidApiTransport.open: %04x:%04x via %s",
                  self._vid, self._pid, binding.__name__)
-        try:
-            self._device = binding.open(self._vid, self._pid, self._serial)
-        except binding.open_errors() as e:
-            # hidapi reports "open failed" for both absent and EACCES; the
-            # udev-rules hint is the actionable half on Linux.
+        # RETRY, because a single failure does not mean absent.  Some
+        # 0416:5302 firmwares REBOOT on the init packet (see
+        # ``HidLcd._connect_streaming_firmware``), so the panel is genuinely
+        # gone from the bus for a moment while it re-enumerates.  One attempt
+        # turned that into a hard bootstrap failure, and two reporters
+        # independently found the workaround was to launch the app a second
+        # time (#267, and a second user on the same panel) -- which is direct
+        # evidence that trying again is all it needed.
+        last: BaseException | None = None
+        for attempt in range(1, _HID_OPEN_ATTEMPTS + 1):
+            try:
+                self._device = binding.open(self._vid, self._pid, self._serial)
+                if attempt > 1:
+                    log.info("HidApiTransport.open: %04x:%04x opened on "
+                             "attempt %d — the panel was re-enumerating",
+                             self._vid, self._pid, attempt)
+                break
+            except binding.open_errors() as e:
+                last = e
+                if attempt < _HID_OPEN_ATTEMPTS:
+                    log.debug("HidApiTransport.open: attempt %d/%d failed "
+                              "(%s) — retrying in %.1fs",
+                              attempt, _HID_OPEN_ATTEMPTS, e, _HID_OPEN_RETRY_S)
+                    time.sleep(_HID_OPEN_RETRY_S)
+        else:
+            # hidapi reports "open failed" for absent, EACCES and a device
+            # mid-reboot alike.  Only name udev when the rules are actually
+            # missing -- #267's report says `[OK] udev-rules installed` while
+            # this message told him to install them, which sends a user to fix
+            # something that is not broken.
+            hint = ("device absent, or missing udev rules "
+                    "(run `trcc system setup`)"
+                    if not _udev_rules_present() else
+                    "udev rules ARE installed, so this is not permissions — "
+                    "the panel may be re-enumerating or held by another "
+                    "process (a running trccd, or another TRCC window)")
             raise PermissionError_(
                 f"cannot open HID device {self._vid:04x}:{self._pid:04x} "
-                f"({e}) — device absent, or missing udev rules "
-                f"(run `trcc system setup`)"
-            ) from e
+                f"({last}) after {_HID_OPEN_ATTEMPTS} attempts — {hint}"
+            ) from last
         self._is_open = True
         return True
 
