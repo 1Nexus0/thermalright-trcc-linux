@@ -324,10 +324,35 @@ def repro_148_daemon_metrics_loop() -> ReproResult:
             self.started = True
 
     class _App:
+        """Stands in for ``App`` across the daemon's bring-up contract.
+
+        This stub had only ``start_hotplug``/``close`` and the two loops, which
+        was the whole surface ``run_daemon`` touched when it hand-rolled its own
+        bring-up.  That bring-up has since moved to the universal UI bus
+        (``UserInterface.start`` -> ``App.start_session``), so the probe stopped
+        testing #148 and started dying on
+        ``'_App' object has no attribute 'start_session'`` -- an ERROR, not a
+        BAD, so it read as "harness bug, triage later" and nobody did.
+
+        ``start_session`` mirrors the real one (``app.py:754``), which is
+        literally the #148 fix: it is the single place the loops start now,
+        precisely so a per-face copy cannot drift out of step again.  The
+        assertion is unchanged and still real -- a ``run_daemon`` that never
+        reaches ``start_session`` leaves ``metrics_loop.started`` False.
+        """
+
         def __init__(self) -> None:
             self.metrics_loop = _Loop()
             self.led_animation_loop = _Loop()
+            self.coldplugged = False
 
+        def start_session(self, on_progress=None) -> None:
+            self.coldplugged = True
+            self.start_hotplug()
+            self.metrics_loop.start()
+            self.led_animation_loop.start()
+
+        def discover_and_connect(self, on_progress=None) -> None: ...
         def start_hotplug(self) -> None: ...
         def close(self) -> None: ...
 
