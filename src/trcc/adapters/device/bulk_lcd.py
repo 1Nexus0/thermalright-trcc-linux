@@ -329,13 +329,44 @@ class BulkLcd(BaseBulkDevice, wire=Wire.BULK):
         return frame
 
     def _write_frame(self, frame: bytes) -> bool:
-        """16 KiB bulk writes, with a ZLP delimiter on 512-byte alignment."""
+        """16 KiB bulk writes, with a ZLP delimiter on 512-byte alignment.
+
+        **The transferred count is checked.**  ``BulkTransport.write`` is
+        documented to return bytes transferred, and this discarded it and
+        returned ``True`` unconditionally — so a SHORT write, where the
+        transport accepted only part of a chunk without raising, was
+        indistinguishable from a full one.  The CLI then reported
+        ``Sent 204800 bytes`` from the payload length, i.e. what we intended,
+        never what moved.
+
+        That is the difference between "your panel is dead" and "we did not
+        finish writing to it", and we were telling users the first with no
+        evidence.  #284 is a reporter who saw every command succeed and the
+        glass never change, matched a known-working setup byte for byte, and
+        reasonably concluded his hardware was faulty.  It may well be — but
+        this code could not have told him otherwise.
+
+        ``<`` rather than ``!=``, copying ``HidLcd``: a transport may report
+        MORE than the chunk (Windows HID prepends a Report ID, so 512 reads
+        back as 513, and ``!=`` wrongly failed every Windows Type-2 frame —
+        #240).  Over-count is not a short write.
+
+        The ZLP is exempt: it is a zero-length delimiter, so there is no
+        payload to come up short.
+        """
         log.debug("_write_frame: frame=%s", frame)
         for offset in range(0, len(frame), _WRITE_CHUNK_SIZE):
-            self._transport.write(
-                self._EP_WRITE, frame[offset:offset + _WRITE_CHUNK_SIZE],
-                _WRITE_TIMEOUT_MS,
-            )
+            chunk = frame[offset:offset + _WRITE_CHUNK_SIZE]
+            if self._transport.write(
+                self._EP_WRITE, chunk, _WRITE_TIMEOUT_MS,
+            ) < len(chunk):
+                log.warning(
+                    "BulkLcd %s: SHORT write at offset %d of %d — the panel "
+                    "received only part of this frame, which looks identical "
+                    "to a dead screen from the outside",
+                    self.info.key, offset, len(frame),
+                )
+                return False
         # Zero-length packet on 512-byte alignment (frame delimiter)
         if len(frame) % 512 == 0:
             self._transport.write(self._EP_WRITE, b"", _WRITE_TIMEOUT_MS)

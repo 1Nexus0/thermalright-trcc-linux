@@ -334,3 +334,53 @@ def test_send_before_handshake_raises_transport_error(
     from trcc.core.errors import TransportError
     with pytest.raises(TransportError):
         device.send(b"\xff\xd8" + b"\x00" * 100)
+
+
+# ── A short write must not read as success (#284) ────────────────────────────
+
+
+class _ShortWriteTransport(FakeBulkTransport):
+    """A transport that accepts only part of each chunk, without raising.
+
+    This is what a real bulk endpoint does under some failure modes: libusb
+    reports the count it managed and returns normally.  The port contract
+    says ``write`` returns bytes transferred; the question is whether anyone
+    reads it.
+    """
+
+    def write(self, endpoint: int, data, timeout_ms: int = 100) -> int:
+        super().write(endpoint, data, timeout_ms)
+        n = len(bytes(data))
+        return n if n == 0 else n - 1       # one byte short, never zero
+
+
+def test_a_short_bulk_write_is_reported_as_failure() -> None:
+    """``_write_frame`` returned True unconditionally, discarding the count.
+
+    So a partial transfer looked exactly like a full one, and the CLI printed
+    ``Sent N bytes`` computed from the PAYLOAD — what we meant to send, not
+    what moved.  A user then sees every command succeed and a screen that
+    never changes, which is indistinguishable from dead hardware (#284).
+    """
+    transport = _ShortWriteTransport()
+    transport.read_script.append(_bulk_response(11, 5))
+    device = _make_bulk(transport)
+    device.connect()
+    assert device.send(b"\x00" * 4096) is False, (
+        "a short bulk write was reported as a successful send — the caller "
+        "cannot tell a partial transfer from a dead panel"
+    )
+
+
+def test_a_full_bulk_write_still_succeeds() -> None:
+    """The guard must not fail an honest transport.
+
+    ``<`` not ``!=``, copying HidLcd: a transport may legitimately report MORE
+    than the chunk (Windows HID prepends a Report ID, #240), and over-count is
+    not a short write.
+    """
+    transport = FakeBulkTransport()
+    transport.read_script.append(_bulk_response(11, 5))
+    device = _make_bulk(transport)
+    device.connect()
+    assert device.send(b"\x00" * 4096) is True

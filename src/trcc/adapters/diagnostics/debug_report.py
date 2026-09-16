@@ -215,6 +215,18 @@ def _collect_devices(
             "product": product.product if product else "(unregistered)",
             "vendor": product.vendor if product else "(unregistered)",
             "wire": product.wire.value if product else "(unknown)",
+            # FIRMWARE REVISION.  Quirks are keyed on (vid, pid, bcdDevice)
+            # (#228), so this is load-bearing for which code path a panel
+            # takes -- and it was visible only in the rotating log tail, which
+            # a report can roll past.  #284 is why it moved here: two units
+            # with the SAME vid:pid and a byte-identical handshake
+            # (PM=11 SUB=5 fbl=224 854x480) behaved oppositely, one showing
+            # images and one never leaving its factory logo.  The reporter
+            # matched the working setup exactly -- same recipe, same version
+            # -- and still got nothing, so the only remaining discriminator
+            # is the firmware revision, and the report did not print it.
+            "bcd": f"0x{info.bcd_device:04x}" if info.bcd_device else "(none)",
+            "serial": info.serial or "(none)",
         }
         # USB runtime power. Without it, a SUSPENDED panel and a dead one look
         # identical in every log we have (#150) -- and remote_wakeup explains
@@ -529,6 +541,9 @@ def _render_devices(rows: list[dict[str, str]], error: str) -> str:
     lines: list[str] = []
     for r in rows:
         lines.append(f"  {r['key']:14}  {r['product']:30}  wire={r['wire']}")
+        if "bcd" in r:
+            lines.append(
+                f"    firmware:  bcdDevice={r['bcd']} serial={r['serial']}")
         if "power" in r:
             lines.append(f"    usb power: {r['power']}")
         if "hs_resolution" in r:
