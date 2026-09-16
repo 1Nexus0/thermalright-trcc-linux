@@ -344,7 +344,10 @@ class HidLcd(BaseBulkDevice, wire=Wire.HID):
         has_serial = len(resp) > 36 and resp[16] == 0x10
         serial = resp[20:36].hex().upper() if has_serial else ""
         fbl = pm_to_fbl(pm, sub)
-        self._profile = get_profile(fbl, pm)
+        # SUB reaches the profile, not just the FBL.  It selects the encode
+        # rotation for six resolutions (#290: 1280x480 + SUB=2 wants 90, and
+        # took 0 because this local was read and dropped).
+        self._profile = get_profile(fbl, pm, sub)
         return HandshakeResult(
             resolution=self._profile.resolution,
             model_id=pm,

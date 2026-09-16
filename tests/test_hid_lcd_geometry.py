@@ -451,3 +451,44 @@ def test_short_chunk_write_still_fails() -> None:
     dev = _make_type2(t)
     dev.connect()
     assert dev.send(bytes(240 * 320 * 2)) is False
+
+
+# ── The SUB byte must reach the ENCODE ROTATION, not just the FBL (#290) ─────
+
+
+@pytest.mark.parametrize("sub,expected_base", [(0, 0), (2, 90), (3, 0)])
+def test_type2_sub_selects_the_encode_rotation(
+    fake_bulk: FakeBulkTransport, sub: int, expected_base: int,
+) -> None:
+    """A 1280x480 panel reporting SUB=2 encodes at 90, not 0.
+
+    ``_parse_response_type2`` read ``resp[4]`` into a local, used it for
+    ``pm_to_fbl``, and dropped it before ``get_profile`` — so every HID panel
+    resolved its rotation with sub defaulted to 0.  Six resolutions carry an
+    ``alt_base`` keyed on the sub, so five of them took the wrong wire angle:
+
+        1280x480  sub 2      -> 90 not 0        <- this test, #290
+        1920x462  sub 2/3/4  -> 0 not 180
+        1920x440  sub 2/3/4  -> 0 not 180
+        1600x720  sub 3      -> 0 not 180
+         960x540  sub 5/7    -> 180 not 0
+
+    ``BulkLcd`` and ``LyLcd`` always passed the live byte, which is why
+    CLAUDE.md recorded this as "latent, not live — every arm that fires is on
+    the bulk wire".  It was live, on HID, and @1Nexus0 found it on his own
+    hardware: landscape and portrait swapped on a Trofeo Vision.
+
+    **Nothing asserted ``encode_base`` on a HID path before this**, which is
+    exactly why 5262 green tests never saw it.
+    """
+    fake_bulk.read_script.append(_type2_response(128, sub))
+    device = _make_type2(fake_bulk)
+
+    device.connect()
+
+    assert device._profile is not None
+    assert device._profile.resolution == (1280, 480)
+    assert device._profile.encode_base == expected_base, (
+        f"SUB={sub} on a 1280x480 panel must encode at {expected_base}°; the "
+        f"SUB byte is not reaching get_profile"
+    )

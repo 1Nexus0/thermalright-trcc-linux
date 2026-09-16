@@ -507,14 +507,36 @@ def _resolution_by_pm(
     return fallback
 
 
-def get_profile(fbl: int, pm: int = 0) -> DeviceProfile:
+def get_profile(fbl: int, pm: int = 0, sub: int = 0) -> DeviceProfile:
     """Look up the device profile for an FBL code.
 
     For FBL 192/224, the PM byte disambiguates among multiple resolutions
     that share the FBL. All other FBL values map 1:1 to a profile.
     Unknown FBLs fall back to the 320×320 big-endian default.
+
+    ``sub`` is the handshake's SUB byte and it selects the ENCODE ROTATION.
+    Six resolutions carry an ``alt_base`` that fires only for particular subs
+    (see :data:`ENCODE_ROTATIONS`), so resolving with a defaulted 0 silently
+    hands those panels the wrong wire angle:
+
+        1280x480  sub 2      -> 90 not 0        (#290)
+        1920x462  sub 2/3/4  -> 0 not 180
+        1920x440  sub 2/3/4  -> 0 not 180
+        1600x720  sub 3      -> 0 not 180
+         960x540  sub 5/7    -> 180 not 0
+
+    ``BulkLcd`` and ``LyLcd`` always passed the live byte to
+    ``resolve_encode_rotation`` directly.  ``HidLcd`` resolved through here,
+    read ``resp[4]`` into a local and never forwarded it — so its panels took
+    the default.  CLAUDE.md recorded that gap as "latent, not live, since
+    every arm that fires in the catalog is on the bulk wire".  That was
+    wrong: a 1280x480 Trofeo Vision on the HID wire reporting SUB=2 has
+    landscape and portrait swapped, which is #290, diagnosed by the reporter.
+
+    Defaulted so the eight existing call sites are unchanged; only a caller
+    that KNOWS the byte should pass it.
     """
-    log.debug("get_profile: fbl=%d pm=%d", fbl, pm)
+    log.debug("get_profile: fbl=%d pm=%d sub=%d", fbl, pm, sub)
     profile = FBL_PROFILES.get(fbl, _DEFAULT_PROFILE)
     if fbl not in FBL_PROFILES:
         _warn_unknown("FBL", fbl, f"pm={pm}", (profile.width, profile.height))
@@ -523,7 +545,7 @@ def get_profile(fbl: int, pm: int = 0) -> DeviceProfile:
         by_pm, fallback = shared
         w, h = _resolution_by_pm(by_pm, pm, fallback, fbl)
         profile = dataclasses.replace(profile, width=w, height=h)
-    rotation = resolve_encode_rotation(profile.resolution, profile.jpeg)
+    rotation = resolve_encode_rotation(profile.resolution, profile.jpeg, sub)
     return dataclasses.replace(
         profile, encode_base=rotation.base, encode_invert=rotation.invert)
 
