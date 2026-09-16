@@ -1,5 +1,51 @@
 # Changelog
 
+## v9.10.0
+
+**Screen casting now works on Wayland from everywhere, not just the app
+window.** GNOME and KDE Wayland need a permission prompt before anything can
+read the screen, and only the main window knew how to ask. Starting a cast
+from the terminal, the API or the alternative interface produced a black
+panel. All four now ask properly, and the first time you tick "Remember this
+selection" TRCC keeps the grant — so it stops asking on every launch.
+
+**A cast could come out skewed on some Linux desktops.** On Sway, Hyprland and
+other wlroots compositors the captured picture leaned progressively further
+left down the image, and on an 854x480 panel it was out by 427 pixels at the
+bottom. Square panels were unaffected, which is why it went unnoticed. Fixed.
+
+**If a cast freezes on one image, TRCC now tells you why.** On those same
+compositors the screen-sharing service sometimes delivers a single frame and
+stops. That is a bug in the system component, not in TRCC, and the log now
+says so plainly instead of leaving you to guess. There is an entry in the
+troubleshooting guide with what to try.
+
+**The captured region now matches your panel's shape.** Drag any rectangle and
+it is fitted to the display's proportions, the way the Windows app always did
+— so what you framed is what appears, instead of being squashed to fit.
+
+**A reading your machine cannot take now says so.** If a panel showed a blank
+where a temperature should be, the log gave the same message whether your
+hardware has no such sensor at all or the reading simply missed a beat. Those
+are different problems and it now names which one.
+
+**The alternative interface caught up.** Several things looked present and did
+nothing, and they work now:
+
+* A slideshow you set up stayed on the first theme forever — it rotates.
+* The LED carousel could be switched on and given a speed but never moved on;
+  you can now choose which zones it visits.
+* Video had play, pause and stop but no position — there is a scrubber, and
+  you can jump to a frame.
+* It gained the LCD date format, an "Upgrade now" button, the HDD-metrics
+  toggle, your DIMM list, and an editor for the sensor dashboard.
+
+**Better bug reports.** Around nine hundred more places in TRCC now record what
+they did, so `trcc report` can answer questions it previously could not —
+especially on macOS and BSD, where we have no machine to reproduce on. This
+costs about seventy nanoseconds a call and will not show up in your frame
+rate.
+
 ## v9.9.12
 
 **Fedora installs could fail outright, and that is fixed.** The RPM shipped its
