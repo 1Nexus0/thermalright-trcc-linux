@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass
+from typing import ClassVar
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
@@ -155,9 +156,46 @@ class Row:
     def res_ok(self) -> bool:
         return self.their_res == self.our_res
 
+    #: Resolutions where ``isBiliPingmu`` and OUR ``widescreen`` provably mean
+    #: different things, with the evidence.  NOT a general escape hatch -- each
+    #: entry is one verified case, and everything else still compares directly.
+    #:
+    #: **640x172 (pm 15)** -- VERIFIED 2026-09-15 in TRCC 2.1.6:
+    #:   * theirs: ``FormCZTV.cs:986`` (pm 13/17/18) sets ``isBiliPingmu`` AND
+    #:     builds a ``FormScreenImage`` preview popup; ``FormCZTV.cs:1001``
+    #:     (pm == 15) sets ``is640x172`` + ``fbl`` and builds neither.  The flag
+    #:     tracks the popup, not the rotation model.
+    #:   * ours: ``DeviceProfile.widescreen`` selects "the WIRE owns rotation"
+    #:     over "spin the whole composite", which ``geometry.plan_orientation``
+    #:     ties to legacy's ``has_portrait_themes``.  The C# ships a full
+    #:     PORTRAIT catalog for this panel -- ``ThemeML172640`` (:456),
+    #:     ``GifDirectoryWebMB172640`` (:264), assigned at :1455 and :1465 --
+    #:     so portrait variants exist and ``True`` is correct for us.
+    #:
+    #: Two correct flags, two meanings, one axis.  Comparing them directly
+    #: reported our shipping code as MISMATCH 1/19 for however long.
+    _SEMANTIC_SPLIT: ClassVar[frozenset[tuple[int, int]]] = frozenset({
+        (640, 172),
+    })
+
     @property
     def wide_ok(self) -> bool:
+        """Does ``isBiliPingmu`` agree with our ``widescreen``?
+
+        Direct comparison, except where the two flags are known to mean
+        different things -- see ``_SEMANTIC_SPLIT``.  Do NOT widen that set to
+        silence a new disagreement: an unexplained one is the signal this axis
+        exists for.
+        """
+        if self.our_res in self._SEMANTIC_SPLIT:
+            return True
         return self.their_wide == self.our_wide
+
+    @property
+    def wide_semantics_differ(self) -> bool:
+        """The axis was excused by a verified semantic split, not by agreement."""
+        return (self.our_res in self._SEMANTIC_SPLIT
+                and self.their_wide != self.our_wide)
 
     @property
     def oracle_models(self) -> bool:
