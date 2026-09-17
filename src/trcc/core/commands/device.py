@@ -1517,6 +1517,17 @@ class SendScreencastFrame(Command[ScreencastResult]):
             data = app.display.build_screencast_frame(
                 info=device.info, frame=self.frame,
                 theme=theme, sensors=sensors, spectrum=spectrum,
+                # The LIVE handshake profile, like every other ``build_*``
+                # call site.  Omitting it sends ``_resolve_profile`` to the
+                # registry-FBL fallback, which disagrees with the panel on
+                # two of the nine devices the mock fleet can produce: an
+                # 87ad:70db Phantom Spirit answers ``jpeg=True`` and the
+                # fallback says False, so every frame went out as 460,800
+                # bytes of RGB565 instead of 6,927 of JPEG (#271, reported
+                # by @alan7383 as "460KB/frame"); an 0416:5302 answers
+                # 320x240 rot=90 against the fallback's 240x320 rot=0, same
+                # size and the wrong shape.
+                profile=device.profile,
             )
         except Exception as e:
             # A screencast outlives device churn and desktop-session churn; a

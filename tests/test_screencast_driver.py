@@ -17,14 +17,18 @@ from trcc.app import App
 from trcc.core.commands import (
     CaptureScreencastFrame,
     ConnectDevice,
+    SendScreencastFrame,
     StartScreencast,
     StartScreencastDriver,
     StopScreencast,
     StopScreencastDriver,
 )
+from trcc.core.models import RawFrame
 from trcc.services.screencast_driver import ScreencastDriver, task_key
 
 from .conftest import FakePlatform, _CliRenderer
+from .mock_platform import MockPlatform
+from .test_display_rotation import RecordingRenderer
 
 _KEY = "0402:3922"
 _REGION = dict(x=10, y=20, w=64, h=48)
@@ -53,6 +57,64 @@ def casting(app: App) -> App:
 
 
 # ── the frame path ───────────────────────────────────────────────────
+
+
+# The Phantom Spirit 120 Vision EVO: BULK, 480x480, and its handshake answers
+# ``jpeg=True`` while the static registry row does NOT.  That disagreement is
+# the whole point — on a device where the fallback happens to agree, omitting
+# the profile is invisible, which is why this gate names a device where it is
+# not.  Measured over the 9-LCD mock fleet, exactly two devices disagree:
+# this one (jpeg) and 0416:5302 (320x240 rot=90 vs 240x320 rot=0).
+_EVO = {"vid": "87ad", "pid": "70db", "pm": 4, "sub": 4,
+        "name": "Phantom Spirit 120 Vision EVO"}
+_EVO_KEY = "87ad:70db"
+
+
+@pytest.fixture
+def evo(tmp_home: Path, scheduler: SyncSendScheduler) -> App:
+    """A connected EVO with a renderer that records which encoder ran."""
+    a = App(platform=MockPlatform([_EVO], tmp_home), send_scheduler=scheduler,
+            renderer=RecordingRenderer())     # type: ignore[arg-type]
+    assert a.dispatch(ConnectDevice(key=_EVO_KEY)).ok
+    return a
+
+
+def test_the_screencast_frame_is_encoded_for_the_PANEL_not_the_registry(
+    evo: App,
+) -> None:
+    """``SendScreencastFrame`` must hand the encoder the LIVE profile.
+
+    Six of the seven ``app.display.build_*`` call sites pass
+    ``profile=device.profile``; this one did not, so ``_resolve_profile``
+    fell back to the registry FBL / a synthesised RGB565 profile.  On this
+    panel that is not cosmetic: the handshake says JPEG and the fallback says
+    RGB565, so every captured frame went out as **460,800 bytes instead of
+    6,927** — the "460KB/frame" @alan7383 reported in #271, reproduced here.
+
+    Asserted as WHICH ENCODER RAN rather than as a byte count: the count is a
+    consequence of the choice, and the choice is the bug.
+    """
+    device = evo.devices[_EVO_KEY]
+    assert device.profile is not None and device.profile.jpeg is True, (
+        "fixture no longer models a JPEG panel — this gate is then vacuous"
+    )
+
+    renderer = evo.renderer
+    renderer.calls.clear()                    # type: ignore[attr-defined]
+    result = evo.dispatch(SendScreencastFrame(
+        key=_EVO_KEY, frame=RawFrame(b"", 64, 64),
+    ))
+    assert result.ok is True, result.message
+
+    ran = [name for name, _ in renderer.calls]   # type: ignore[attr-defined]
+    assert "encode_jpeg" in ran, (
+        "the panel handshook as JPEG and the frame was encoded some other "
+        "way — the live profile is not reaching build_screencast_frame"
+    )
+    assert "encode_rgb565" not in ran, (
+        "encoded RGB565 for a JPEG panel: that is the 66x oversized frame"
+    )
+
 
 
 def test_capture_grabs_the_region_the_session_declared(casting: App) -> None:
