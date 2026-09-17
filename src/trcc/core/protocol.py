@@ -524,6 +524,7 @@ def get_profile(fbl: int, pm: int = 0, sub: int = 0) -> DeviceProfile:
         1920x440  sub 2/3/4  -> 0 not 180
         1600x720  sub 3      -> 0 not 180
          960x540  sub 5/7    -> 180 not 0
+         960x320  sub 5/6/7  -> 180 not 0
 
     ``BulkLcd`` and ``LyLcd`` always passed the live byte to
     ``resolve_encode_rotation`` directly.  ``HidLcd`` resolved through here,

@@ -340,7 +340,7 @@ Every piece of data has exactly ONE owner. Violations = bugs.
 | Data Kind | Owner | Examples |
 |-----------|-------|---------|
 | Domain constants (static mappings) | a module under `core/` | `HARDWARE_METRICS`, `TIME_FORMATS` (`core/models.py`) |
-| Panel / protocol constants | `core/protocol.py` | `FBL_TO_RESOLUTION`, `FBL_PROFILES` |
+| Panel / protocol constants | `core/protocol.py` | `FBL_PROFILES`, `ENCODE_ROTATIONS` |
 | Locale + asset-suffix maps | `core/i18n.py` | `LOCALE_TO_LANG`, `ISO_TO_LEGACY` |
 | LED style catalog | `core/led_models.py` | `LED_STYLES` |
 | Device registries (VID/PID) | `core/registry.py` | `ALL_DEVICES` |
@@ -644,11 +644,20 @@ INFO — INFO becomes per-frame noise, ~900 KB of `_on_video_tick`
 spam in a 22-second session, and buries the user-action lines we
 just paid for in the same pass.
 
-Before any bulk `_on_*` logging pass, grep
-`QTimer\.timeout\.connect\(self\._on_|make_timer\(self\._on_` and
-**exempt every match** from the INFO blanket rule.  Names today:
-`_on_video_tick`, `_on_slideshow_tick`, `_on_flash_tick`,
-`_on_tick`, `_on_play_tick`, `_preview_tick`.  If a handler already
+Before any bulk logging pass, **generate the list — never read one**:
+
+```
+grep -rnE "timeout\.connect\(self\._|make_timer\(self\._" --include=*.py src/
+```
+
+**Exempt every match** from the INFO blanket rule.  No list is written
+beside this grep, because the two disagreed the moment one was: the list
+named `_on_flash_tick`, which has **zero definitions**, and the grep was
+anchored on `self\._on_`, so it could not find `_preview_tick` — a name
+the list itself carried.  The criterion is *connected to a timer*, not
+*starts with `_on_`*; five real handlers (`_tick`, `_refresh`,
+`_update_values`, `_preview_tick`, `_emit_brightness`) fail the old
+anchor.  If a handler already
 has first-tick-INFO + subsequent-DEBUG logic (look for
 `self._..._first_tick_logged`-style flags + state-transition skip
 logic), **leave it alone** — don't prepend a blanket entry log;
@@ -885,10 +894,17 @@ Zero tolerance for security issues. Fix within hexagonal architecture — never 
   `ly_lcd.py` — both passing the live SUB byte. (`encode_sub_bases` no longer
   exists; it was the empty per-FBL rule those arms replaced.) This line read
   "recorded-but-UNWIRED, a blanket `rotate→90°`" until then, which was stale.
-  **The genuine remainder**: `get_profile` resolves rotation with `sub`
-  defaulted to 0 — latent, not live, since every arm that fires in the catalog
-  is on the bulk wire, which passes the real sub — and no mock can confirm WIRE
-  OUTPUT, which still needs a real device.
+  **That "latent, not live" reading was WRONG, and a reporter paid for it**
+  (#290, diagnosed by @1Nexus0 on his own hardware, fixed 2026-09-16). It
+  excused `get_profile`'s defaulted `sub` on the grounds that "every arm that
+  fires in the catalog is on the bulk wire, which passes the real sub". The HID
+  wire also resolved through `get_profile`: `_parse_response_type2` read the SUB
+  byte into a local and never forwarded it, so **five resolutions took the wrong
+  wire angle on real glass** — a 1280x480 Trofeo Vision reporting SUB=2 had
+  landscape and portrait swapped. `get_profile(fbl, pm, sub)` now takes the byte
+  (`core/protocol.py:510`) and `hid_lcd.py:350` passes it.
+  **The genuine remainder**: no mock can confirm WIRE OUTPUT, which still needs
+  a real device.
   See `memory/project_geometry_subsystem_and_mock.md` and
   `memory/project_mysubmode_is_the_per_sku_mount.md` (the SUB byte's origin is
   `UCDevice.cs:1114`, `receive[5]`).
