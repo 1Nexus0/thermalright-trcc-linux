@@ -169,6 +169,7 @@ def bulk_profile(pm: int, sub: int, key: str = "?") -> tuple[int, DeviceProfile]
         jpeg=jpeg,
         big_endian=base.big_endian, rotate=base.rotate,
         widescreen=base.widescreen,
+        sub=sub,
         # The SUB byte also says how the panel is MOUNTED: on three
         # resolutions a sub of 5+ means it is turned portrait in its cooler,
         # so its content catalog is the transposed one from orientation 0.

@@ -592,25 +592,10 @@ def resolve_encode_angle(profile: DeviceProfile, orientation: int) -> int:
     (``invert=False``) and every other family counts down.  One formula, one
     table.
     """
-    # Pick the right base using the SUB byte
-    # ENCODE_ROTATIONS keys on (w, h, _JPEG=True) — prefer JPEG lookup,
-    # fall back to non-JPEG if no match.
-    from trcc.core.protocol import ENCODE_ROTATIONS, _JPEG, _565
-    key_jpg = (profile.width, profile.height, _JPEG)
-    key_565 = (profile.width, profile.height, _565)
-    rot = ENCODE_ROTATIONS.get(key_jpg) or ENCODE_ROTATIONS.get(key_565)
-    if rot is None:
-        base = profile.encode_base
-        invert = profile.encode_invert
-    else:
-        resolved = rot.for_sub(profile.sub)
-        base = resolved.base
-        invert = resolved.invert
-
-    signed = orientation if not invert else -orientation
-    angle = (base + signed) % 360
-    frame_log.debug("resolve_encode_angle: sub=%d base=%d invert=%s orient=%d → %d°",
-                      profile.sub, base, invert, orientation, angle)
+    signed = orientation if not profile.encode_invert else -orientation
+    angle = (profile.encode_base + signed) % 360
+    frame_log.debug("resolve_encode_angle: base=%d invert=%s orient=%d → %d°",
+              profile.encode_base, profile.encode_invert, orientation, angle)
     return angle
 
 
