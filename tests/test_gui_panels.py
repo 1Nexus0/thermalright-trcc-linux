@@ -3278,7 +3278,7 @@ def test_the_preview_wears_the_panel_s_bezel(qapp: object, tmp_path: Path) -> No
 # =========================================================================
 
 
-def test_about_keepalive_input_clamps_and_emits(qapp: object) -> None:
+def test_about_keepalive_input_clamps_and_emits(qapp: object, qtbot) -> None:
     """The About field mirrors the refresh field: clamp, echo, emit — and an
     empty box restores the last value instead of dispatching."""
     from trcc.core.models import (
@@ -3308,9 +3308,12 @@ def test_about_keepalive_input_clamps_and_emits(qapp: object) -> None:
     about.keepalive_input.setText("")
     about.keepalive_input.editingFinished.emit()
     assert len(seen) == emitted, "an empty box must not dispatch"
+    about.close()
+    about.deleteLater()
+    qtbot.wait(5)
 
 
-def test_theme_setting_static_background_toggle(qapp: object) -> None:
+def test_theme_setting_static_background_toggle(qapp: object, qtbot) -> None:
     """The static-background checkbox emits its delegate once per click, and
     loading the device's flag sets the state WITHOUT re-dispatching."""
     from trcc.ui.gui.uc_theme_setting import UCThemeSetting
@@ -3326,9 +3329,12 @@ def test_theme_setting_static_background_toggle(qapp: object) -> None:
     panel.set_static_background(False)
     assert panel.static_bg_btn.isChecked() is False
     assert len(seen) == 1, "the snapshot load must not dispatch"
+    panel.close()
+    panel.deleteLater()
+    qtbot.wait(5)
 
 
-def test_qtgui_keepalive_spinbox_mirrors_and_applies(gui_app: App) -> None:
+def test_qtgui_keepalive_spinbox_mirrors_and_applies(gui_app: App, qtbot) -> None:
     from trcc.core.models import (
         MAX_KEEPALIVE_INTERVAL_S,
         MIN_KEEPALIVE_INTERVAL_S,
@@ -3345,9 +3351,13 @@ def test_qtgui_keepalive_spinbox_mirrors_and_applies(gui_app: App) -> None:
     panel._apply_app_settings()
 
     assert gui_app.settings.app.keepalive_interval_s == 1.5
+    panel.close()
+    panel.deleteLater()
+    qtbot.wait(5)
 
 
-def test_qtgui_static_background_checkbox_reads_and_writes(gui_app: App) -> None:
+def test_qtgui_static_background_checkbox_reads_and_writes(
+        gui_app: App, qtbot) -> None:
     from trcc.ui.qtgui.panels.configuration_panel import ConfigurationPanel
 
     key = next(iter(gui_app.devices), None) or "0402:3922"
@@ -3362,3 +3372,6 @@ def test_qtgui_static_background_checkbox_reads_and_writes(gui_app: App) -> None
     panel._apply()
 
     assert gui_app.settings.for_device(key).static_background is False
+    panel.close()
+    panel.deleteLater()
+    qtbot.wait(5)
