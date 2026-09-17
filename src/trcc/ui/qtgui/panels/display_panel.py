@@ -1,4 +1,4 @@
-"""DisplayPanel — orientation, brightness, theme load, video transport."""
+"""DisplayPanel — orientation, brightness, theme load, background media."""
 from __future__ import annotations
 
 import logging
@@ -24,12 +24,14 @@ from ....core.commands import (
     PlayVideo,
     RestoreLastTheme,
     SeekVideo,
+    SetBackground,
     SetBrightness,
     SetOrientation,
     StopVideo,
     ToggleVideo,
     VideoStatus,
 )
+from ....core.models import MEDIA, MediaKind
 from ..base import BasePanel
 from ..device_picker import DevicePickerWidget
 
@@ -76,7 +78,15 @@ class DisplayPanel(BasePanel):
         self._restore_btn = QPushButton("Restore last theme", self)
         self._restore_btn.clicked.connect(self._on_restore_last)
 
-        # Video transport — immediate actions (not part of the batch Apply).
+        # Background media — immediate actions (not part of the batch Apply).
+        # ``SetBackground`` and ``PlayVideo`` are sisters: both write
+        # ``DeviceSettings.background_path``, which the renderer consults
+        # BEFORE the theme's own background, so they swap the picture and
+        # KEEP the theme's overlays.  ``Stop`` clears the override for
+        # either — it tests ``had_override`` independently of whether any
+        # video was playing — which is why one button serves both.
+        self._background_btn = QPushButton("Set background…", self)
+        self._background_btn.clicked.connect(self._on_set_background)
         self._play_video_btn = QPushButton("Play video…", self)
         self._play_video_btn.clicked.connect(self._on_play_video)
         self._pause_video_btn = QPushButton("Pause/Resume", self)
@@ -97,6 +107,7 @@ class DisplayPanel(BasePanel):
         self._refresh_video_btn.clicked.connect(self._refresh_video_status)
 
         video_row = QHBoxLayout()
+        video_row.addWidget(self._background_btn)
         video_row.addWidget(self._play_video_btn)
         video_row.addWidget(self._pause_video_btn)
         video_row.addWidget(self._stop_video_btn)
@@ -119,7 +130,7 @@ class DisplayPanel(BasePanel):
         root.addLayout(form)
         root.addWidget(self._apply_btn)
         root.addWidget(self._restore_btn)
-        root.addWidget(QLabel("Video:", self))
+        root.addWidget(QLabel("Background:", self))
         root.addLayout(video_row)
         root.addLayout(seek_row)
         root.addWidget(self._status)
@@ -155,13 +166,35 @@ class DisplayPanel(BasePanel):
         result = self.dispatch(RestoreLastTheme(key=key))
         self._status.setText(result.message)
 
+    def _on_set_background(self) -> None:
+        """Override the background with a STILL IMAGE, keeping the theme.
+
+        The still sister of :meth:`_on_play_video`.  ``LoadImage`` is not a
+        substitute — that one REPLACES the theme with a synthesised one-file
+        theme, losing its overlays; this writes the override the renderer
+        consults first.  Cleared by ``Stop``, same as a video.
+        """
+        key = self._require_key()
+        if key is None:
+            return
+        source, _ = QFileDialog.getOpenFileName(
+            self, "Pick a background image", "",
+            f"Images ({MEDIA.patterns(MediaKind.IMAGE)});;All files (*)",
+        )
+        if not source:
+            log.info("_on_set_background: cancelled by the user")
+            return
+        log.info("_on_set_background: key=%s path=%s", key, source)
+        result = self.dispatch(SetBackground(key=key, path=Path(source)))
+        self._status.setText(result.message)
+
     def _on_play_video(self) -> None:
         key = self._require_key()
         if key is None:
             return
         source, _ = QFileDialog.getOpenFileName(
             self, "Pick a video to play", "",
-            "Videos (*.mp4 *.mov *.webm *.mkv *.avi *.zt);;All files (*)",
+            f"Videos ({MEDIA.patterns(MediaKind.ANIMATED)});;All files (*)",
         )
         if not source:
             return

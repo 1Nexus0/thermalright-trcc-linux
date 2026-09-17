@@ -2327,6 +2327,91 @@ def test_releasing_the_scrubber_seeks(gui_app: App, qtbot) -> None:
 
 
 # =========================================================================
+# DisplayPanel — the still-image background qtgui could not set
+# =========================================================================
+
+
+def test_setting_a_background_dispatches_SetBackground_not_LoadImage(
+    gui_app: App, qtbot, monkeypatch, tmp_path,
+) -> None:
+    """qtgui could override a background with VIDEO but not a STILL IMAGE.
+
+    The distinction is the whole point and it is easy to get wrong:
+
+    * ``SetBackground`` writes ``DeviceSettings.background_path``, which the
+      renderer consults BEFORE the theme's own background — the theme and its
+      overlays survive, only the picture changes.
+    * ``LoadImage`` REPLACES the theme, materialising a one-file theme under
+      ``user_content_dir/single-image/``.  The overlays go with it.
+
+    So asserting "an image reached the bus" would pass on the wrong Command.
+    This pins WHICH one, which is the bug that was fixed.
+    """
+    from PySide6.QtWidgets import QFileDialog
+
+    from trcc.core.commands import LoadImage, SetBackground
+
+    panel = _display_panel(gui_app, qtbot)
+    picked = tmp_path / "wallpaper.png"
+    picked.write_bytes(b"\x89PNG\r\n\x1a\n")
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName",
+        staticmethod(lambda *a, **k: (str(picked), "")),
+    )
+
+    sent: list[object] = []
+    real = panel.dispatch
+    monkeypatch.setattr(
+        panel, "dispatch",
+        lambda cmd: (sent.append(cmd), real(cmd))[1],
+    )
+
+    panel._background_btn.click()
+
+    kinds = [type(c) for c in sent]
+    assert SetBackground in kinds, (
+        "the background button did not dispatch SetBackground"
+    )
+    assert LoadImage not in kinds, (
+        "dispatched LoadImage — that REPLACES the theme and loses its overlays"
+    )
+    cmd = next(c for c in sent if isinstance(c, SetBackground))
+    assert cmd.key == "0402:3922"
+    assert cmd.path == picked
+
+
+def test_the_background_dialog_offers_the_catalog_image_formats(
+    gui_app: App, qtbot, monkeypatch, tmp_path,
+) -> None:
+    """The filter comes from ``MEDIA``, not a hand-typed glob.
+
+    ``MediaCatalog`` exists because the answer to "is this a still image?" was
+    spelled out in nine places and had already drifted — one dialog omitted
+    ``.webp`` while the validator accepted it, so a loadable file could not be
+    picked.  A dialog that re-types the list re-opens that gap.
+    """
+    from PySide6.QtWidgets import QFileDialog
+
+    from trcc.core.models import MEDIA, MediaKind
+
+    panel = _display_panel(gui_app, qtbot)
+    seen: list[str] = []
+
+    def _capture(*args, **_kwargs):
+        seen.append(args[3] if len(args) > 3 else "")
+        return ("", "")
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(_capture))
+    panel._background_btn.click()
+
+    assert seen, "the dialog was never opened"
+    for pattern in MEDIA.patterns(MediaKind.IMAGE).split():
+        assert pattern in seen[0], (
+            f"{pattern} is in the catalog but not offered by the dialog"
+        )
+
+
+# =========================================================================
 # SystemPanel — the sensor-dashboard editor
 # =========================================================================
 
