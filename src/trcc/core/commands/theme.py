@@ -1755,7 +1755,7 @@ class RestoreDeviceState(Command[ThemeResult]):
         if bg:
             log.info("RestoreDeviceState: %s replaying persisted background %s",
                      self.key, bg)
-            SetBackground(key=self.key, path=Path(bg)).execute(app)
+            app.dispatch(SetBackground(key=self.key, path=Path(bg)))
 
         return ThemeResult(
             ok=True, key=self.key, theme_name=theme.name,
@@ -2010,12 +2010,12 @@ class LoadCloudTheme(Command[CloudThemeLoadResult]):
         # SetBackground owns the persistence and the animated/still split, so a
         # cloud background behaves exactly like one set from the GUI or
         # ``trcc display background``.
-        set_result = SetBackground(key=self.key, path=target).execute(app)
+        set_result = app.dispatch(SetBackground(key=self.key, path=target))
         if set_result.ok and MEDIA.kind_of(target) is MediaKind.IMAGE:
             # SetBackground publishes BackgroundChanged (the GUI re-renders off
             # it) and sends nothing itself, so a standalone CLI call would leave
             # the panel on its old frame until something else ticked.
-            TickDisplay(key=self.key).execute(app)
+            app.dispatch(TickDisplay(key=self.key))
         return CloudThemeLoadResult(
             ok=set_result.ok,
             key=self.key,

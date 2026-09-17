@@ -1136,11 +1136,12 @@ class PlayVideo(Command[VideoResult]):
                     "using %s instead of playing %s",
                     self.key, still.name, self.path.name,
                 )
-                applied = SetBackground(key=self.key, path=still).execute(app)
+                applied = app.dispatch(
+                    SetBackground(key=self.key, path=still))
                 if applied.ok:
                     # SetBackground persists + invalidates + publishes, but
                     # sends nothing; push the frame so a CLI one-shot shows it.
-                    TickDisplay(key=self.key).execute(app)
+                    app.dispatch(TickDisplay(key=self.key))
                 return VideoResult(
                     ok=applied.ok, key=self.key, path=str(still),
                     frame_count=1,
@@ -2339,13 +2340,15 @@ class SetStaticBackground(Command[StaticBackgroundResult]):
     enabled: bool
 
     def execute(self, app: App) -> StaticBackgroundResult:
+        log.info("SetStaticBackground.execute: key=%s enabled=%s",
+                 self.key, self.enabled)
         app.settings.set_static_background(self.key, self.enabled)
         video = self._current_video(app)
         # A loaded playback keeps its animation timer and outranks the still.
         if video is None or self.enabled:
-            StopVideo(key=self.key).execute(app)
+            app.dispatch(StopVideo(key=self.key))
         if video is not None:
-            PlayVideo(key=self.key, path=video).execute(app)
+            app.dispatch(PlayVideo(key=self.key, path=video))
         _invalidate_scene(app, self.key)
         return StaticBackgroundResult(
             ok=True, key=self.key, enabled=self.enabled,
