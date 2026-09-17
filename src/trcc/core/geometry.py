@@ -208,3 +208,94 @@ def lock_region_to_panel(
     log.debug("lock_region_to_panel: %sx%s on a %sx%s panel -> %sx%s",
               width, height, pw, ph, width, locked)
     return x, y, width, locked
+
+
+@dataclass(frozen=True, slots=True)
+class FitRect:
+    """Where a source frame lands on a panel-sized canvas.
+
+    ``width``/``height`` is the rect the video is scaled to; ``x``/``y`` is
+    where that rect is painted.  The C# calls these ``wVal/hVal`` and
+    ``xVal/yVal``.
+    """
+
+    width: int
+    height: int
+    x: int
+    y: int
+
+
+def fit_source_to_panel(
+    source: tuple[int, int], panel: tuple[int, int],
+) -> FitRect:
+    """Fit a video's frame inside a panel, preserving its aspect.
+
+    **The oracle never scales a video to the panel rectangle.**  ffmpeg is
+    given a *fitted rect* derived from the SOURCE's aspect, and the result is
+    composited onto a panel-sized canvas at an offset (``UCVideoCut.cs``
+    ``ZhuanMaPanDuan``: ``new Bitmap(wValSub, hValSub)`` then
+    ``DrawImage(frame, xVal, yVal)``).  Handing ffmpeg the panel size instead
+    is what squashed a 1920x1080 clip into 480x480.
+
+    **The 51-branch cascade is one formula.**  ``UCVideoCut`` spells this out
+    three times — ``buttonTPJCH_Click`` (force height), ``buttonTPJCW_Click``
+    (force width) and ``SetImage`` (auto) — once per resolution, and the audit
+    called the per-panel constants "raw magic doubles".  They are not magic:
+    every one is the panel's own aspect ratio.  Measured over all 14 branches
+    plus the 0.75 default, 16 for 16::
+
+        1920x440 -> 11/48   = 0.229167 = 440/1920
+        1920x462 -> 77/320  = 0.240625 = 462/1920
+         640x172 -> 43/160  = 0.268750 = 172/640
+         960x320 -> (x3)    = 0.333333 = 320/960
+        1280x480 -> 0.375   =            480/1280
+        1600x720 -> 0.45    =            720/1600
+         176x320 -> 0.55    =            176/320
+         854x480 -> 0.56206 ~            480/854
+         960x540 -> 0.5625  =            540/960
+         800x480 -> 0.6     =            480/800
+        320x240 / 640x480 -> 0.75 (the default arm) = 240/320 = 480/640
+        240x240 / 320x320 / 360x360 / 480x480 -> plain ``h > w`` = 1.0
+
+    And every one of those comparisons is the same question written per panel:
+    *is the source relatively wider or taller than the panel?*  So the whole
+    cascade is plain **fit-inside** — scale by whichever axis runs out first,
+    centre on the other.  It is derived here rather than tabulated: a panel
+    added to the catalog needs no new row, and no table can drift from it.
+
+    **The auto path never crops.**  ``buttonTPJCH_Click`` / ``buttonTPJCW_Click``
+    FORCE an axis and can therefore overflow the canvas (a negative ``xVal``,
+    which the canvas then clips) — but that is the user's explicit override,
+    not what loading a clip does.  ``SetImage`` always fits inside.  Reading a
+    forced-axis arm as if it were the default is an easy mistake: it says the
+    oracle crops on wide panels, and it does not.
+
+    ``source`` is the frame size AFTER any rotation — the C# swaps
+    ``bitAngleW``/``bitAngleH`` at 90/270 before the cascade reads them
+    (``buttonXuanzhuan_Click``), so a caller rotating the video must rotate
+    first and pass the rotated dimensions.
+
+    Degenerate input (a zero side) returns the panel rect unchanged, which is
+    the pre-fit behaviour: better a stretched frame than a division by zero.
+    """
+    sw, sh = source
+    pw, ph = panel
+    log.debug("fit_source_to_panel: source=%sx%s panel=%sx%s", sw, sh, pw, ph)
+    if sw <= 0 or sh <= 0 or pw <= 0 or ph <= 0:
+        log.warning(
+            "fit_source_to_panel: degenerate source %sx%s or panel %sx%s — "
+            "filling the panel, which stretches a mismatched aspect",
+            sw, sh, pw, ph,
+        )
+        return FitRect(pw, ph, 0, 0)
+    # FIT INSIDE — scale by whichever axis runs out first.  Every per-panel
+    # threshold in the cascade is the algebraic form of this same comparison
+    # (source aspect vs panel aspect), which is why the arms differ per panel
+    # and the OUTCOME does not.
+    if sw * ph <= sh * pw:          # source relatively taller -> height-led
+        width, height = max(1, sw * ph // sh), ph
+    else:                           # source relatively wider  -> width-led
+        width, height = pw, max(1, sh * pw // sw)
+    rect = FitRect(width, height, (pw - width) // 2, (ph - height) // 2)
+    log.debug("fit_source_to_panel: %sx%s in %sx%s -> %s", sw, sh, pw, ph, rect)
+    return rect

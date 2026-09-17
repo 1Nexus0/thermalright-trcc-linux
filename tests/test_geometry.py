@@ -13,8 +13,10 @@ from pathlib import Path
 import pytest
 
 from trcc.core.geometry import (
+    FitRect,
     OrientationPlan,
     content_is_portrait,
+    fit_source_to_panel,
     lock_region_to_panel,
     plan_orientation,
 )
@@ -267,3 +269,98 @@ def test_a_narrow_drag_on_a_wide_panel_never_collapses_to_zero() -> None:
         _, _, w, h = lock_region_to_panel((640, 172), 0, 0, width, 999)
         assert w == width
         assert h >= 1, f"a {width}px drag collapsed to {h}px high"
+
+
+# =========================================================================
+# fit_source_to_panel — the 51-branch cascade, derived
+# =========================================================================
+
+#: Every resolution UCVideoCut.cs branches on, plus the two our catalog has
+#: that it leaves to the 0.75 default arm (320x240, 640x480).
+_CASCADE_PANELS = [
+    (176, 320), (240, 240), (320, 240), (320, 320), (360, 360), (480, 480),
+    (640, 172), (640, 480), (800, 480), (854, 480), (960, 320), (960, 540),
+    (1280, 480), (1600, 720), (1920, 440), (1920, 462),
+]
+
+#: The constant each branch actually spells, read off the decompile.  The
+#: claim under test is that every one of them IS the panel's aspect ratio —
+#: if that is false the derivation is wrong for that panel and the table has
+#: to come back.
+_CS_THRESHOLDS = {
+    (176, 320): 0.55, (240, 240): 1.0, (320, 240): 0.75, (320, 320): 1.0,
+    (360, 360): 1.0, (480, 480): 1.0, (640, 172): 43 / 160, (640, 480): 0.75,
+    (800, 480): 0.6, (854, 480): 0.56206, (960, 320): 1 / 3,
+    (960, 540): 0.5625, (1280, 480): 0.375, (1600, 720): 0.45,
+    (1920, 440): 11 / 48, (1920, 462): 77 / 320,
+}
+
+
+@pytest.mark.parametrize("panel", _CASCADE_PANELS)
+def test_the_cs_threshold_is_the_panels_own_aspect(panel) -> None:
+    """The "raw magic doubles" are derivable, which is why there is no table.
+
+    ``AUDIT_VIDEO`` records these as hand-tuned constants per resolution.  They
+    are not: 0.56206 is 480/854, 77/320 is 462/1920, and the 0.75 default arm
+    serves exactly the two panels whose aspect is 0.75.  If this fails for a
+    panel, ``fit_source_to_panel`` must not be derived for it.
+    """
+    w, h = panel
+    assert _CS_THRESHOLDS[panel] == pytest.approx(min(w, h) / max(w, h), abs=1e-4)
+
+
+@pytest.mark.parametrize("panel", _CASCADE_PANELS)
+@pytest.mark.parametrize("source", [(1920, 1080), (1080, 1920), (640, 640),
+                                    (3840, 1080), (500, 2000)])
+def test_the_fitted_rect_never_distorts_and_always_fits(source, panel) -> None:
+    """Aspect preserved, inside the panel, centred on the free axis.
+
+    These three together are what "letterbox" means, and they are asserted
+    over every panel x a spread of source shapes rather than the one case a
+    bug report happened to name.
+    """
+    rect = fit_source_to_panel(source, panel)
+    pw, ph = panel
+
+    # FITS INSIDE.  The auto path never crops -- only the forced-axis buttons
+    # can, and we do not port those.  A first draft of this gate asserted the
+    # opposite, having read buttonTPJCH_Click as if it were SetImage.
+    assert rect.width <= pw and rect.height <= ph, "rect overflows the panel"
+    assert rect.width > 0 and rect.height > 0
+
+    # EXACTLY ONE axis is pinned to the panel -- the one that ran out.  A rect
+    # smaller on both axes would fit and still be wrong (needlessly small).
+    assert rect.width == pw or rect.height == ph, "not scaled up to touch"
+
+    # Aspect preserved, to integer rounding.
+    assert rect.width / rect.height == pytest.approx(source[0] / source[1],
+                                                     rel=0.02)
+    # Centred on whichever axis has slack.
+    assert rect.x == (pw - rect.width) // 2
+    assert rect.y == (ph - rect.height) // 2
+
+
+def test_it_matches_the_numbers_the_cs_computes() -> None:
+    """Hand-computed from ``UCVideoCut.cs`` is480x480 (line 2049).
+
+        else { wVal = 480; hVal = bitAngleH * 480 / bitAngleW;
+               yVal += (480 - hVal) / 2; }
+
+    1920x1080 -> hVal = 1080*480/1920 = 270, yVal = (480-270)/2 = 105.
+    """
+    assert fit_source_to_panel((1920, 1080), (480, 480)) == FitRect(480, 270, 0, 105)
+    assert fit_source_to_panel((1080, 1920), (480, 480)) == FitRect(270, 480, 105, 0)
+    assert fit_source_to_panel((480, 480), (480, 480)) == FitRect(480, 480, 0, 0)
+
+    # And a WIDE panel, where the arms are written the other way round --
+    # is1920x462 landscape: ``hVal = 116; wVal = bitAngleW * 116 / bitAngleH;
+    # xVal += (480 - wVal) / 2`` on its 480x116 display rect.
+    # 1920x1080 -> wVal = 1920*116/1080 = 206, xVal = (480-206)/2 = 137.
+    assert fit_source_to_panel((1920, 1080), (480, 116)) == FitRect(206, 116, 137, 0)
+    assert fit_source_to_panel((3840, 1080), (480, 116)) == FitRect(412, 116, 34, 0)
+
+
+def test_a_degenerate_source_fills_rather_than_divides_by_zero() -> None:
+    """An unprobeable source must not crash the export."""
+    assert fit_source_to_panel((0, 0), (480, 480)) == FitRect(480, 480, 0, 0)
+    assert fit_source_to_panel((1920, 1080), (0, 0)) == FitRect(0, 0, 0, 0)

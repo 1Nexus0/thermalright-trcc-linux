@@ -30,6 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..core import toolchain
+from ..core.geometry import fit_source_to_panel
 from ..core.models import (
     SUBPROCESS_NO_WINDOW,
     ZT_FPS,
@@ -151,6 +152,34 @@ class VideoExporter:
         elif req.rotation == 270:
             vf.append("transpose=2")
 
+        # The oracle hands ffmpeg a rect derived from the SOURCE's aspect and
+        # composites it onto a panel-sized canvas; a bare ``-s panel`` stretches
+        # anything that is not already the panel's shape (a 1920x1080 clip came
+        # out 480x480, squashed 1.78x).  ``scale``+``pad`` is that composite in
+        # one filter.  Rotation stays FIRST and the probed size is swapped to
+        # match, because the C# reads post-rotation dimensions
+        # (``buttonXuanzhuan_Click`` swaps bitAngleW/H at 90/270).
+        source_wh = probe_dimensions(req.source)
+        if req.rotation in (90, 270):
+            source_wh = (source_wh[1], source_wh[0])
+        panel = (req.target_w, req.target_h)
+        if source_wh[0] > 0 and source_wh[1] > 0:
+            fit = fit_source_to_panel(source_wh, panel)
+            vf.append(f"scale={fit.width}:{fit.height}")
+            vf.append(
+                f"pad={req.target_w}:{req.target_h}:{fit.x}:{fit.y}",
+            )
+            size_args: list[str] = []
+        else:
+            # Without the source shape the aspect cannot be preserved.  Say so
+            # rather than silently shipping a stretched clip.
+            log.warning(
+                "export_zt: source size unknown for %s — filling %dx%d, which "
+                "STRETCHES a clip whose aspect differs (install ffprobe)",
+                req.source, req.target_w, req.target_h,
+            )
+            size_args = ["-s", f"{req.target_w}x{req.target_h}"]
+
         cmd: list[str] = [
             "ffmpeg",
             "-ss", f"{req.start_ms / 1000.0}",
@@ -158,7 +187,7 @@ class VideoExporter:
             "-i", str(req.source),
             "-y",
             "-r", str(ZT_FPS),
-            "-s", f"{req.target_w}x{req.target_h}",
+            *size_args,
         ]
         if vf:
             cmd.extend(["-vf", ",".join(vf)])
@@ -231,6 +260,46 @@ class VideoExporter:
 
 def _noop_progress(_percent: int, _msg: str) -> None:
     pass
+
+
+def probe_dimensions(source: Path) -> tuple[int, int]:
+    """Best-effort ``(width, height)`` probe via ffprobe; ``(0, 0)`` if unavailable.
+
+    Needed to preserve the source's aspect: the fit rect is derived from the
+    SOURCE shape, so without this the exporter cannot know whether a clip is
+    16:9 or square and can only fill the panel — which stretches.
+    """
+    log.info("probe_dimensions: source=%s", source)
+    if not toolchain.present("ffprobe"):
+        log.warning("probe_dimensions: no ffprobe — aspect cannot be preserved")
+        return (0, 0)
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "csv=p=0",
+        str(source),
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, timeout=10, check=False,
+            creationflags=SUBPROCESS_NO_WINDOW,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log.warning("probe_dimensions: ffprobe failed on %s (%s)", source, e)
+        return (0, 0)
+    if result.returncode != 0:
+        log.warning("probe_dimensions: ffprobe returned %d for %s",
+                    result.returncode, source)
+        return (0, 0)
+    try:
+        w, h = (int(v) for v in result.stdout.decode().strip().split(",")[:2])
+    except ValueError:
+        log.warning("probe_dimensions: unparseable ffprobe output %r",
+                    result.stdout[:80])
+        return (0, 0)
+    log.info("probe_dimensions: %s is %dx%d", source, w, h)
+    return (w, h)
 
 
 def probe_duration_ms(source: Path) -> int:
