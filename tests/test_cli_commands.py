@@ -154,6 +154,46 @@ def test_device_list_smoke(cli_runner: CliRunner, cli_app) -> None:
     assert "device(s)" in result.stdout or "No supported devices" in result.stdout
 
 
+def test_device_list_never_passes_a_catalog_guess_off_as_a_measurement(
+    cli_runner: CliRunner, cli_app, monkeypatch,
+) -> None:
+    """``detect`` must not print a catalog default as if it were measured.
+
+    ``DiscoverDevices`` never handshakes, so every resolution it reports comes
+    from the static registry.  One USB id covers panels from 240x320 to
+    1280x480, and #268's reporter compared this line against
+    ``trcc system hid-debug`` -- which DOES handshake -- and reasonably
+    concluded detection was broken.  It was the label, not the detection.
+
+    Both branches in one invocation: ``0402:3922`` declares (320,320), and the
+    LED controller ``0416:8001`` declares (0,0), which is how the registry
+    already spells "not declared".  Faked at the USB boundary only -- the real
+    CLI, the real Command and the real registry all run.
+    """
+    from trcc.core.models import DeviceInfo
+
+    monkeypatch.setattr(
+        cli_app.platform, "scan_devices",
+        lambda: [DeviceInfo(vid=0x0402, pid=0x3922),
+                 DeviceInfo(vid=0x0416, pid=0x8001)],
+    )
+
+    result = cli_runner.invoke(_app(), ["device", "list"])
+
+    assert result.exit_code == 0
+    assert "2 device(s) found" in result.stdout
+    # The declared one is LABELLED, never bare digits.
+    assert "320×320 (catalog)" in result.stdout
+    assert "resolution=320×320)" not in result.stdout, (
+        "a catalog default is printed as if the panel had been asked"
+    )
+    # The undeclared one says so instead of inventing a size.
+    assert "unknown" in result.stdout
+    assert "0×0" not in result.stdout
+    # And the reader is told where the real number comes from.
+    assert "trcc device connect" in result.stdout
+
+
 def test_device_connect_unknown_key(cli_runner: CliRunner, cli_app) -> None:
     """Unknown VID:PID → CLI surfaces the error message + non-zero exit."""
     del cli_app

@@ -31,11 +31,23 @@ def list_devices() -> None:
         raise typer.Exit(code=1)
     typer.echo(f"{len(result.products)} device(s) found:")
     for product in result.products:
+        # ``DiscoverDevices`` never handshakes (``test_it_does_not_scan_the_bus``
+        # pins that), so this figure is the CATALOG's, not the panel's.  One USB
+        # id covers panels from 240x320 to 1280x480, and printing bare digits
+        # made a guess indistinguishable from a measurement: #268's reporter
+        # compared this line against ``trcc system hid-debug`` and correctly
+        # concluded one of them was lying.  (0,0) is how the registry already
+        # spells "not declared" -- the LED controller row uses it.
+        w, h = product.native_resolution
+        size = f"{w}×{h} (catalog)" if (w, h) != (0, 0) else "unknown"
         typer.echo(
             f"  {product.key}  {product.vendor} {product.product}  "
-            f"(wire={product.wire.value}, "
-            f"resolution={product.native_resolution[0]}×{product.native_resolution[1]})"
+            f"(wire={product.wire.value}, resolution={size})"
         )
+    typer.echo(
+        "Resolutions above come from the catalog, not the panel.  "
+        "Run 'trcc device connect <key>' to read the panel's own."
+    )
 
 
 @app.command("connect")
