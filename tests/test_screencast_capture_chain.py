@@ -142,6 +142,48 @@ def test_gnome_screenshot_grabs_full_and_is_cropped(
         "frame carries pixels from outside it")
 
 
+def test_spectacle_grabs_full_and_is_cropped(
+    cap: QtScreenCapture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KDE Plasma Wayland's only rung: ``spectacle -b -n -o <file>`` grabs
+    the whole screen, then the port crops it (#271)."""
+    calls = _only("spectacle", monkeypatch, FULL)
+    frame = cap.grab_region(*REGION)
+
+    assert calls == [["spectacle", "-b", "-n", "-o", calls[0][-1]]]
+    assert (frame.width, frame.height) == (REGION[2], REGION[3])
+    assert len(frame.data) == REGION[2] * REGION[3] * 3
+    assert _uniform(frame, INK)
+
+
+def test_a_tool_that_exits_before_its_file_lands_is_waited_for(
+    cap: QtScreenCapture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``spectacle`` returns 0 with the file still empty; the chain must
+    wait for bytes instead of reading an empty PNG and moving on (#271)."""
+    pending: list[Path] = []
+
+    def fake_which(name: str) -> str | None:
+        return f"/usr/bin/{name}" if name == "spectacle" else None
+
+    def fake_run(cmd: list[str], **kw: Any) -> Any:
+        pending.append(Path(cmd[-1]))            # file lands later
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    def late_write(seconds: float) -> None:      # the first wait poll
+        _png(pending.pop(), *FULL, BACKDROP, marker=REGION)
+
+    monkeypatch.setattr("trcc.adapters.screencast.qt.shutil.which", fake_which)
+    monkeypatch.setattr("trcc.adapters.screencast.qt.subprocess.run", fake_run)
+    monkeypatch.setattr("trcc.adapters.screencast.qt.time.sleep", late_write)
+    monkeypatch.setattr(QtScreenCapture, "_qt_grab",
+                        lambda self, x, y, w, h: None)
+
+    frame = cap.grab_region(*REGION)
+
+    assert _uniform(frame, INK)
+
+
 def test_region_tools_are_preferred_over_the_full_grab(
     cap: QtScreenCapture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

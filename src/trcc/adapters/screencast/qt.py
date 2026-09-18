@@ -40,7 +40,7 @@ implementation reached by BOTH region pickers and the eyedropper, and
 measured against this file it differs in three ways:
 
 * its list is ``("grim", "gnome-screenshot", "scrot")`` — no ``maim``, no
-  ``import``, and NEITHER file knows KDE's ``spectacle`` (PR #271);
+  ``import``, no ``spectacle``; this file has all three;
 * it captures the FULL screen only, because that is what a picker needs to
   paint a frozen backdrop — it is not a region grabber;
 * it returns a **null QPixmap** where this port raises, so its caller
@@ -56,6 +56,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QRect
@@ -70,6 +71,9 @@ log = logging.getLogger(__name__)
 
 
 _EXTERNAL_TIMEOUT_S = 2
+# How long to wait for an external tool's output file to fill after it exits.
+_OUTPUT_WAIT_POLLS = 20
+_OUTPUT_WAIT_INTERVAL_S = 0.025
 
 
 class QtScreenCapture(ScreenCapture):
@@ -193,6 +197,12 @@ class QtScreenCapture(ScreenCapture):
             # Whole screen, then crop.  ``full`` stays a QPixmap so the crop
             # is one call whichever producer supplied it.
             full = self._run_tools((
+                # KDE Plasma Wayland: KWin is not wlroots, so ``grim`` fails,
+                # the X11 tools see nothing, and Qt's grab is blank -- this is
+                # the only rung that desktop has.  Flags verified by the
+                # contributor's Plasma run (PR #271): background, no
+                # notification, output file.
+                ("spectacle", ["spectacle", "-b", "-n", "-o", "{out}"]),
                 ("gnome-screenshot", ["gnome-screenshot", "-f", "{out}"]),
             ), tmp_path)
             if full is None and self._qt_can_grab():
@@ -242,6 +252,14 @@ class QtScreenCapture(ScreenCapture):
                             tool, result.returncode,
                             result.stderr[:200].decode("utf-8", "replace"))
                 continue
+            # ``spectacle`` returns before its file is flushed (measured on
+            # Plasma, PR #271); ``mkstemp`` pre-created it empty, so "exists"
+            # says nothing -- wait for bytes.  A tool that never writes falls
+            # through to the null-pixmap warning below, as before.
+            for _ in range(_OUTPUT_WAIT_POLLS):
+                if Path(tmp_path).stat().st_size > 0:
+                    break
+                time.sleep(_OUTPUT_WAIT_INTERVAL_S)
             pix = QPixmap(tmp_path)
             if not pix.isNull():
                 log.info("QtScreenCapture: %s captured %dx%d",
