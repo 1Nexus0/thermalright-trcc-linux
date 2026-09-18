@@ -6,24 +6,45 @@ native grab usually returns a black pixmap (the compositor refuses to
 hand out other windows' contents), so we shell out to ``grim`` (the
 canonical wlroots tool) or ``scrot`` (X11 last resort) and crop.
 
-The order matters:
+The order matters, and it is the order :meth:`QtScreenCapture._external_grab`
+actually tries — region tools first, then whole-screen-and-crop:
 
-1.  Try Qt native — fastest path, no subprocess, no temp files.
-2.  Try ``grim -g`` for the exact geometry — works on every wlroots
-    compositor + sway + Hyprland.
-3.  Try ``scrot -a`` — for X11 sessions where Qt's native grab was
-    blocked by the security model.
-4.  Try ``gnome-screenshot -f`` and crop — it has no scriptable region
-    flag, and it is the only one of the three that works on GNOME and
-    KDE Wayland, where ``grim`` is wlroots-only.
-5.  Fall back to a Qt full-screen grab + crop.
+1.  Qt native region grab — fastest path, no subprocess, no temp files.
+    Rejected when null or ``width() <= 1`` (the Wayland black pixmap).
+2.  ``grim -g`` for the exact geometry — every wlroots compositor, sway,
+    Hyprland.
+3.  ``scrot -a`` — X11 sessions where Qt's native grab was blocked.
+4.  ``maim -g`` — the other X11 region grabber.
+5.  ``import -window root -crop`` (ImageMagick) — least specialised, and
+    first among those actually present on a plain X11 desktop: this dev box
+    has no grim, no scrot and no maim, and capture failed outright until it
+    was here.
+6.  ``gnome-screenshot -f`` + crop — no scriptable region flag, and the only
+    entry that works on GNOME and KDE Wayland, where ``grim`` is wlroots-only.
+7.  Qt full-screen grab + crop.
 
-**This is the one chain.**  It was written three times — here, in
-``ui/gui/screen_capture.py`` and in ``ui/screen_overlay.py`` — and the copies
-had already diverged: only the UI ones knew about ``gnome-screenshot``.  A
-GNOME Wayland user could freeze the screen in the region picker and then get a
-black screencast from the CLI, the API or qtgui, while the gui beside them
-worked.  Every caller now comes through this port.
+Everything failing raises :class:`OSError` naming the install hint, rather
+than returning a blank frame.
+
+**This is the one SCREENCAST chain, and only that.**  It was written three
+times — here, in ``ui/gui/screen_capture.py`` and in ``ui/screen_overlay.py``
+— and the copies had diverged: only the UI ones knew about
+``gnome-screenshot``.  A GNOME Wayland user could freeze the screen in the
+region picker and then get a black screencast from the CLI, the API or qtgui,
+while the gui beside them worked.
+
+``ui/gui/screen_capture.py`` no longer carries a copy: it builds
+``screen_overlay.DragSelectOverlay`` and owns no tool list.  **The third copy
+is still there.**  ``ui/screen_overlay.py::grab_full_screen`` is a separate
+implementation reached by BOTH region pickers and the eyedropper, and
+measured against this file it differs in three ways:
+
+* its list is ``("grim", "gnome-screenshot", "scrot")`` — no ``maim``, no
+  ``import``, and NEITHER file knows KDE's ``spectacle`` (PR #271);
+* it captures the FULL screen only, because that is what a picker needs to
+  paint a frozen backdrop — it is not a region grabber;
+* it returns a **null QPixmap** where this port raises, so its caller
+  (``BaseScreenOverlay.show``) cancels silently.
 
 Every successful path returns a :class:`RawFrame` with packed RGB24
 bytes, ready for :meth:`Renderer.from_raw_rgb24`.

@@ -834,7 +834,7 @@ class OverlayElement:
 
 # Action name → icon PNG basename.  Used by the legacy-style display-mode
 # toggle panels (Background / Mask / Video / Screencast) to find their
-# action-button icons in ``next/ui/gui/assets/``.  Single source of
+# action-button icons in ``ui/gui/assets/``.  Single source of
 # truth so multiple panels don't drift on which icon goes with which
 # action verb.
 ACTION_ICON_IMAGES: dict[str, str] = {

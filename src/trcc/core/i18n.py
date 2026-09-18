@@ -66,7 +66,7 @@ LANGUAGE_NAMES: dict[str, str] = {
 # =========================================================================
 # Pixel-position constants (legacy GUI parity)
 # =========================================================================
-# Each tuple is (x, y, w, h, font_pt).  Used by next/ui/gui/trcc_app.py to
+# Each tuple is (x, y, w, h, font_pt).  Used by ui/gui/trcc_app.py to
 # paint translated text on top of baked-PNG backgrounds at the Windows
 # TRCC coordinates.  Data only — no logic.
 

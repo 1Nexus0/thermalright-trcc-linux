@@ -784,10 +784,16 @@ on the next bug.
    run in daemon mode reads it through a Command/Query, since `AppProxy` has no
    `.settings`
 
-**New assets**:
-1. Put file in `src/trcc/assets/gui/`
-2. Reference by base name — `Assets.get('MY_ASSET')` auto-resolves `.png`
-3. Localized variants: `{base}{lang}.png`, use `Assets.get_localized()`
+**New assets** — there are TWO trees and they are not interchangeable:
+1. **GUI skin images** go in `src/trcc/ui/gui/assets/` (640 files). That is
+   what `Assets` loads: `_PKG_ASSETS_DIR = Path(__file__).parent / 'assets'`
+   in `ui/gui/assets.py`, overridable at runtime by `set_assets_dir()`.
+   Not `src/trcc/assets/gui/` — no such directory.
+2. **Packaging / system assets** go in `src/trcc/assets/` — fonts, icons,
+   `.desktop`, the polkit policy, the systemd unit, the LHM config. `Assets`
+   never looks here.
+3. Reference by base name — `Assets.get('MY_ASSET')` auto-resolves `.png`
+4. Localized variants: `{base}{lang}.png`, use `Assets.get_localized()`
 
 ## Security
 

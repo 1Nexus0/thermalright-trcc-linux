@@ -248,10 +248,19 @@ class ZtDecoder:
             int32 : jpeg_size
             bytes : jpeg payload
 
-    Decoded frames are scaled to the requested ``size`` via a single
-    ffmpeg ``jpeg_pipe`` invocation per frame — same approach as
-    legacy.  ``fps`` is derived from the average inter-frame delay
-    (timestamps are absolute ms offsets).
+    **Nothing here decodes, and nothing here scales.**  The payloads are
+    already JPEG on disk, so :meth:`decode` parses the header and returns
+    them unchanged; one is decoded per tick by ``Renderer.decode_image``
+    (``services/display.py``).  It runs **no ffmpeg at all** — it only
+    checks that ffmpeg exists, because :class:`MediaService` may reach
+    :class:`VideoDecoder` for the same theme.
+
+    ``size`` is therefore NOT a scale target.  A ``.zt`` is authored AT the
+    canvas by ``UCVideoCut``, and :meth:`MediaService.load_video` refuses one
+    without an explicit size rather than guess; this class uses ``size``
+    only in its completion log, so a ``.zt`` authored for another panel is
+    visible in a report.  ``fps`` is derived from the average inter-frame
+    delay (timestamps are absolute ms offsets).
     """
 
     def __init__(self, path: Path, size: tuple[int, int]) -> None:

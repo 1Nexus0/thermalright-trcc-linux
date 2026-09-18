@@ -12,7 +12,7 @@ Two FBL codes (192, 224) are shared by multiple resolutions; the PM byte
 disambiguates via `_FBL_192_BY_PM` and `_FBL_224_BY_PM`.
 
 Ported byte-for-byte from legacy ``src/trcc/core/models/protocol.py`` —
-parity locked by ``tests/next/test_protocol_parity.py``.
+parity locked by ``tests/test_csharp_oracle_parity.py``.
 """
 from __future__ import annotations
 
