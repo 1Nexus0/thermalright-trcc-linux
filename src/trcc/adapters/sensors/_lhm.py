@@ -250,8 +250,9 @@ class LhmSubprocess:
         self._unavailable = False
         # True once we've seen a foreign LibreHardwareMonitor.exe running —
         # latches the decision so start() (a per-frame hot path) scans the
-        # process table at most once, never spawns our bundled copy, and just
-        # lets the step-2 probe pick up the foreign namespace when it registers.
+        # process table and waits on the foreign namespace at most once, never
+        # spawns our bundled copy, and lets the step-2 probe pick the foreign
+        # namespace up when it registers.
         self._foreign_lhm_running = False
 
     @property
@@ -269,13 +270,15 @@ class LhmSubprocess:
 
         Reuse is namespace-first, then process-name: if the namespace probe
         misses but a foreign ``LibreHardwareMonitor.exe`` is already running,
-        we return ``None`` this poll and never spawn our bundled copy — the
-        decision latches so the process table is scanned at most once, and the
-        namespace probe above picks up the foreign namespace when it registers.
+        we wait on ITS namespace exactly as we would on one we spawned, and
+        never launch our bundled copy.  The decision latches, so the process
+        table is scanned and the wait paid at most once; later polls rely on
+        the namespace probe above to pick the foreign namespace up whenever
+        it registers.
 
-        Returns ``None`` when the namespace is not (yet) queryable AND either a
-        foreign LHM is running (we defer to it) or no LHM is present and the
-        bundled exe is unavailable / did not register after spawning.
+        Returns ``None`` when the namespace is not (yet) queryable AND either
+        no LHM is present and the bundled exe is unavailable, or the LHM we
+        wait on — ours or a foreign one — did not register within the timeout.
         """
         if self._namespace_handle is not None:
             return self._namespace_handle
@@ -299,32 +302,34 @@ class LhmSubprocess:
         if self._unavailable:
             return None
 
-        # Never spawn our bundled (older) LibreHardwareMonitor alongside one the
-        # user already has running.  The step-2 probe above missed its WMI
-        # namespace (still initializing, or WMI publishing disabled), but the
-        # process is alive — so consume it, don't launch a duplicate.  Latch the
-        # decision: start() runs per sensor read, so we scan the process table
-        # at most once; every later poll short-circuits here while the step-2
-        # probe keeps trying and caches the namespace the moment it registers.
-        if self._foreign_lhm_running or self._process_running():
-            if not self._foreign_lhm_running:
-                log.info(
-                    "LibreHardwareMonitor already running (process detected); "
-                    "consuming its WMI namespace, not spawning the bundled copy",
-                )
-                self._foreign_lhm_running = True
+        # A foreign LibreHardwareMonitor we already waited on and whose
+        # namespace is still not up — the step-2 probe above catches it the
+        # moment it registers.  Never spawn our bundled copy beside it.
+        if self._foreign_lhm_running:
             return None
 
-        self._owned_process = self._spawn()
-        if self._owned_process is None:
-            log.warning(
-                "LibreHardwareMonitor not running and bundled exe not "
-                "found; LHM sensor source unavailable",
+        # Whose process do we wait on?  A running foreign LHM (WMI publisher
+        # still initializing, or never coming) is consumed, not duplicated —
+        # the process table is scanned once and the answer latched.  Otherwise
+        # we spawn the bundled exe and own it.  Either way the wait below is
+        # the same, and so is the warning when it times out.
+        if self._process_running():
+            self._foreign_lhm_running = True
+            log.info(
+                "LibreHardwareMonitor already running (process detected); "
+                "waiting on its WMI namespace, not spawning the bundled copy",
             )
-            self._unavailable = True
-            return None
-        log.info("Spawned LibreHardwareMonitor (pid=%d)",
-                 self._owned_process.pid)
+        else:
+            self._owned_process = self._spawn()
+            if self._owned_process is None:
+                log.warning(
+                    "LibreHardwareMonitor not running and bundled exe not "
+                    "found; LHM sensor source unavailable",
+                )
+                self._unavailable = True
+                return None
+            log.info("Spawned LibreHardwareMonitor (pid=%d)",
+                     self._owned_process.pid)
 
         self._namespace_handle = self._wait()
         if self._namespace_handle is None:

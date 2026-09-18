@@ -6,6 +6,8 @@ subprocess — every blocking dependency is injected.
 """
 from __future__ import annotations
 
+import logging
+
 from trcc.adapters.sensors._lhm import LhmSubprocess
 
 
@@ -285,16 +287,18 @@ def test_stop_clears_unavailable_so_a_fresh_session_retries() -> None:
 # own old dated version."
 
 
-def test_foreign_process_running_does_not_spawn() -> None:
-    """Foreign LHM process alive + namespace probe miss → we must NOT spawn."""
+def test_foreign_process_running_waits_on_its_namespace_never_spawns() -> None:
+    """Foreign LHM process alive + namespace probe miss → we wait on ITS
+    namespace, the same wait we pay for one we spawned, and never spawn."""
+    namespace = object()
     spawned: list[str] = []
     lhm = LhmSubprocess(
         probe=lambda: None,                       # namespace not queryable yet
         spawn=lambda: spawned.append("x") or _StubProcess(),
-        wait=lambda: object(),
+        wait=lambda: namespace,                   # ...but it registers in time
         process_running=lambda: True,             # a foreign LHM.exe is running
     )
-    assert lhm.start() is None
+    assert lhm.start() is namespace
     assert spawned == [], (
         "must not spawn the bundled LHM when a foreign one is already running"
     )
@@ -322,8 +326,8 @@ def test_foreign_process_scan_is_latched_after_first_detection() -> None:
 
 
 def test_foreign_namespace_registers_after_process_detected() -> None:
-    """Once the foreign LHM's WMI namespace comes up, the step-2 probe caches
-    it — and no spawn ever happened."""
+    """The one wait on the foreign LHM times out, but once its WMI namespace
+    comes up the step-2 probe caches it — and no spawn ever happened."""
     handle = object()
     probe_results: list[object | None] = [None, None, handle]
     spawned: list[str] = []
@@ -334,13 +338,33 @@ def test_foreign_namespace_registers_after_process_detected() -> None:
     lhm = LhmSubprocess(
         probe=probe,
         spawn=lambda: spawned.append("x") or _StubProcess(),
-        wait=lambda: object(),
+        wait=lambda: None,               # the foreign namespace outlasts the wait
         process_running=lambda: True,
     )
-    assert lhm.start() is None       # foreign detected, latched, no spawn
-    assert lhm.start() is None       # namespace still pending
+    assert lhm.start() is None       # foreign detected, latched, waited, no spawn
+    assert lhm.start() is None       # namespace still pending — no second wait
     assert lhm.start() is handle     # namespace now up → cached via probe
     assert spawned == [], "must never spawn while a foreign LHM is running"
+
+
+def test_foreign_namespace_never_registers_warns_once(caplog) -> None:
+    """A foreign LHM whose namespace never comes up is a silent sensor outage
+    unless the log says so: the same timeout WARNING the spawn path emits,
+    once — never per poll."""
+    lhm = LhmSubprocess(
+        probe=lambda: None,
+        spawn=lambda: _StubProcess(),
+        wait=lambda: None,
+        process_running=lambda: True,
+    )
+    with caplog.at_level(logging.WARNING):
+        assert lhm.start() is None
+        assert lhm.start() is None
+    timeouts = [
+        r for r in caplog.records
+        if r.levelno == logging.WARNING and "did not register" in r.getMessage()
+    ]
+    assert len(timeouts) == 1, [r.getMessage() for r in caplog.records]
 
 
 def test_stop_clears_foreign_latch_so_a_fresh_session_rescans() -> None:
