@@ -5,8 +5,12 @@
 # packaged unit naming one contributor's panel is useless to everybody else,
 # and `display play` requires an explicit device key.
 #
+# The first argument is the `trcc display` verb, `play` by default.  The unit's
+# ExecStopPost passes `sleep`, so stopping blanks the SAME panel starting drove —
+# the key is resolved here and nowhere else.
+#
 # Override detection by setting TRCC_DEVICE=VVVV:PPPP in the environment —
-# trcc-display.service reads ~/.config/trcc/ticker.env for exactly this, which
+# trcc-display.service reads ~/.trcc/ticker.env for exactly this, which
 # is also how you pin one panel when several are attached.
 
 set -uo pipefail
@@ -40,5 +44,5 @@ if [[ -z "$key" ]]; then
     exit 1
 fi
 
-echo "trcc-display-ticker: driving $key"
-exec "$TRCC" display play "$key"
+echo "trcc-display-ticker: display ${1:-play} $key"
+exec "$TRCC" display "${1:-play}" "$key"

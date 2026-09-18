@@ -63,8 +63,8 @@ carries no hardcoded VID:PID. To pin a specific panel, or to point at a
 pip/pipx install rather than `/usr/bin/trcc`:
 
 ```bash
-mkdir -p ~/.config/trcc
-cat > ~/.config/trcc/ticker.env <<'EOF'
+mkdir -p ~/.trcc
+cat > ~/.trcc/ticker.env <<'EOF'
 TRCC_DEVICE=0416:5408
 TRCC_BIN=/home/you/.local/bin/trcc
 EOF

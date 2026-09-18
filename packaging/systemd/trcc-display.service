@@ -12,21 +12,23 @@ Description=TRCC Linux LCD stats ticker
 Documentation=https://github.com/Lexonight1/thermalright-trcc-linux
 After=graphical-session.target
 PartOf=graphical-session.target
+# The device is often not enumerated yet at login, and only one process may
+# hold the interface — so Restart= below retries forever instead of tripping
+# the start-rate limit.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 # Optional: TRCC_DEVICE=0416:5408 to pin one panel, TRCC_BIN=/path/to/trcc for
 # a pip/pipx install.  A missing file is not an error.
-EnvironmentFile=-%h/.config/trcc/ticker.env
+EnvironmentFile=-%h/.trcc/ticker.env
 ExecStart=/usr/bin/trcc-display-ticker
-# Blank the panel on stop rather than leaving a stale frame lit.
-ExecStopPost=/bin/sh -c 'exec ${TRCC_BIN:-/usr/bin/trcc} display sleep "$(${TRCC_BIN:-/usr/bin/trcc} detect 2>/dev/null | grep -oE "[0-9a-fA-F]{4}:[0-9a-fA-F]{4}" | head -1)"'
+# Blank the panel on stop rather than leaving a stale frame lit — the same
+# helper, so it is the same panel ExecStart drove (TRCC_DEVICE honoured).
+ExecStopPost=/usr/bin/trcc-display-ticker sleep
 
-# The device is often not enumerated yet at login, and only one process may hold
-# the interface — so back off and retry rather than failing permanently.
 Restart=always
 RestartSec=5
-StartLimitBurst=0
 
 [Install]
 WantedBy=default.target
