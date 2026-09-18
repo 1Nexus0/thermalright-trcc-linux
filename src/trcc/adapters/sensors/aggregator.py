@@ -82,7 +82,15 @@ def _gpu_order(gpu: GpuSource) -> tuple[bool, int, str]:
 
 
 def _store(readings: dict[str, float], key: str, value: float | None) -> None:
-    log.debug("_store: readings=%s key=%s", readings, key)
+    # Log what this call DID, never the accumulator it was handed: the
+    # dict grows through a sweep, so dumping it makes one reading cost a
+    # kilobyte and climb.  MEASURED 2026-09-18 across a live log: four
+    # lines of this shape were 90% of ALL log bytes, and the 1 MB x 5 ring
+    # turned over every ~90 s -- so `trcc report` after any incident older
+    # than a minute held nothing but the last seconds of sensor polls.
+    # This one alone was 4.37 MB over 5,035 lines, 867 bytes to record one
+    # number.
+    log.debug("_store: %s=%s", key, value)
     if value is not None:
         readings[key] = float(value)
 

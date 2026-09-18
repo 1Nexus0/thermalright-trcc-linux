@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**The log stops erasing itself.** Four lines were writing ninety percent of
+everything TRCC logs, each of them recording an entire collection rather than
+what it had just done — the worst spent 867 bytes to note a single temperature
+reading. The log file filled and recycled roughly every ninety seconds, so a
+report sent after any problem more than a minute old contained nothing but the
+last few seconds of sensor polls. The same lines now record the value they
+handled, and the log keeps hours instead of seconds.
+
 **Screen mirroring on Wayland stops guessing which desktop you run.** TRCC
 tried every screenshot tool it knew on every desktop, so a KDE Plasma session
 ran a tool built for a different compositor on every single frame, and an X11

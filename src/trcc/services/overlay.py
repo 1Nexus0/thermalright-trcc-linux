@@ -72,7 +72,14 @@ def resolve_overlay_elements(
     own elements already use) so every consumer — render, the DC writer,
     theme save/export — shares one definition of "what is on screen".
     """
-    log.debug("resolve_overlay_elements: theme_config=%s user_elements=%s", theme_config, user_elements)
+    # The name and the counts, not the whole theme config: that dict carries
+    # every element verbatim, so this line was 2,641 bytes per render.  What a
+    # reader needs is which layer won and how many elements it has, and
+    # ``_build_overlay`` already reports the winner beside this.
+    log.debug("resolve_overlay_elements: theme=%r theme_elements=%d "
+              "user_elements=%s", theme_config.get("name"),
+              len(theme_config.get("elements") or []),
+              "none" if user_elements is None else len(user_elements))
     if user_elements is not None:
         return [e.to_dict() for e in user_elements]
     return list(theme_config.get("elements") or [])

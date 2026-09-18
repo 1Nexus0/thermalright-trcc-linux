@@ -364,3 +364,107 @@ def test_logger_receivers_matches_what_the_tree_actually_uses() -> None:
         "_LOGGER_RECEIVERS (it logs) or to not_loggers here (it does not):\n"
         + "\n".join(f"  {r}: {n} call(s)" for r, n in sorted(unknown.items()))
     )
+
+
+# =========================================================================
+# A log line may not grow with the data it describes
+#
+# MEASURED 2026-09-18 on a live 5.5 MB log: FOUR lines were 90% of every byte
+# written, and all four logged a CONTAINER they had been handed rather than
+# what the call did.  ``aggregator._store``, whose whole job is to put one
+# number into a dict, logged the WHOLE dict -- 4.37 MB over 5,035 lines, 867
+# bytes to record one reading, climbing as the dict filled through a sweep.
+#
+# The cost is not disk.  The rotating ring is 1 MB x 5, so it turned over
+# every ~90 seconds, which means ``trcc report`` after any incident older
+# than a minute held nothing but the last seconds of sensor polls.  The log
+# was erasing the evidence it exists to keep.
+#
+# A structural gate was measured and rejected: 75 call sites format an
+# unbounded container, and most are right -- a command's argument list is
+# useful and short.  The invariant is the RENDERED SIZE, so that is what is
+# gated here, on the paths that actually run hot.
+# =========================================================================
+
+#: A one-shot line can be long; these fire per reading, per render or per
+#: poll.  Anything over this is a container being dumped.
+MAX_HOT_LINE_BYTES = 200
+
+
+def _hot_lines() -> list[str]:
+    """Drive the hot log paths with realistic data; return what they wrote."""
+    import io
+    import logging as _logging
+
+    from trcc.adapters.sensors.aggregator import _store
+    from trcc.adapters.sensors.psutil_sources import ComputedIo
+    from trcc.services.overlay import resolve_overlay_elements
+
+    buf = io.StringIO()
+    handler = _logging.StreamHandler(buf)
+    handler.setFormatter(_logging.Formatter("%(name)s: %(message)s"))
+    root = _logging.getLogger()
+    root.addHandler(handler)
+    previous = root.level
+    root.setLevel(_logging.DEBUG)
+    # Per-frame lines are a separate family, silenced by default and dumped
+    # deliberately at -vvv; they are not what this gate is about.
+    _logging.getLogger("trcc.frame").setLevel(_logging.WARNING)
+    try:
+        readings: dict[str, float] = {}
+        for i, key in enumerate([
+            "cpu:temp", "cpu:usage", "cpu:freq", "cpu:power",
+            "memory:used", "memory:available", "memory:percent",
+            "gpu:primary:temp", "gpu:primary:usage", "gpu:primary:power",
+            "disk:read", "disk:write", "disk:activity",
+            "net:up", "net:down", "fan:cpu", "fan:gpu",
+        ]):
+            _store(readings, key, float(i))
+
+        io_source = ComputedIo()
+        io_source._poll_disk(readings, 1.0)
+        io_source._poll_net(readings, 1.0)
+
+        theme = {
+            "name": "Theme1", "width": 320, "height": 320,
+            "elements": [
+                {"type": "metric", "x": 74, "y": 250, "metric": "cpu:temp",
+                 "format": "{value:.0f}C", "name": "Microsoft YaHei",
+                 "size": 36.0, "bold": True, "italic": False,
+                 "color": "#808080", "show_unit": True}
+                for _ in range(7)
+            ],
+        }
+        resolve_overlay_elements(theme, None)
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(previous)
+    return [line for line in buf.getvalue().splitlines() if line.strip()]
+
+
+def test_a_hot_log_line_does_not_carry_the_whole_collection() -> None:
+    """The per-reading, per-poll and per-render lines stay small."""
+    oversized = [(len(line), line[:160]) for line in _hot_lines()
+                 if len(line) > MAX_HOT_LINE_BYTES]
+
+    assert not oversized, (
+        f"a hot log line is over {MAX_HOT_LINE_BYTES} bytes, which means it "
+        "is formatting a collection instead of what the call did — that is "
+        "what turned the log over every 90 seconds and left `trcc report` "
+        "with no evidence:\n"
+        + "\n".join(f"  {n} B: {text}…" for n, text in oversized)
+    )
+
+
+def test_the_hot_paths_really_do_log(monkeypatch) -> None:
+    """The gate above passes trivially if nothing logs at all.
+
+    Its own control: the driver must produce the lines it is measuring, or
+    an emitter that fell silent would read as a win.
+    """
+    lines = _hot_lines()
+
+    assert sum("_store:" in line for line in lines) >= 17, lines[:5]
+    assert any("_poll_disk:" in line for line in lines), lines[:5]
+    assert any("_poll_net:" in line for line in lines), lines[:5]
+    assert any("resolve_overlay_elements:" in line for line in lines), lines[:5]
