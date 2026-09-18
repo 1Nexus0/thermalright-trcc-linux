@@ -480,7 +480,6 @@ jobs:
           depend = python-certifi
           depend = portaudio
           depend = libusb
-          depend = python-hidapi
           depend = sg3_utils
           # DO NOT make this a hard depend. python-nvidia-ml-py depends on
           # nvidia-utils -- ~938 MB of driver + EGL stack on an AMD-only
@@ -491,6 +490,16 @@ jobs:
           optdepend = python-nvidia-ml-py: NVIDIA GPU sensor support
           optdepend = 7zip: theme archive extraction
           optdepend = ffmpeg: video and GIF playback
+          # DO NOT make either of these a hard depend (#293).  They are the
+          # SAME python module from two packages and CONFLICT with each other,
+          # so naming one forces the other off the system: a Steam Deck has
+          # python-hid because jupiter-hw-support requires it, and declaring
+          # python-hidapi as a depend made trcc-linux uninstallable there.
+          # We do not care which is present -- _HidBinding.detect() in
+          # adapters/device/transport.py probes for both and adapts, and the
+          # .deb has shipped the apmorton binding for releases.
+          optdepend = python-hidapi: HID panel support (conflicts with python-hid -- install either)
+          optdepend = python-hid: HID panel support (conflicts with python-hidapi -- install either)
           optdepend = python-dbus: Wayland session support
           optdepend = python-gobject: Wayland session support
           INFO

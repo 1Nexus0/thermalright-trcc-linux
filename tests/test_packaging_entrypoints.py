@@ -178,6 +178,42 @@ def test_arch_unavailable_list_has_no_stale_entries() -> None:
 
 # ── the NVIDIA reader: TWO constraints, both true ─────────────────────
 
+def test_neither_hid_binding_is_ever_a_hard_arch_dep() -> None:
+    """Naming one FORCES THE OTHER OFF, and a Steam Deck needs the other.
+
+    ``python-hidapi`` and ``python-hid`` ship the same ``hid`` module from two
+    different projects, so pacman treats them as conflicting.  Declaring either
+    as a depend therefore means "remove the one you have".  SteamOS ships
+    ``python-hid`` because ``jupiter-hw-support`` requires it, so
+    ``pacman -U trcc-linux`` could not resolve at all and the reporter could
+    not install by any route (#293).
+
+    We genuinely do not care which one is present: ``_HidBinding.detect()``
+    iterates ``(_CythonHidBinding, _ApmortonHidBinding)`` and uses whichever
+    imports, and ``open_errors()`` resolves apmorton's ``HIDException`` by name
+    because it is not an ``OSError``.  Our own .deb has shipped the apmorton
+    binding for releases, so the alternative is not theoretical.
+
+    This is the nvidia trap in a second costume — an optdepend with no recorded
+    reason reads as an oversight and gets "fixed" into a hard depend.  The
+    reason is in ``DELIBERATELY_OPTIONAL``; this keeps it from being undone.
+    """
+    import sys as _sys
+    _dev_tools = _ROOT / "dev" / "tools"
+    if str(_dev_tools) not in _sys.path:
+        _sys.path.insert(0, str(_dev_tools))
+    from check_program_deps import arch_declared_depends
+
+    declared = arch_declared_depends()
+    for pkg in ("python-hidapi", "python-hid"):
+        assert pkg not in declared, (
+            f"Arch hard-depends on {pkg} — it conflicts with the other `hid` "
+            f"provider, so this uninstalls a package the user's system may "
+            f"require (#293, a Steam Deck). Keep BOTH as optdepends; "
+            f"_HidBinding.detect() already probes for whichever is installed."
+        )
+
+
 def test_nvidia_reader_is_never_a_hard_dep() -> None:
     """It must stay OPTIONAL — a hard dep inflicts NVIDIA drivers on AMD boxes.
 

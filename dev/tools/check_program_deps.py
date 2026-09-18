@@ -126,6 +126,16 @@ ARCH_UNAVAILABLE = {"python-uvicorn", "python-sounddevice"}
 # (Platform.software_install_hint) -- see
 # tests/test_packaging_entrypoints.py, which asserts BOTH halves.
 DELIBERATELY_OPTIONAL: dict[str, str] = {
+    "hidapi": (
+        "two Arch packages provide the same `hid` module and CONFLICT with "
+        "each other -- python-hidapi and python-hid. Naming one as a depend "
+        "forces the other off the system, and a Steam Deck needs python-hid "
+        "because jupiter-hw-support requires it: `pacman -U trcc-linux` could "
+        "not resolve at all (#293). We do not care which is installed -- "
+        "_HidBinding.detect() probes for both and adapts, and the .deb has "
+        "shipped the apmorton binding for releases. Both are optdepends, and "
+        "the no-binding warning names the package for each distro."
+    ),
     "nvidia-ml-py": (
         "pulls nvidia-utils (~938 MB) on Arch / libnvidia-ml1 from contrib on "
         "Debian -- an NVIDIA driver stack for every AMD and Intel owner (#216). "

@@ -423,8 +423,16 @@ class _HidBinding(ABC):
             if child.device_class() is not None:
                 log.info("_HidBinding.detect: using %s", child.__name__)
                 return child
-        log.warning("_HidBinding.detect: NO hid binding installed — "
-                    "HID panels cannot be opened (pip install hidapi)")
+        # Name BOTH, and do not assume pip: the advice reaches distro-package
+        # users too, and the two packages conflict with each other, so telling
+        # someone to install a specific one can mean "uninstall the one your
+        # system needs" (#293, a Steam Deck).  Either satisfies us.
+        log.warning(
+            "_HidBinding.detect: NO hid binding installed — HID panels cannot "
+            "be opened.  Install EITHER binding (they conflict, pick one): "
+            "Arch python-hidapi or python-hid · Debian/Ubuntu python3-hid · "
+            "Fedora python3-hidapi · pip hidapi",
+        )
         return None
 
     @classmethod
@@ -490,8 +498,11 @@ class HidApiTransport(BulkTransport):
                  serial: str | None = None) -> None:
         if not HIDAPI_AVAILABLE:
             raise ImportError(
-                "hidapi not installed — pip install hidapi "
-                "(also libhidapi: apt install libhidapi-dev)"
+                "no hid binding installed — install EITHER python-hidapi or "
+                "python-hid (they provide the same module and conflict, so "
+                "pick whichever your distro already has), or `pip install "
+                "hidapi`.  The C library may be needed too: "
+                "apt install libhidapi-dev"
             )
         self._vid = vid
         self._pid = pid

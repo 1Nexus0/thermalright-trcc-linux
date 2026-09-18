@@ -24,7 +24,8 @@ pkgbase = trcc-linux
 	optdepends = python-pynvml: NVIDIA GPU sensor support
 	optdepends = python-dbus: Wayland session support
 	optdepends = python-gobject: Wayland session support
-	optdepends = python-hidapi: Alternative HID transport
+	optdepends = python-hidapi: HID panel support (conflicts with python-hid)
+	optdepends = python-hid: HID panel support (conflicts with python-hidapi)
 	source = trcc-linux-8.8.1.tar.gz::https://github.com/Lexonight1/thermalright-trcc-linux/archive/v8.8.1.tar.gz
 	sha256sums = SKIP
 
