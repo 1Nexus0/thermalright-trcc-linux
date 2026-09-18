@@ -90,6 +90,7 @@ class ScsiLcd(BaseDevice[ScsiTransport], wire=Wire.SCSI):
         """Poll (with boot-retry) + init, then resolve geometry from the FBL."""
         # Step 1: Poll (data-in) with boot-state check
         poll_cdb = self._build_cdb(_POLL_CMD, _POLL_SIZE)
+        log.debug("_do_handshake: poll CDB %s", poll_cdb.hex())
         response = b""
         for attempt in range(_BOOT_MAX_RETRIES):
             response = self._transport.read_cdb(
@@ -108,6 +109,7 @@ class ScsiLcd(BaseDevice[ScsiTransport], wire=Wire.SCSI):
 
         # Step 2: Init (data-out, 0xE100 zeros)
         init_cdb = self._build_cdb(_INIT_CMD, _POLL_SIZE)
+        log.debug("_do_handshake: init CDB %s", init_cdb.hex())
         self._transport.send_cdb(
             init_cdb, b"\x00" * _POLL_SIZE, _HANDSHAKE_TIMEOUT_MS,
         )
@@ -135,7 +137,7 @@ class ScsiLcd(BaseDevice[ScsiTransport], wire=Wire.SCSI):
 
     def _frame_size(self) -> tuple[int, int]:
         """The resolution the device reported, or the registry default."""
-        log.debug("_frame_size")
+        frame_log.debug("_frame_size")
         return (self._handshake.resolution if self._handshake
                 else self.info.native_resolution)
 
@@ -272,13 +274,13 @@ class ScsiLcd(BaseDevice[ScsiTransport], wire=Wire.SCSI):
         turns out to want one, it is a 17th-through-20th byte that does not
         exist today, not a line to un-comment.
         """
-        log.debug("_build_cdb: cmd=%s size=%s", cmd, size)
+        frame_log.debug("_build_cdb: cmd=%s size=%s", cmd, size)
         return struct.pack("<I", cmd) + b"\x00" * 8 + struct.pack("<I", size)
 
     @staticmethod
     def _frame_chunks(width: int, height: int) -> list[tuple[int, int]]:
         """Compute (cmd, size) pairs for chunked frame send."""
-        log.debug("_frame_chunks: width=%s height=%s", width, height)
+        frame_log.debug("_frame_chunks: width=%s height=%s", width, height)
         pixels = width * height
         chunk_size = (_CHUNK_SIZE_SMALL if pixels <= _SMALL_DISPLAY_PIXELS
                       else _CHUNK_SIZE_LARGE)

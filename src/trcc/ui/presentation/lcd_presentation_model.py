@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ...core.logs import per_frame
 from .preview_geometry import (
     rotated_lcd_size,
 )
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     pass
 
 log = logging.getLogger(__name__)
+frame_log = per_frame(__name__)
 
 # Default brightness % before the user picks one (legacy default).
 _DEFAULT_BRIGHTNESS = 100
@@ -130,7 +132,8 @@ class LcdPresentationModel:
     @staticmethod
     def progress_fraction(cursor: int, total: int) -> float:
         """Playback progress as 0..1 (0.0 when there are no frames)."""
-        log.debug("progress_fraction: cursor=%s total=%s", cursor, total)
+        frame_log.debug("progress_fraction: cursor=%s total=%s",
+                        cursor, total)
         return (cursor / total) if total else 0.0
 
     def apply_split_mode(

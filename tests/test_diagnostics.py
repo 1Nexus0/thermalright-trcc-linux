@@ -7,6 +7,7 @@ import os
 import re
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import pytest
 
@@ -1913,6 +1914,175 @@ def test_the_frame_path_gate_actually_reaches_the_render_chain(
     # and its per-frame chatter was suppressed rather than never produced.  If
     # the chain stopped executing, the mutation test below stops failing and
     # says so in one sentence.
+
+
+class _TickRun(NamedTuple):
+    """What a tick-path run measured, and the proof it happened.
+
+    ``writes`` is the wire-write count, kept beside the rates because the
+    rates alone cannot tell "nothing logged per frame" from "nothing ran".
+    The first reach test asserted a ``scsi_lcd`` record was present, which
+    held only while the send chain was the very thing being fixed -- moving
+    those lines onto the frame family broke the assertion without breaking
+    anything it was meant to protect.  A witness has to be independent of
+    what the change touches.
+    """
+
+    rates: dict[str, float]
+    writes: int
+
+
+def _tick_path_rates(tmp_path: Path, *, frames: int = 30) -> _TickRun:
+    """Records-per-frame for a WHOLE animation tick: advance, render, encode, SEND.
+
+    ``_frame_path_rates`` stops at ``display.build_frame``.  Measured against a
+    real 23 s run on the maintainer's hardware at 16 frames/s, that composite
+    is a couple of percent of what the app actually writes -- the rest comes
+    from the SCSI send chain, the playback properties the Result carries, and
+    the UI's progress read.  None of them is reachable from a bare
+    ``build_frame``, so the gate stayed green while seven call sites wrote
+    739 B per rendered frame between them and the 1 MB x 5 ring turned over in
+    about seven minutes.  A ``trcc report`` filed more than a few minutes after
+    an incident held nothing but the tail of the send loop.
+
+    This drives the body the GUI's ``_on_video_tick`` runs -- one
+    ``TickDisplay``, one ``progress_fraction`` -- on a real ``App`` over a fake
+    transport, so every layer beneath the Command is the shipping one.
+
+    **Sends are forced synchronous, and that is load-bearing.**
+    ``RenderAndSend`` submits ``wait=False`` and ``DeviceSender`` supersedes
+    whatever frame is still pending, so driven flat out only a fraction of the
+    built frames ever reach the wire -- ``dev/tools/frame_profile.py`` records
+    200 built against 4 raw writes.  Dividing the send chain's records by ticks
+    would then understate it ~50x and report a live flood as clean.  One write
+    per tick is what makes records-per-frame mean anything here.
+    """
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+    from trcc.adapters.render.qt import QtRenderer
+    from trcc.app import App
+    from trcc.core.commands import ConnectDevice, TickDisplay
+    from trcc.core.models import Theme
+    from trcc.services.media import Playback
+    from trcc.ui.presentation.lcd_presentation_model import LcdPresentationModel
+
+    from .conftest import FakePlatform
+    from .test_video_playback import _encoded_frame
+
+    key = "0402:3922"
+    ladder = levels_for(0)                       # what a user runs: no -v
+    log_file = tmp_path / "trcc.log"
+    configure_logging(log_file, level=ladder.file,
+                      stderr_level=logging.CRITICAL,
+                      per_frame=ladder.per_frame)
+
+    app = App(platform=FakePlatform(tmp_path))
+    scsi = app.platform.scsi        # pyright: ignore[reportAttributeAccessIssue]
+    # Scripted SCSI handshake: FBL=100 -> a 320x320 panel.
+    resp = bytearray(0xE100)
+    resp[0] = 100
+    app.platform.scsi.read_script.append(bytes(resp))   # type: ignore[attr-defined]
+    connected = app.dispatch(ConnectDevice(key=key))
+    assert connected.ok, connected.message
+    app.set_renderer(QtRenderer())
+
+    app.active_themes[key] = Theme(
+        path=tmp_path / "theme", name="t",
+        resolution=(320, 320), config={"elements": []},
+    )
+    app.media._playbacks[key] = Playback(   # pyright: ignore[reportPrivateUsage]
+        frames=[_encoded_frame(v) for v in (0xFF000000, 0xFF404040, 0xFF808080)],
+        fps=15,
+    )
+
+    # Force every submit to block until THIS frame is written -- see the
+    # docstring: without it the denominator counts frames that never reached
+    # the wire.
+    real_send = app.send
+
+    def sync_send(key: str, payload: Any, *, wait: bool = False) -> bool:
+        return real_send(key, payload, wait=True)
+
+    app.send = sync_send        # type: ignore[method-assign]
+
+    def tick_once() -> None:
+        """Exactly what ``LCDHandler._on_video_tick`` does for an active UI."""
+        result = app.dispatch(TickDisplay(key=key))
+        LcdPresentationModel.progress_fraction(result.cursor or 0,
+                                               result.frame_count or 0)
+
+    for _ in range(5):            # warm-up: first-frame lines are one-shot
+        tick_once()
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+
+    mark = log_file.stat().st_size
+    writes = len(scsi.sent)
+    for _ in range(frames):
+        tick_once()
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+
+    return _TickRun(
+        rates={site: n / frames
+               for site, n in _records_by_site(log_file, mark).items()},
+        writes=len(scsi.sent) - writes,
+    )
+
+
+def test_the_tick_path_writes_no_record_per_frame(tmp_path: Path) -> None:
+    """Drive a whole tick at DEFAULT verbosity; nothing may scale with frames.
+
+    The sibling gate above covers the render composite.  This covers everything
+    the render hands off to, which is where the volume actually was.
+    """
+    rates = _tick_path_rates(tmp_path).rates
+    floods = {s: r for s, r in rates.items() if r >= _PER_FRAME_RATE}
+    assert not floods, (
+        "these call sites write a record per rendered frame at DEFAULT "
+        "verbosity — move each onto core.logs.per_frame(__name__) so the "
+        "record is never constructed:\n"
+        + "\n".join(f"  {rate:.2f}/frame  {site}"
+                    for site, rate in sorted(floods.items(),
+                                             key=lambda kv: -kv[1]))
+    )
+
+
+def test_the_tick_path_gate_actually_reaches_the_wire(tmp_path: Path) -> None:
+    """The gate above is only as good as the code it runs.
+
+    Its whole reason to exist is that it reaches PAST ``build_frame``, so a
+    green result means nothing unless the send chain genuinely ran.  If the
+    forced-synchronous send or the scripted handshake ever stops working, the
+    driver silently degrades into the render-only gate that already exists and
+    this says so in one sentence.
+
+    The witness is the WIRE, not a log record: a driver that stopped sending
+    and a send chain that correctly stopped logging look identical from the
+    log, and the second is the thing this suite exists to produce.
+    """
+    frames = 10
+    run = _tick_path_rates(tmp_path, frames=frames)
+    # 320x320 RGB565 is 204,800 bytes, which the large-display 64 KiB chunk
+    # splits into exactly 4 CDBs -- so a synchronous run writes 4 per tick and
+    # the count is exact, not a floor.  MEASURED both ways over 30 ticks:
+    # synchronous 120/120/120, asynchronous 4/12/4, because DeviceSender
+    # supersedes whatever is still pending.  A floor would have passed on that
+    # 12: the first version of this assertion asked for ">= 10 writes" and a
+    # deliberately de-synchronised driver cleared it on chunks alone.
+    assert run.writes == frames * 4, (
+        f"{frames} ticks produced {run.writes} CDB write(s), expected "
+        f"{frames * 4} — the driver is not writing one frame per tick, so its "
+        "'no floods' verdict is measured against a denominator the wire never "
+        "saw.  Sends must be forced synchronous here; see _tick_path_rates."
+    )
+    per_frame_logger = [s for s in run.rates if s.startswith(PER_FRAME_ROOT)]
+    assert not per_frame_logger, (
+        "per-frame records reached the FILE at default verbosity — the family "
+        f"is not silenced: {per_frame_logger}"
+    )
 
 
 def test_the_frame_path_gate_can_actually_see_a_flood(tmp_path: Path) -> None:

@@ -383,7 +383,7 @@ class Playback:
 
     @property
     def frame_count(self) -> int:
-        log.debug("frame_count")
+        frame_log.debug("frame_count")
         return len(self.frames)
 
     @property
@@ -397,7 +397,7 @@ class Playback:
         ``RenderResult`` a UI paces itself from) read it here rather than each
         re-deriving ``1000 / fps``.
         """
-        log.debug("interval_ms")
+        frame_log.debug("interval_ms")
         return max(1, int(1000 / (self.fps or 30)))
 
     @property
