@@ -41,6 +41,7 @@ from ..core.models import (
 )
 from ..core.ports import ContentStore, Paths, Renderer
 from ..core.protocol import (
+    DEFAULT_PROFILE,
     DeviceProfile,
     get_profile,
     wire_angle,
@@ -1561,6 +1562,22 @@ class DisplayService:
                          info.key, info.fbl, profile.width, profile.height)
             return profile
         w, h = info.native_resolution
+        if (w, h) == (0, 0):
+            # The catalog declares NOTHING for this row, on purpose: one USB
+            # id covers several panels and only the handshake separates them
+            # (0416:5302, #300).  Honest about the resolution, but a 0x0
+            # surface is not a guess — it is a broken frame, and every
+            # consumer downstream divides by it.  Fall through to the ONE
+            # answer the catalog gives for "unknown", the same one an
+            # unrecognised FBL already gets.
+            if first:
+                log.warning(
+                    "_resolve_profile: %s is not connected and its catalog row "
+                    "declares no resolution (this id covers several panels) — "
+                    "assuming %dx%d.  Connect the device for its real geometry.",
+                    info.key, DEFAULT_PROFILE.width, DEFAULT_PROFILE.height,
+                )
+            return DEFAULT_PROFILE
         if first:
             log.warning("_resolve_profile: %s has neither a handshake profile "
                         "nor an FBL — synthesizing %dx%d RGB565, no rotation; "

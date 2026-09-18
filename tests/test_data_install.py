@@ -133,3 +133,31 @@ def test_discovery_installs_nothing_for_a_panel_it_cannot_identify(
         f"0416:5302 spans 240x320 / 320x240 / 1280x480 and is identified by "
         f"its PM byte, which discovery never reads (#300)."
     )
+
+
+def test_an_undeclared_row_never_yields_a_zero_sized_profile() -> None:
+    """``(0, 0)`` means "ask the device", never "render nothing".
+
+    Making ``0416:5302`` honest (#300) put a new value in front of
+    ``DisplayService._resolve_profile``'s last fallback, which read
+    ``info.native_resolution`` straight into a ``DeviceProfile``.  It
+    synthesized **0x0** — and the whole suite stayed green, because nothing
+    exercised an undeclared row without a handshake.  A zero-sized surface is
+    not a cautious guess; every consumer downstream divides by it.
+
+    Asserted for EVERY registry row, not just the one that exposed it: the
+    next row to become honest must not reintroduce this.
+    """
+    from trcc.core.registry import ALL_DEVICES
+    from trcc.services.display import DisplayService
+
+    svc = DisplayService.__new__(DisplayService)
+    svc._profile_fallbacks = set()
+
+    for key, product in sorted(ALL_DEVICES.items()):
+        profile = DisplayService._resolve_profile(svc, product, None)
+        assert profile.width > 0 and profile.height > 0, (
+            f"{key[0]:04x}:{key[1]:04x} resolves to "
+            f"{profile.width}x{profile.height} with no handshake — a zero "
+            f"surface, not a geometry"
+        )

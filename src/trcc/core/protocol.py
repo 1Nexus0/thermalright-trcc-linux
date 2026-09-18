@@ -163,7 +163,7 @@ FBL_PROFILES: dict[int, DeviceProfile] = {
 #     else if (myDeviceMode == 3 && myDevicePingMu == 100 && fbl == 59)
 #     { is640x172 = true; fbl = 224; }
 #
-# Without this row that handshake fell to ``_DEFAULT_PROFILE`` -- 320x320
+# Without this row that handshake fell to ``DEFAULT_PROFILE`` -- 320x320
 # RGB565 for a 640x172 JPEG panel, wrong on both axes and wrong encoder.
 #
 # Derived from the 224 base rather than written out, because the two routes
@@ -173,7 +173,14 @@ FBL_PROFILES[59] = dataclasses.replace(
     FBL_PROFILES[224], width=640, height=172)
 
 
-_DEFAULT_PROFILE = DeviceProfile(320, 320, big_endian=True)
+#: The geometry to assume when the catalog identifies NOTHING.  Public
+#: because consumers legitimately reach this state: a registry row may
+#: honestly declare ``native_resolution=(0, 0)`` when one USB id covers
+#: several panels (0416:5302 — see ``core/registry.py``), and a caller with
+#: no handshake then has nowhere else to ask.  A zero-sized surface is not a
+#: guess, it is a broken frame, so there is exactly one answer for "unknown"
+#: and it lives here beside the table it falls out of.
+DEFAULT_PROFILE = DeviceProfile(320, 320, big_endian=True)
 
 
 # =============================================================================
@@ -538,7 +545,7 @@ def get_profile(fbl: int, pm: int = 0, sub: int = 0) -> DeviceProfile:
     that KNOWS the byte should pass it.
     """
     log.debug("get_profile: fbl=%d pm=%d sub=%d", fbl, pm, sub)
-    profile = FBL_PROFILES.get(fbl, _DEFAULT_PROFILE)
+    profile = FBL_PROFILES.get(fbl, DEFAULT_PROFILE)
     if fbl not in FBL_PROFILES:
         _warn_unknown("FBL", fbl, f"pm={pm}", (profile.width, profile.height))
     shared = _SHARED_FBLS.get(fbl)
