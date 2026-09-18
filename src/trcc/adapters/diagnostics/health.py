@@ -378,7 +378,7 @@ def check_qt_importable() -> HealthCheckResult:
 
 
 def check_udev_rules_linux() -> HealthCheckResult:
-    """Linux-only: look for installed udev rules under /etc/udev/rules.d/."""
+    """Linux-only: look for the installed rule in every directory udev reads."""
     log.info("check_udev_rules_linux: called")
     if sys.platform != "linux":
         return HealthCheckResult(
@@ -388,18 +388,15 @@ def check_udev_rules_linux() -> HealthCheckResult:
     # Derived from the writer, never restated.  This list used to name
     # "99-trcc.rules" — a file nothing has ever installed — so a correctly
     # set-up machine was told its rules were missing, in the very report we
-    # ask people to send us when their device is not detected (#258).
-    #
-    # `trcc system setup` and the RPM write RULES_PATH under /etc; the deb
-    # and Arch packages put the same file under /lib (and some distros use
-    # /usr/lib).  The bare "99-trcc.rules" names are kept only so a box
-    # carrying one from an older install still reads as configured.
-    from ..system._udev import RULES_PATH
+    # ask people to send us when their device is not detected (#258).  It
+    # then named three of the directories udev reads, so a /usr/local install
+    # was told the same thing (#273).  The bare "99-trcc.rules" names are
+    # kept only so a box carrying one from an older install still reads as
+    # configured.
+    from ..system._udev import RULES_DIRS, RULES_PATH
 
     candidate_paths = [
-        RULES_PATH,
-        Path("/lib/udev/rules.d") / RULES_PATH.name,
-        Path("/usr/lib/udev/rules.d") / RULES_PATH.name,
+        *(directory / RULES_PATH.name for directory in RULES_DIRS),
         Path("/etc/udev/rules.d/99-trcc.rules"),
         Path("/etc/udev/rules.d/90-trcc.rules"),
         Path("/lib/udev/rules.d/99-trcc.rules"),
@@ -408,7 +405,7 @@ def check_udev_rules_linux() -> HealthCheckResult:
     if not found:
         return HealthCheckResult(
             name="udev-rules", severity="WARN",
-            message="No TRCC udev rules found under /etc/udev/rules.d/",
+            message="No TRCC udev rules found in any directory udev reads",
             fix_hint=f"Run `trcc system setup` (or install via the distro "
                      f"package) to lay down {RULES_PATH}",
         )

@@ -41,10 +41,21 @@ from ._elevate import reexec_as_root
 log = logging.getLogger(__name__)
 
 
-# Public: the health check reads this rather than restating the filename.
-# It restated it once, got it wrong ("99-trcc.rules"), and every correctly
-# installed Linux box was told its udev rules were missing (#258).
+# Public: the health check reads these rather than restating them.  It
+# restated the filename once, got it wrong ("99-trcc.rules"), and every
+# correctly installed Linux box was told its udev rules were missing (#258).
 RULES_PATH = Path("/etc/udev/rules.d/99-trcc-lcd.rules")
+# Every directory udev reads rules from (udev(7), "RULES FILES"), highest
+# priority first, plus /lib for distros without a merged /usr -- where the
+# deb installs.  `trcc system setup` writes the first; the packages under
+# packaging/ install the same file into one of the others.
+RULES_DIRS = (
+    RULES_PATH.parent,
+    Path("/run/udev/rules.d"),
+    Path("/usr/local/lib/udev/rules.d"),
+    Path("/usr/lib/udev/rules.d"),
+    Path("/lib/udev/rules.d"),
+)
 _MODPROBE_PATH = Path("/etc/modprobe.d/trcc-lcd.conf")
 _MODULES_LOAD_PATH = Path("/etc/modules-load.d/trcc-sg.conf")
 _MODULES_LOAD_RAPL_PATH = Path("/etc/modules-load.d/trcc-rapl.conf")

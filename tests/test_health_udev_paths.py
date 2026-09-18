@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from trcc.adapters.diagnostics import health
-from trcc.adapters.system._udev import RULES_PATH
+from trcc.adapters.system._udev import RULES_DIRS, RULES_PATH
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux-only check")
@@ -38,18 +38,44 @@ def test_check_finds_the_file_the_writer_writes(
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux-only check")
-@pytest.mark.parametrize("directory", ["/lib/udev/rules.d", "/usr/lib/udev/rules.d"])
-def test_check_finds_the_packaged_locations(
-    directory: str, monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("directory", RULES_DIRS, ids=str)
+def test_check_finds_the_rule_in_every_directory_udev_reads(
+    directory: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The deb and Arch packages install under /lib, not /etc."""
-    packaged = Path(directory) / RULES_PATH.name
-    monkeypatch.setattr(Path, "is_file", lambda self: self == packaged)
+    """The packages install under /lib or /usr/lib, a `make install` under
+    /usr/local/lib, and udev also reads /run -- two of which this check once
+    ignored (#273).  Parametrized over the writer's list, not a copy of it, so
+    the next directory added there is covered here without anyone remembering.
+    """
+    installed = directory / RULES_PATH.name
+    monkeypatch.setattr(Path, "is_file", lambda self: self == installed)
 
     result = health.check_udev_rules_linux()
 
     assert result.severity == "OK", result.message
-    assert str(packaged) in result.message
+    assert result.message == f"udev rules installed: {installed}"
+
+
+def test_rules_dirs_cover_every_directory_udev_reads() -> None:
+    """udev(7), "RULES FILES": rules are read from /usr/lib/udev/rules.d,
+    /usr/local/lib/udev/rules.d, /run/udev/rules.d and /etc/udev/rules.d.
+
+    That list is restated from the manual on purpose -- it is the oracle.  A
+    test parametrized over RULES_DIRS cannot notice a directory missing from
+    RULES_DIRS: drop /run there and its case simply disappears, still green
+    (measured).  This one fails.
+    """
+    udev_7_rules_files = {
+        Path("/usr/lib/udev/rules.d"),
+        Path("/usr/local/lib/udev/rules.d"),
+        Path("/run/udev/rules.d"),
+        Path("/etc/udev/rules.d"),
+    }
+    missing = udev_7_rules_files - set(RULES_DIRS)
+    assert not missing, (
+        "udev reads these but the health check never looks there: "
+        f"{sorted(map(str, missing))}"
+    )
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux-only check")
