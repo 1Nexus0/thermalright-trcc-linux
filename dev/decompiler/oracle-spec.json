@@ -1,4 +1,11 @@
 {
+  "_README": [
+    "HAND-MINED FACTS LIVE HERE. Regenerating this file DESTROYS them.",
+    "extract_device_spec.py reads TRCC.exe's decompile only. The bulk / hid3 / ly rows below were mined by hand from a SECOND binary, USBLCDNEW.dll (~/Downloads/TRCC_2.1.6_USBLCDNEW_decompiled/Examples/DCReadWriteAsync.cs), which that script never opens.",
+    "Re-running it demotes those three wires to NOT_IN_THIS_DECOMPILE / NEEDS_REVIEW and drops handshake_init, length_field, header, packet_pad, zlp_on_512_multiple and valid_identity. Measured 2026-09-17, by doing it.",
+    "Most of those are NOT recoverable by a miner: header {ly:64, ly1:20} is the SOURCE OFFSET in `Array.Copy(array2, 64 + ...)`, not a byte literal \u2014 a literal-miner emits 16 for both wires and is confidently wrong.",
+    "If you regenerate: diff against git HEAD and restore these rows, or `git checkout` the file."
+  ],
   "decompile": "TRCC_2.1.6_decompiled",
   "frame_headers": [
     {

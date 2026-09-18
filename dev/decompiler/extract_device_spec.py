@@ -16,6 +16,16 @@ Shape (this IS the manifold, decompile-derived):
 Why regenerable: Thermalright ships new versions. Re-run against a new decompile →
 diff the spec to see what THEY changed; the parity check shows where WE drift.
 
+⚠ REGENERATING IS LOSSY TODAY.  The committed ``oracle-spec.json`` carries
+hand-mined rows for **bulk / hid3 / ly** taken from a SECOND binary,
+``USBLCDNEW.dll``, which this script does not read — it only knows TRCC.exe's
+decompile.  Writing over them demotes three wires to NOT_IN_THIS_DECOMPILE and
+drops ``handshake_init`` / ``length_field`` / ``header`` / ``packet_pad`` /
+``zlp_on_512_multiple`` / ``valid_identity``.  Most are not minable anyway:
+``header {ly: 64, ly1: 20}`` is the source offset in
+``Array.Copy(array2, 64 + ...)``, not a byte-array literal, so a literal-miner
+emits 16 for both and is wrong.  **Diff before you commit the output.**
+
 Honesty rails:
   * STATIC extraction only (headers / chunk-sizes / markers / magic). Runtime golden
     bytes still need the C# executed on hardware.
