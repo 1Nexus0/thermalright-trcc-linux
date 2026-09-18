@@ -26,6 +26,56 @@ def _app(tmp_path: Path) -> App:
     return App(MockPlatform([_SPEC], tmp_path), renderer=QtRenderer())
 
 
+def test_the_window_captures_through_its_own_platform(tmp_path: Path) -> None:
+    """Under ``TRCC_DAEMON=1`` the window's session is not the daemon's, so
+    the screencast must read the screen through the Platform the window was
+    started with, never through ``app.platform``.  Two distinct platforms
+    here stand in for the two sessions; the capture the handler holds must be
+    the host's.
+    """
+    from trcc.ui.gui.trcc_app import TRCCApp
+    app = _app(tmp_path)
+    host = MockPlatform([], tmp_path / "host")
+    try:
+        window = TRCCApp(app=app, platform=host)
+
+        assert window._screencast._capture is host.screen_capture()
+        assert window._screencast._capture is not app.platform.screen_capture()
+    finally:
+        app.close()
+
+
+def test_stopping_the_screencast_releases_the_capture_through_the_port(
+    tmp_path: Path,
+) -> None:
+    """The window calls ``stop`` on whatever capture it was handed -- the
+    port's method, not an attribute it checks for -- so a portal session is
+    closed when the cast ends and nothing keeps streaming a screen nobody is
+    showing.
+    """
+    from tests.conftest import FakeScreenCapture
+    from trcc.ui.gui.trcc_app import TRCCApp
+
+    class _Recording(FakeScreenCapture):
+        def __init__(self) -> None:
+            super().__init__()
+            self.stops = 0
+
+        def stop(self) -> None:
+            self.stops += 1
+
+    app = _app(tmp_path)
+    host = MockPlatform([], tmp_path / "host")
+    host.capture = _Recording()
+    try:
+        window = TRCCApp(app=app, platform=host)
+        window._screencast.cleanup()
+
+        assert host.capture.stops == 1, "the window did not release its capture source"
+    finally:
+        app.close()
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 
@@ -79,7 +129,7 @@ def test_gui_builds_a_handler_for_the_device(tmp_path: Path) -> None:
     app = _app(tmp_path)
     try:
         assert app.dispatch(ConnectDevice(key=_KEY)).ok
-        window = TRCCApp(app=app)
+        window = TRCCApp(app=app, platform=app.platform)
         window.replay_initial_devices()
         assert _KEY in window._handlers, list(window._handlers)
     finally:

@@ -126,7 +126,7 @@ def _probe_gui_imports() -> Section:
         ("trcc.ui.qtgui.device_picker",     "G4 device_picker"),
         ("trcc.ui.qtgui.region_overlay",    "G5 region_overlay"),
         ("trcc.ui.qtgui.panels.screencast_panel", "G5 screencast_panel"),
-        ("trcc.adapters.screencast.qt",   "G5 QtScreenCapture"),
+        ("trcc.adapters.screencast.qt",   "G5 screencast Qt links"),
     ):
         try:
             __import__(module)

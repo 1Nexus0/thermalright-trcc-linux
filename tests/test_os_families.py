@@ -27,6 +27,9 @@ from trcc.adapters.system.linux import (
     LinuxFamily,
     LinuxOS,
 )
+from trcc.adapters.system.macos import MacOSPlatform
+from trcc.adapters.system.windows import WindowsPlatform
+from trcc.core.models import DisplayServer
 
 
 @pytest.mark.parametrize("family", _FAMILIES, ids=lambda f: f.name)
@@ -257,3 +260,55 @@ def test_the_named_bsds_still_answer_for_themselves() -> None:
     assert "pkg install" in FreeBsdOS().software_install_hint("7z")
     assert "pkg_add" in OpenBsdOS().software_install_hint("7z")
     assert "pkg_add ffmpeg7" in NetBsdOS().software_install_hint("ffmpeg")
+
+
+# ── the display session: an OS fact, answered by the OS ──────────────────
+
+_SESSION_VARS = ("XDG_SESSION_TYPE", "WAYLAND_DISPLAY", "DISPLAY",
+                 "XDG_CURRENT_DESKTOP")
+
+
+@pytest.mark.parametrize(("env", "server", "desktops"), [
+    ({"XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "KDE"},
+     DisplayServer.WAYLAND, ("kde",)),
+    ({"WAYLAND_DISPLAY": "wayland-0", "XDG_CURRENT_DESKTOP": "ubuntu:GNOME"},
+     DisplayServer.WAYLAND, ("ubuntu", "gnome")),
+    ({"XDG_SESSION_TYPE": "x11", "XDG_CURRENT_DESKTOP": "XFCE"},
+     DisplayServer.X11, ("xfce",)),
+    ({"DISPLAY": ":0"}, DisplayServer.X11, ()),
+    ({}, DisplayServer.HEADLESS, ()),
+], ids=["plasma-wayland", "ubuntu-gnome-wayland", "xfce-x11", "bare-display",
+        "headless"])
+def test_the_display_session_is_read_from_the_session_variables(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str],
+    server: DisplayServer, desktops: tuple[str, ...],
+) -> None:
+    """Until 2026-09-18 nothing in the tree could answer this, so the capture
+    chain ran every desktop's tool on every desktop: on Plasma that was an
+    X11 grabber ringing the bell two to three times a second and a wlroots
+    tool failing every tick.  The desktop list is kept whole and lower-cased
+    because the spec puts the most specific name FIRST -- ``ubuntu:GNOME`` --
+    so "which family" is membership, never the head.
+    """
+    for var in _SESSION_VARS:
+        monkeypatch.delenv(var, raising=False)
+    for var, value in env.items():
+        monkeypatch.setenv(var, value)
+
+    session = LinuxOS().display_session()
+
+    assert (session.server, session.desktops) == (server, desktops)
+
+
+@pytest.mark.parametrize("os_", [WindowsPlatform, MacOSPlatform],
+                         ids=lambda c: c.__name__)
+def test_native_windowing_ignores_leftover_session_variables(
+    monkeypatch: pytest.MonkeyPatch, os_: type,
+) -> None:
+    """An XQuartz or WSL variable must not turn Windows or macOS into an X11
+    session: there the OS's own windowing is the whole answer.
+    """
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("DISPLAY", ":0")
+
+    assert os_().display_session().server is DisplayServer.NATIVE

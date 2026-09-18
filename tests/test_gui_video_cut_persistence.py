@@ -60,7 +60,7 @@ def test_cut_video_is_kept_under_user_content_and_survives_close(
     app = App(MockPlatform([_SPEC], tmp_path), renderer=QtRenderer())
     try:
         assert app.dispatch(ConnectDevice(key=_KEY)).ok
-        window = TRCCApp(app=app)
+        window = TRCCApp(app=app, platform=app.platform)
         window.replay_initial_devices()
 
         window._on_video_cut_done(str(staged))

@@ -54,16 +54,6 @@ def overlay_font(family: str, size: int) -> QFont:
     return QFont(family, size)
 
 
-@lru_cache(maxsize=1)
-def is_wayland() -> bool:
-    """``True`` if we're running under a Wayland session."""
-    log.debug("is_wayland")
-    return (
-        os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
-        or bool(os.environ.get("WAYLAND_DISPLAY"))
-    )
-
-
 _FALLBACK_TOOLS: tuple[str, ...] = ("grim", "gnome-screenshot", "scrot")
 
 

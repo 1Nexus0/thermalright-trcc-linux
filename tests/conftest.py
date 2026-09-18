@@ -16,7 +16,14 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import pytest
 
-from trcc.core.models import DEFAULT_AUTOSTART_TARGET, RawFrame, UsbPowerState, Wire
+from trcc.core.models import (
+    DEFAULT_AUTOSTART_TARGET,
+    DisplayServer,
+    DisplaySession,
+    RawFrame,
+    UsbPowerState,
+    Wire,
+)
 from trcc.core.ports import (
     AutostartManager,
     BulkTransport,
@@ -337,6 +344,14 @@ class FakePlatform(Platform):
 
     def check_permissions(self) -> List[str]:
         return []
+
+    #: What ``display_session`` answers; a test sets these to simulate a
+    #: Wayland or headless session without touching the environment.
+    display_server: DisplayServer = DisplayServer.X11
+    desktops: tuple[str, ...] = ("fake",)
+
+    def display_session(self) -> DisplaySession:
+        return DisplaySession(self.display_server, self.desktops)
 
     def distro_name(self) -> str:
         return "Fake Linux"

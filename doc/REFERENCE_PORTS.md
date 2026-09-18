@@ -17,7 +17,7 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | [`HttpFetcher`](#httpfetcher) | 1 | 0 | 1 |
 | [`MissPolicy`](#misspolicy) | 1 | 0 | 2 |
 | [`Query`](#query) | 1 | 0 | 38 |
-| [`ScreenCapture`](#screencapture) | 1 | 0 | 2 |
+| [`ScreenCapture`](#screencapture) | 1 | 1 | 3 |
 | [`UserInterface`](#userinterface) | 1 | 7 | 5 |
 | [`_HidBinding`](#_hidbinding) | 1 | 0 | 2 |
 | [`_QtUI`](#_qtui) | 1 | 1 | 2 |
@@ -47,9 +47,9 @@ Ordered **cheapest to extend first** — the ports at the top are where this cod
 | [`AutostartManager`](#autostartmanager) | 6 | 0 | 4 |
 | [`Diagnostics`](#diagnostics) | 7 | 0 | 1 |
 | [`SensorEnumerator`](#sensorenumerator) | 11 | 5 | 1 |
-| [`BaseOS`](#baseos) | 12 | 17 | 8 |
+| [`BaseOS`](#baseos) | 12 | 18 | 8 |
 | [`Renderer`](#renderer) | 15 | 8 | 1 |
-| [`Platform`](#platform) | 24 | 0 | 8 |
+| [`Platform`](#platform) | 25 | 0 | 8 |
 | [`ContentStore`](#contentstore) | 26 | 0 | 1 |
 
 ---
@@ -168,7 +168,9 @@ Port for "grab a rectangle off the desktop right now".
 grab_region(x: 'int', y: 'int', width: 'int', height: 'int') -> RawFrame
 ```
 
-**Implementations (2):** `PipeWireScreenCapture` · `QtScreenCapture`
+**You inherit (1):** `stop`
+
+**Implementations (3):** `PipeWireScreenCapture` · `QtNativeCapture` · `ToolCapture`
 
 ## UserInterface
 
@@ -698,7 +700,7 @@ permission_denied_hint() -> str
 setup(dry_run: 'bool' = False) -> int
 ```
 
-**You inherit (17):** `autostart` · `configure_stdout` · `disk_partitions` · `hotplug` · `install_method` · `minimize_on_close` · `open_transport` · `package_manager` · `packages` · `paths` · `scan_devices` · `screen_capture` · `sensors` · `software_install_hint` · `upgrade_command` · `usb_power_state` · `worker_thread_context`
+**You inherit (18):** `autostart` · `configure_stdout` · `disk_partitions` · `display_session` · `hotplug` · `install_method` · `minimize_on_close` · `open_transport` · `package_manager` · `packages` · `paths` · `scan_devices` · `screen_capture` · `sensors` · `software_install_hint` · `upgrade_command` · `usb_power_state` · `worker_thread_context`
 
 **Implementations (8):** `BsdOS` · `FreeBsdOS` · `GenericBsd` · `LinuxOS` · `MacOSPlatform` · `NetBsdOS` · `OpenBsdOS` · `WindowsPlatform`
 
@@ -738,7 +740,7 @@ to_raw_rgb24(surface: 'Any') -> RawFrame
 
 OS abstraction.  DI'd into App at startup.
 
-**Extend `BaseOS` (`adapters/system/_base.py`)**, not this port directly — it answers 17 of these 24, leaving you 12 of its own to write (listed under [`BaseOS`](#baseos)).
+**Extend `BaseOS` (`adapters/system/_base.py`)**, not this port directly — it answers 18 of these 25, leaving you 12 of its own to write (listed under [`BaseOS`](#baseos)).
 
 **Register by naming your key in the class line:**
 
@@ -746,7 +748,7 @@ OS abstraction.  DI'd into App at startup.
 class MyPlatform(BaseOS, key="myos"):
 ```
 
-**You implement (24):**
+**You implement (25):**
 
 ```python
 autostart() -> AutostartManager
@@ -754,6 +756,7 @@ check_permissions() -> list[str]
 configure_stdout() -> None
 disk_info() -> list[dict[str, str]]
 disk_partitions() -> list[tuple[str, str]]
+display_session() -> DisplaySession
 distro_name() -> str
 hotplug() -> HotplugMonitor
 install_method() -> str

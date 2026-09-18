@@ -18,7 +18,12 @@ from pathlib import Path
 from typing import Any
 
 from ...core.errors import TransportError
-from ...core.models import memory_form_factor, memory_type
+from ...core.models import (
+    DisplayServer,
+    DisplaySession,
+    memory_form_factor,
+    memory_type,
+)
 from ...core.ports import (
     AutostartManager,
     HotplugMonitor,
@@ -409,6 +414,11 @@ class WindowsPlatform(BaseOS, key="win32"):
                 "elevates automatically), or run from an administrator terminal."
             ]
         return []
+
+    def display_session(self) -> DisplaySession:
+        """Native windowing, whatever a leftover session variable says."""
+        log.info("%s.display_session: native", type(self).__name__)
+        return DisplaySession(DisplayServer.NATIVE)
 
     def distro_name(self) -> str:
         log.info("distro_name: called")

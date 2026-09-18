@@ -27,7 +27,13 @@ from typing import Any
 import pytest
 
 from trcc.adapters.screencast import build_screen_capture
-from trcc.adapters.screencast.qt import QtScreenCapture
+from trcc.adapters.screencast.qt import (
+    WAYLAND_TOOLS,
+    X11_TOOLS,
+    QtNativeCapture,
+    ToolCapture,
+)
+from trcc.core.models import DisplayServer, DisplaySession, RawFrame
 from trcc.core.ports import ScreenCapture
 
 pytest.importorskip("PySide6")
@@ -42,8 +48,11 @@ BACKDROP = (200, 0, 0)
 
 
 @pytest.fixture
-def cap() -> QtScreenCapture:
-    return QtScreenCapture()
+def cap() -> ToolCapture:
+    """Every tool in one chain, so each rung can be forced to be the only
+    survivor.  Which tools a real session gets is the composer's decision,
+    tested separately below."""
+    return ToolCapture(X11_TOOLS + WAYLAND_TOOLS)
 
 
 def _png(path: Path, w: int, h: int, rgb: tuple[int, int, int],
@@ -95,9 +104,6 @@ def _only(tool: str, monkeypatch: pytest.MonkeyPatch,
 
     monkeypatch.setattr("trcc.adapters.screencast.qt.shutil.which", fake_which)
     monkeypatch.setattr("trcc.adapters.screencast.qt.subprocess.run", fake_run)
-    # Qt's native grab must not pre-empt the tool under test.
-    monkeypatch.setattr(QtScreenCapture, "_qt_grab",
-                        lambda self, x, y, w, h: None)
     return calls
 
 
@@ -105,7 +111,7 @@ def _only(tool: str, monkeypatch: pytest.MonkeyPatch,
 
 @pytest.mark.parametrize("tool", ["grim", "scrot"])
 def test_region_tools_are_asked_for_the_region(
-    cap: QtScreenCapture, monkeypatch: pytest.MonkeyPatch, tool: str,
+    cap: ToolCapture, monkeypatch: pytest.MonkeyPatch, tool: str,
 ) -> None:
     """``grim -g`` / ``scrot -a`` take a geometry, so no crop is needed."""
     calls = _only(tool, monkeypatch, (REGION[2], REGION[3]))
@@ -119,8 +125,24 @@ def test_region_tools_are_asked_for_the_region(
 
 # ── the rung that was missing ──────────────────────────────────────────────
 
+def test_import_is_told_to_hold_its_bell(
+    cap: ToolCapture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ImageMagick's ``import`` rings the X bell on every capture unless told
+    ``-silent``.  Plasma plays that bell through KWin, so this rung made an
+    "error noise" two to three times a second for as long as the fallback
+    ran.  Measured on Plasma 6 with the audio server watching: one playback
+    per call without the flag, none with it.
+    """
+    calls = _only("import", monkeypatch, (REGION[2], REGION[3]))
+    cap.grab_region(*REGION)
+
+    assert len(calls) == 1 and calls[0][0] == "import"
+    assert "-silent" in calls[0], f"import will ring the bell: {calls[0]}"
+
+
 def test_gnome_screenshot_grabs_full_and_is_cropped(
-    cap: QtScreenCapture, monkeypatch: pytest.MonkeyPatch,
+    cap: ToolCapture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The GNOME / KDE Wayland rung — full grab, then crop.
 
@@ -143,7 +165,7 @@ def test_gnome_screenshot_grabs_full_and_is_cropped(
 
 
 def test_spectacle_grabs_full_and_is_cropped(
-    cap: QtScreenCapture, monkeypatch: pytest.MonkeyPatch,
+    cap: ToolCapture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """KDE Plasma Wayland's only rung: ``spectacle -b -n -o <file>`` grabs
     the whole screen, then the port crops it (#271)."""
@@ -157,7 +179,7 @@ def test_spectacle_grabs_full_and_is_cropped(
 
 
 def test_a_tool_that_exits_before_its_file_lands_is_waited_for(
-    cap: QtScreenCapture, monkeypatch: pytest.MonkeyPatch,
+    cap: ToolCapture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``spectacle`` returns 0 with the file still empty; the chain must
     wait for bytes instead of reading an empty PNG and moving on (#271)."""
@@ -176,8 +198,6 @@ def test_a_tool_that_exits_before_its_file_lands_is_waited_for(
     monkeypatch.setattr("trcc.adapters.screencast.qt.shutil.which", fake_which)
     monkeypatch.setattr("trcc.adapters.screencast.qt.subprocess.run", fake_run)
     monkeypatch.setattr("trcc.adapters.screencast.qt.time.sleep", late_write)
-    monkeypatch.setattr(QtScreenCapture, "_qt_grab",
-                        lambda self, x, y, w, h: None)
 
     frame = cap.grab_region(*REGION)
 
@@ -185,7 +205,7 @@ def test_a_tool_that_exits_before_its_file_lands_is_waited_for(
 
 
 def test_region_tools_are_preferred_over_the_full_grab(
-    cap: QtScreenCapture, monkeypatch: pytest.MonkeyPatch,
+    cap: ToolCapture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Order matters: cropping a whole screen is the expensive last resort."""
     seen: list[str] = []
@@ -200,17 +220,18 @@ def test_region_tools_are_preferred_over_the_full_grab(
 
     monkeypatch.setattr("trcc.adapters.screencast.qt.shutil.which", fake_which)
     monkeypatch.setattr("trcc.adapters.screencast.qt.subprocess.run", fake_run)
-    monkeypatch.setattr(QtScreenCapture, "_qt_grab",
-                        lambda self, x, y, w, h: None)
 
     cap.grab_region(*REGION)
-    assert seen == ["grim"], f"expected grim first, got {seen}"
+
+    region_tools = {tool.name for tool in cap.tools if tool.region}
+    assert len(seen) == 1 and seen[0] in region_tools, (
+        f"expected one region tool first, got {seen}")
 
 
 # ── nothing available ──────────────────────────────────────────────────────
 
 def test_every_backend_failing_raises_rather_than_returning_black(
-    cap: QtScreenCapture, monkeypatch: pytest.MonkeyPatch,
+    cap: ToolCapture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A black frame is indistinguishable from a legitimately dark desktop.
 
@@ -219,8 +240,6 @@ def test_every_backend_failing_raises_rather_than_returning_black(
     """
     monkeypatch.setattr("trcc.adapters.screencast.qt.shutil.which",
                         lambda name: None)
-    monkeypatch.setattr(QtScreenCapture, "_qt_grab",
-                        lambda self, x, y, w, h: None)
     monkeypatch.setattr(
         "trcc.adapters.screencast.qt.QApplication.primaryScreen",
         staticmethod(lambda: None))
@@ -229,7 +248,7 @@ def test_every_backend_failing_raises_rather_than_returning_black(
         cap.grab_region(*REGION)
 
 
-def test_invalid_region_is_refused(cap: QtScreenCapture) -> None:
+def test_invalid_region_is_refused(cap: ToolCapture) -> None:
     with pytest.raises(OSError, match="Invalid region size"):
         cap.grab_region(0, 0, 0, 100)
 
@@ -237,39 +256,39 @@ def test_invalid_region_is_refused(cap: QtScreenCapture) -> None:
 # ── the single chooser ─────────────────────────────────────────────────────
 
 def test_one_place_chooses_the_backend() -> None:
-    """``build_screen_capture`` is what both the OS and ``ui/gui`` call.
+    """``build_screen_capture`` composes the chain from the display session.
 
-    Two callers, one decision — so the PipeWire backend lands for every face
-    at once instead of for whichever one remembered to look for it.  That is
-    no longer hypothetical: it landed on 2026-09-15, and until then it existed
-    only inside ``ui/gui``, which is why the CLI, the REST route and qtgui had
-    no Wayland capture at all.
-
-    The Qt chain is still in there — it is what answers on X11 and what the
-    portal falls back to until a user approves the consent dialog.
+    One decision for every face -- the CLI, the REST route, qtgui and the gui
+    window all reach it through ``Platform.screen_capture()`` -- so a backend
+    lands for all of them at once.  On Wayland that is the portal with the
+    desktop's own tool behind it; Qt's grab is never composed there, because
+    the compositor hands a client only its own surfaces.
     """
     from trcc.adapters.screencast.pipewire import PipeWireScreenCapture
 
-    made = build_screen_capture()
+    made = build_screen_capture(
+        DisplaySession(DisplayServer.WAYLAND, ("kde",)))
+
     assert isinstance(made, ScreenCapture)
     assert isinstance(made, PipeWireScreenCapture)
-    assert isinstance(made._fallback, QtScreenCapture)
+    assert isinstance(made._fallback, ToolCapture)
 
 
 def test_the_os_delegates_to_that_chooser(monkeypatch: pytest.MonkeyPatch) -> None:
-    """And hands it the config dir, which is where the portal token is kept.
+    """And hands it its OWN session and config dir.
 
-    Without it the backend has nowhere to store what the portal returns, so
-    the consent dialog reappears on every launch — a silent downgrade, since
-    capture still works.
+    The session is what the chooser composes from; the config dir is where
+    the portal token is kept.  Without the latter the backend has nowhere to
+    store what the portal returns, so the consent dialog reappears on every
+    launch -- a silent downgrade, since capture still works.
     """
     from trcc.adapters.system.linux import LinuxOS
 
-    sentinel = QtScreenCapture()
+    sentinel = ToolCapture(())
     seen: list[object] = []
 
-    def chooser(config_dir=None):
-        seen.append(config_dir)
+    def chooser(session, config_dir=None):
+        seen.append((session.server, config_dir))
         return sentinel
 
     monkeypatch.setattr("trcc.adapters.screencast.build_screen_capture",
@@ -277,9 +296,154 @@ def test_the_os_delegates_to_that_chooser(monkeypatch: pytest.MonkeyPatch) -> No
     os_ = LinuxOS()
 
     assert os_._build_screen_capture() is sentinel
-    assert seen == [os_.paths().config_dir()], (
-        f"the OS did not forward its config dir: {seen}"
+    assert seen == [(os_.display_session().server,
+                     os_.paths().config_dir())], (
+        f"the OS did not forward its session and config dir: {seen}"
     )
+
+
+# ── the composer: which links, per session ────────────────────────────────
+
+def _tools_of(chain: ScreenCapture) -> list[str]:
+    """The tool names a composed chain can spawn, wherever they sit."""
+    from trcc.adapters.screencast.pipewire import PipeWireScreenCapture
+    match chain:
+        case PipeWireScreenCapture():
+            return _tools_of(chain._fallback)
+        case QtNativeCapture():
+            return [] if chain._then is None else _tools_of(chain._then)
+        case ToolCapture():
+            return [tool.name for tool in chain.tools]
+    return []
+
+
+#: The tools that ONLY ever work on X11.  ``spectacle`` and
+#: ``gnome-screenshot`` are in both chains on purpose -- they capture X11
+#: perfectly well, and on Wayland each works on the compositor that trusts it.
+_X11_ONLY = {"scrot", "maim", "import"}
+
+
+@pytest.mark.parametrize(("desktops", "expected"), [
+    (("kde",), ["spectacle"]),
+    (("ubuntu", "gnome"), ["gnome-screenshot"]),
+    (("sway",), ["grim"]),
+    (("hyprland",), ["grim"]),
+    (("cosmic",), ["grim", "gnome-screenshot", "spectacle"]),
+    ((), ["grim", "gnome-screenshot", "spectacle"]),
+], ids=["plasma", "ubuntu-gnome", "sway", "hyprland", "unknown", "unnamed"])
+def test_a_wayland_session_gets_its_own_desktops_tool_and_no_x11_grabber(
+    desktops: tuple[str, ...], expected: list[str],
+) -> None:
+    """On Wayland each desktop lends ONE tool, and the X11 grabbers see only
+    Xwayland -- one of them ringing the X bell on every call, which Plasma
+    played as an error noise two to three times a second.  An unknown desktop
+    gets every Wayland tool, because we cannot know which it trusts.
+    """
+    from trcc.adapters.screencast.pipewire import PipeWireScreenCapture
+
+    made = build_screen_capture(DisplaySession(DisplayServer.WAYLAND, desktops))
+
+    assert isinstance(made, PipeWireScreenCapture), "Wayland captures through the portal"
+    assert isinstance(made._fallback, ToolCapture), "Qt's grab is blank on Wayland and is not composed"
+    assert _tools_of(made) == expected
+    assert not _X11_ONLY.intersection(_tools_of(made)), (
+        "an X11-only grabber was composed for a Wayland session; it sees "
+        "Xwayland alone, and one of them rings the X bell every call")
+
+
+@pytest.mark.parametrize("desktop", ["xfce", "gnome", "kde"])
+def test_an_x11_session_gets_qt_first_then_every_tool_that_works_on_x11(
+    desktop: str,
+) -> None:
+    """X11 is NOT narrowed by desktop, and that is the point.
+
+    ``spectacle`` and ``gnome-screenshot`` capture an X11 screen whatever
+    desktop is running, and the chain before this one reached them from
+    every desktop.  A first draft of the composer gave X11 the three region
+    grabbers alone -- which takes capture away from a GNOME-on-X11 or
+    Plasma-on-X11 box that has its desktop's tool and none of the three.
+    Only WAYLAND narrows, because there a tool works solely on the
+    compositor that trusts it.
+    """
+    from trcc.adapters.screencast.pipewire import PipeWireScreenCapture
+
+    made = build_screen_capture(DisplaySession(DisplayServer.X11, (desktop,)))
+    tools = _tools_of(made)
+
+    assert isinstance(made, QtNativeCapture)
+    assert not isinstance(made, PipeWireScreenCapture)
+    assert {"spectacle", "gnome-screenshot"} <= set(tools), tools
+    assert set(tools) >= _X11_ONLY, tools
+    assert "grim" not in tools, "grim is wlroots-only and cannot capture X11"
+
+
+def test_stop_travels_down_the_chain() -> None:
+    """``stop`` is on the port so the gui can call it on whatever it was
+    handed; the native link holds nothing itself and passes it on to the
+    link that might."""
+    stopped: list[str] = []
+
+    class _Held(ScreenCapture):
+        def grab_region(self, x, y, width, height):
+            raise OSError("not asked here")
+
+        def stop(self) -> None:
+            stopped.append("held")
+
+    QtNativeCapture(then=_Held()).stop()
+    QtNativeCapture().stop()                  # nothing to forward, no error
+
+    assert stopped == ["held"]
+
+
+def test_a_stateless_source_inherits_stop_from_the_port() -> None:
+    """``stop`` is concrete on the port, so a source that holds nothing --
+    every fake in this suite, Qt's grab, the tools -- need not write one and
+    the gui can call it on whatever it was handed.  Measured 2026-09-18:
+    with the port's ``stop`` removed, no test in the tree noticed.
+    """
+    class _Bare(ScreenCapture):
+        def grab_region(self, x, y, width, height):
+            raise OSError("never asked")
+
+    _Bare().stop()                            # inherited, and a no-op
+
+
+def test_native_windowing_gets_qt_alone() -> None:
+    """Windows and macOS: no portal, no tools, Qt's grab is the whole answer."""
+    made = build_screen_capture(DisplaySession(DisplayServer.NATIVE))
+
+    assert isinstance(made, QtNativeCapture)
+    assert made._then is None
+
+
+def test_a_headless_process_is_composed_like_x11() -> None:
+    """No session variables at all: the X11 grabbers may still find a display
+    of their own, and Qt's guard declines on its own when it cannot."""
+    made = build_screen_capture(DisplaySession(DisplayServer.HEADLESS))
+
+    assert isinstance(made, QtNativeCapture)
+    assert _tools_of(made) == [tool.name for tool in X11_TOOLS]
+
+
+@pytest.mark.parametrize(("desktops", "name"), [
+    (("kde",), "portal-restore-token.kde"),
+    (("ubuntu", "gnome"), "portal-restore-token.ubuntu-gnome"),
+    ((), "portal-restore-token.unknown"),
+], ids=["plasma", "ubuntu-gnome", "unnamed"])
+def test_the_portal_token_is_kept_per_desktop(
+    tmp_path: Path, desktops: tuple[str, ...], name: str,
+) -> None:
+    """A restore token is meaningful only to the portal backend that issued
+    it, and the backend is chosen per desktop.  One file for all of them
+    meant switching between GNOME and KDE asked again every time, each grant
+    overwriting the other's -- measured on 2026-09-18: the GNOME token
+    replayed to KDE and refused, then KDE's overwriting it.
+    """
+    made = build_screen_capture(
+        DisplaySession(DisplayServer.WAYLAND, desktops), config_dir=tmp_path)
+
+    assert made._token_path == tmp_path / name
 
 
 # ── the blank-grab trap ───────────────────────────────────────────────
@@ -299,9 +463,8 @@ def test_an_offscreen_qt_never_supplies_a_capture(monkeypatch) -> None:
     ``QT_QPA_PLATFORM=offscreen`` for headless rendering without asking
     whether a display exists.
     """
-    from trcc.adapters.screencast.qt import QtScreenCapture
+    cap = QtNativeCapture()
 
-    cap = QtScreenCapture()
     assert cap._qt_can_grab() is False, (
         "the suite runs offscreen, so Qt must decline — if this passes, Qt is "
         "about to hand the wire a black frame"
@@ -309,43 +472,37 @@ def test_an_offscreen_qt_never_supplies_a_capture(monkeypatch) -> None:
     assert cap._qt_grab(0, 0, 64, 64) is None
 
 
-def test_the_full_screen_fallback_is_guarded_too(monkeypatch) -> None:
-    """THE SECOND ROUTE.  Qt is reached twice, and one guard missed it.
+def test_the_native_link_hands_over_when_qt_is_blank() -> None:
+    """When Qt cannot see a screen the next link is asked, not a blank sent.
 
-    ``_external_grab`` falls back to a Qt FULL-screen grab and crops it.  The
-    first version of this guard covered only ``_qt_grab``, so the fallback
-    went on serving the same blank pixmap by a different path — the fix
-    measured identically broken until both routes asked one predicate.
+    The old single class reached Qt by TWO routes -- a region grab and a
+    full-screen grab cropped after the tools -- and one guard missed the
+    second, so it went on serving the same blank pixmap by a different path.
+    The native link now has ONE route and one guard, and hands over.
     """
-    from trcc.adapters.screencast.qt import QtScreenCapture
+    seen: list[tuple[int, int, int, int]] = []
 
-    cap = QtScreenCapture()
-    # No external tool may answer, so the ONLY remaining source is the Qt
-    # full-screen fallback — which must decline rather than crop a blank.
-    monkeypatch.setattr(QtScreenCapture, "_run_tools",
-                        lambda self, attempts, tmp_path: None)
+    class _Next(ScreenCapture):
+        def grab_region(self, x, y, width, height):
+            seen.append((x, y, width, height))
+            return RawFrame(data=bytes(width * height * 3), width=width,
+                            height=height)
 
-    assert cap._external_grab(0, 0, 64, 64) is None, (
-        "the full-screen fallback cropped an offscreen grab and returned it"
-    )
+    frame = QtNativeCapture(then=_Next()).grab_region(*REGION)
+
+    assert seen == [REGION], "the next link was not asked for the region"
+    assert (frame.width, frame.height) == (REGION[2], REGION[3])
 
 
 def test_a_blank_source_raises_instead_of_sending_black() -> None:
     """With nothing able to capture, the answer is an error, not a picture.
 
     Returning black is worse than failing: the caller sends it to the panel
-    and the user sees a dead screencast with no message anywhere.
+    and the user sees a dead screencast with no message anywhere.  Qt alone
+    is the whole chain on Windows and macOS, so a blank there is the end.
     """
-    import pytest as _pytest
-
-    from trcc.adapters.screencast.qt import QtScreenCapture
-
-    cap = QtScreenCapture()
-    with _pytest.MonkeyPatch.context() as mp:
-        mp.setattr(QtScreenCapture, "_run_tools",
-                   lambda self, attempts, tmp_path: None)
-        with _pytest.raises(OSError, match="Screen capture failed"):
-            cap.grab_region(0, 0, 64, 64)
+    with pytest.raises(OSError, match="Screen capture failed"):
+        QtNativeCapture().grab_region(0, 0, 64, 64)
 
 
 def test_the_region_tools_cover_plain_x11() -> None:
@@ -355,15 +512,18 @@ def test_the_region_tools_cover_plain_x11() -> None:
     all, so capture failed outright once the blank Qt grab stopped being
     accepted.  ``maim`` and ImageMagick's ``import`` are the common X11
     answers; with ``import`` the headless chain measured a mean absolute
-    error of 0.00 against ground truth.
+    error of 0.00 against ground truth.  And ``grim`` is NOT an X11 tool.
     """
-    import inspect
+    names = [tool.name for tool in X11_TOOLS]
 
-    from trcc.adapters.screencast.qt import QtScreenCapture
-
-    src = inspect.getsource(QtScreenCapture._external_grab)
-    for tool in ("grim", "scrot", "maim", "import"):
-        assert f'"{tool}"' in src, f"{tool} is not in the region chain"
+    assert {"maim", "import"} <= set(names), names
+    assert "grim" not in names, "grim is wlroots-only and does not belong here"
+    assert all(tool.region for tool in X11_TOOLS if tool.name in _X11_ONLY), (
+        "every X11 region grabber takes a geometry")
+    region_first = [t.region for t in X11_TOOLS]
+    assert region_first == sorted(region_first, reverse=True), (
+        "the region grabbers must come before the whole-screen tools: a "
+        f"full grab plus a crop is the expensive last resort — {names}")
 
 
 # ── one stride loop, three producers ──────────────────────────────────

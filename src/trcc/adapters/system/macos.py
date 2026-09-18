@@ -18,6 +18,7 @@ from pathlib import Path
 
 import psutil  # pyright: ignore[reportMissingImports]
 
+from ...core.models import DisplayServer, DisplaySession
 from ...core.ports import (
     AutostartManager,
     HotplugMonitor,
@@ -135,6 +136,11 @@ class MacOSPlatform(BaseOS, key="darwin"):
                 "kernel driver — run with sudo or install as a signed app bundle.",
             ]
         return []
+
+    def display_session(self) -> DisplaySession:
+        """Native windowing, whatever a leftover session variable says."""
+        log.info("%s.display_session: native", type(self).__name__)
+        return DisplaySession(DisplayServer.NATIVE)
 
     def distro_name(self) -> str:
         log.info("distro_name: called")

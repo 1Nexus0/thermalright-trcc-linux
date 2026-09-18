@@ -13,9 +13,9 @@ Workflow:
 
 Honest scope:
 
-* X11 + Wayland (via ``grim`` / ``scrot``) work today.  PipeWire-
-  native capture lands later as a second :class:`ScreenCapture`
-  adapter — the port is in place.
+* X11 and Wayland both capture through ``Platform.screen_capture()``:
+  Qt's grab and the X11 grabbers on X11, the xdg-portal PipeWire stream
+  with the desktop's own tool behind it on Wayland.
 * The panel runs the timer locally; it does not persist across
   restarts.  Screencast state is intentionally transient — users
   who want a permanent mirror are an unusual case.
@@ -231,7 +231,7 @@ class ScreencastPanel(BasePanel):
         if not started.ok:
             self._status.setText(started.message)
             return
-        # The driver replaces this panel's own QTimer + QtScreenCapture.  It
+        # The driver replaces this panel's own QTimer + capture chain.  It
         # was a THIRD screencast driver in the tree, beside the gui skin's and
         # the one core grew for headless clients, and the only one that never
         # persisted its region — so nothing else could tell a cast was running.

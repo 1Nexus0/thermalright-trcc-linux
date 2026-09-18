@@ -58,7 +58,7 @@ from ...core.commands import (
 )
 from ...core.logs import per_frame
 from ...core.models import HardwareMetrics, Kind, ThemeDir
-from ...core.ports import ScreenCapture
+from ...core.ports import CaptureNotReady, Platform, ScreenCapture
 from ...core.results import LanguageEntry
 from ..bus_bridge import BusBridge
 from ..presentation import presentation_for
@@ -237,15 +237,13 @@ class ScreencastHandler:
     def _stop_capture(self) -> None:
         """Release the capture backend's session, if it holds one.
 
-        The portal backend keeps a consented session open; dropping it on
-        screencast-stop means the next start asks again rather than streaming
-        a screen nobody is showing.  ``QtScreenCapture`` holds nothing, so
-        this is a no-op for it -- hence ``getattr`` rather than a type test.
+        The portal backend keeps a consented stream open; dropping it on
+        screencast-stop means nothing keeps streaming a screen nobody is
+        showing, and the next start replays the stored token.  Stateless
+        links release nothing -- ``stop`` is a no-op on the port for them.
         """
-        stop = getattr(self._capture, "stop", None)
-        if callable(stop):
-            log.info("ScreencastHandler._stop_capture: releasing the session")
-            stop()
+        log.info("ScreencastHandler._stop_capture: releasing the session")
+        self._capture.stop()
 
     def _tick(self) -> None:
         if not self._active or self._w <= 0 or self._h <= 0 or not self._lcd_w or not self._lcd_h:
@@ -264,6 +262,11 @@ class ScreencastHandler:
         try:
             raw = self._capture.grab_region(
                 self._x, self._y, self._w, self._h)
+        except CaptureNotReady as e:
+            # Consent pending, or no first frame yet: drop this tick, quietly
+            # -- it fires seven times a second for up to thirty seconds.
+            frame_log.debug("Screencast: no frame yet — %s", e)
+            return
         except OSError as e:
             if not self._capture_warn_logged:
                 log.warning("Screencast: capture failed — %s", e)
@@ -333,11 +336,13 @@ class TRCCApp(QMainWindow):
     def __init__(
         self,
         app: App,
+        platform: Platform,
         decorated: bool = False,
     ) -> None:
         super().__init__()
         from trcc.__version__ import __version__
-        log.info("TRCC v%s starting", __version__)
+        log.info("TRCC v%s starting (host platform %s)", __version__,
+                 type(platform).__name__)
 
         self._app = app
         # One dispatch for every platform fact this window needs.  Reaching
@@ -392,21 +397,18 @@ class TRCCApp(QMainWindow):
         self._apply_dark_theme()
         self._setup_ui()
 
-        # Screencast handler
-        # Built HERE, not fetched from ``app.platform`` — that raises under
-        # TRCC_DAEMON=1, and the screen being captured belongs to THIS
-        # session, not to whichever one owns USB.
-        from ...adapters.screencast import build_screen_capture
-        # The config dir comes off the BUS, not off ``app.platform`` — the
-        # latter is an AttributeError under TRCC_DAEMON=1.  It is only used to
-        # keep the portal's restore token, so a denied Query costs a consent
-        # prompt next launch and nothing else.
-        paths = self._app.dispatch(GetPaths())
+        # Screencast handler.  Its capture source is the HOST Platform's --
+        # the one this window was started with -- never ``app.platform``:
+        # the screen being captured belongs to the session the window is in,
+        # which under TRCC_DAEMON=1 is not the session that owns USB (and
+        # ``AppProxy`` exposes ``dispatch`` alone).  ``Platform.screen_capture``
+        # is the port that says so.  Until 2026-09-18 the window imported the
+        # adapter composer directly for the same reason, bypassing that port.
+        capture = platform.screen_capture()
+        log.info("screencast capture source: %s from %s",
+                 type(capture).__name__, type(platform).__name__)
         self._screencast = ScreencastHandler(
-            self, self._on_screencast_frame,
-            capture=build_screen_capture(
-                Path(paths.config_dir) if paths.ok and paths.config_dir
-                else None))
+            self, self._on_screencast_frame, capture=capture)
 
         # Connect widget signals
         self._connect_view_signals()
@@ -1908,7 +1910,7 @@ class TRCCApp(QMainWindow):
                 h.select_theme_from_path(Path(last_path))
 
     def _on_screencast_frame(self, image: Any) -> None:
-        log.info("_on_screencast_frame")
+        log.debug("_on_screencast_frame")  # per frame, ~7 Hz
         h = self._active_lcd()
         if h:
             h.on_screencast_frame(image)

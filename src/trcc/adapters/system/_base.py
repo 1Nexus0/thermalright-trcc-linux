@@ -24,6 +24,7 @@ class can register its own children without importing its own package (a cycle).
 from __future__ import annotations
 
 import logging
+import os
 from abc import abstractmethod
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
@@ -34,7 +35,7 @@ import usb.util  # pyright: ignore[reportMissingImports]
 
 from ...core.factory import FallBackTo, Registry
 from ...core.logs import per_frame
-from ...core.models import DeviceInfo, Wire
+from ...core.models import DeviceInfo, DisplayServer, DisplaySession, Wire
 from ...core.ports import (
     AutostartManager,
     HotplugMonitor,
@@ -262,21 +263,52 @@ class BaseOS(Platform):
         log.debug("%s._build_packages: none for this OS", type(self).__name__)
         return NoPackageManager()
 
+    def display_session(self) -> DisplaySession:
+        """The session variables, read as the XDG spec defines them.
+
+        ``XDG_SESSION_TYPE`` is authoritative when set; ``WAYLAND_DISPLAY``
+        and ``DISPLAY`` stand in for it under compositors and X servers
+        started by hand.  Neither present is a headless process -- an ssh
+        shell, a service -- and is said so rather than guessed as X11.
+        ``XDG_CURRENT_DESKTOP`` is a colon list, most specific first
+        (``ubuntu:GNOME``), kept whole and lower-cased so a consumer tests
+        membership.
+        """
+        session_type = os.environ.get("XDG_SESSION_TYPE", "").strip().lower()
+        wayland_display = os.environ.get("WAYLAND_DISPLAY", "")
+        display = os.environ.get("DISPLAY", "")
+        current = os.environ.get("XDG_CURRENT_DESKTOP", "")
+        if session_type == "wayland" or wayland_display:
+            server = DisplayServer.WAYLAND
+        elif session_type == "x11" or display:
+            server = DisplayServer.X11
+        else:
+            server = DisplayServer.HEADLESS
+        desktops = tuple(
+            token.strip().lower() for token in current.split(":")
+            if token.strip())
+        log.info("%s.display_session: %s desktops=%s (XDG_SESSION_TYPE=%r "
+                 "WAYLAND_DISPLAY=%r DISPLAY=%r XDG_CURRENT_DESKTOP=%r)",
+                 type(self).__name__, server.value, desktops, session_type,
+                 wayland_display, display, current)
+        return DisplaySession(server, desktops)
+
     def _build_screen_capture(self) -> ScreenCapture:
         """Build this OS's capture source (called once, then memoised).
 
         Concrete, and truthfully so — unlike the defaults deleted on
         2026-08-21, this one WORKS everywhere rather than answering on an
-        OS's behalf.  ``QtScreenCapture`` tries Qt's native grab first and
-        falls through to ``grim`` / ``scrot`` only where they exist, so an
-        OS that has neither still captures.  Override when a native path
-        beats it.
+        OS's behalf: the chain is composed from :meth:`display_session`, so
+        a Wayland desktop gets the portal and its own tool, X11 gets Qt's
+        grab and the X11 grabbers, native windowing gets Qt alone.
+        Override when a native path beats it.
         """
         from ..screencast import build_screen_capture
 
         log.info("%s._build_screen_capture: delegating to the shared backend "
                  "chooser", type(self).__name__)
-        return build_screen_capture(self.paths().config_dir())
+        return build_screen_capture(self.display_session(),
+                                    self.paths().config_dir())
 
     # ── Shared transport / scan ──────────────────────────────────────────
 

@@ -36,6 +36,7 @@ if TYPE_CHECKING:
         DeviceInfo,
         DeviceQuirks,
         DiscoveredMask,
+        DisplaySession,
         HandshakeResult,
         HardwareMetrics,
         LedHandshakeResult,
@@ -1990,12 +1991,24 @@ class CloudCatalog(ABC):
 # =========================================================================
 
 
+class CaptureNotReady(OSError):
+    """The capture source is starting up and will answer later.
+
+    Raised by a session-backed source -- the xdg-portal stream -- while the
+    user is being asked for consent, or before its first frame lands.  Not a
+    failure: every caller drops the frame and asks again next tick, and the
+    capture Command reports it at DEBUG where a real failure is a WARNING.
+    """
+
+
 class ScreenCapture(ABC):
     """Port for "grab a rectangle off the desktop right now".
 
-    Adapters: :class:`QtScreenCapture` for Qt apps (X11 + Wayland
-    fallback).  Used by the screencast pipeline to feed live desktop
-    pixels into the device.
+    Adapters: ``QtNativeCapture`` (Qt's own grab), ``ToolCapture``
+    (external screenshot programs) and ``PipeWireScreenCapture`` (the
+    xdg-portal stream), composed per display session by
+    ``build_screen_capture``.  Used by the screencast pipeline to feed live
+    desktop pixels into the device.
 
     Returns a :class:`RawFrame` with RGB24 pixel data sized exactly to
     the requested rectangle — callers handle scale/fit/encode.
@@ -2007,9 +2020,20 @@ class ScreenCapture(ABC):
 
         Raise :class:`OSError` (or subclass) on capture failure — the
         caller decides whether to retry, stop the screencast, or surface
-        the error to the user.
+        the error to the user.  :class:`CaptureNotReady` is the one subclass
+        that means "not yet" rather than "no": drop the frame, ask again.
         """
         ...
+
+    def stop(self) -> None:
+        """Release a held session, if this source holds one.
+
+        Concrete and a no-op: Qt's grab and the external tools hold nothing
+        between calls.  The portal backend overrides it to close its consented
+        stream when the screencast stops, so nothing keeps streaming a screen
+        nobody is showing.
+        """
+        log.debug("%s.stop: nothing held", type(self).__name__)
 
 
 # =========================================================================
@@ -2247,14 +2271,36 @@ class Platform(ABC):
 
     # ── Screen capture ────────────────────────────────────────────────
     @abstractmethod
+    def display_session(self) -> DisplaySession:
+        """Which display server draws the desktop this PROCESS can see, and
+        which desktop family runs it.
+
+        An OS fact, so it is asked here and answered by the OS adapter: on
+        Linux and the BSDs from the session variables, on Windows and macOS
+        always native.  The screen belongs to the session of the process
+        asking, which is why this is a method on the Platform an object
+        holds and not a value on the bus: under ``TRCC_DAEMON=1`` the
+        window's Platform answers for the window's session and the daemon's
+        for the daemon's, and those can differ.
+
+        This is the input :func:`~trcc.adapters.screencast.build_screen_capture`
+        chooses its links from.  Until 2026-09-18 nothing in the tree could
+        answer it -- one env probe sat in a UI module and nothing read it --
+        so the capture chain ran every desktop's tool on every desktop:
+        X11 grabbers under Wayland, which see only Xwayland and one of which
+        rings the X bell on each call; a wlroots tool under KWin, which
+        fails every tick; a Plasma tool under GNOME.
+        """
+
+    @abstractmethod
     def screen_capture(self) -> ScreenCapture:
         """Grab a desktop rectangle — the source the screencast feed reads.
 
-        Declared on the port because WHICH tool captures a screen is an
-        OS fact: ``grim`` on wlroots, ``scrot`` on X11, and neither exists
-        on Windows or macOS, where Qt's native grab is the whole answer.
-        ``BaseOS`` supplies the Qt-backed adapter, which already degrades
-        through those tools, so an OS only overrides this when it has
+        Declared on the port because WHICH path captures a screen is an
+        OS fact: the portal stream and one desktop's own tool on Wayland,
+        Qt's grab then the X11 grabbers on X11, Qt's grab alone on Windows
+        and macOS.  ``BaseOS`` composes that chain from
+        :meth:`display_session`, so an OS only overrides this when it has
         something better.
 
         Here rather than injected like ``Renderer`` because a Command needs

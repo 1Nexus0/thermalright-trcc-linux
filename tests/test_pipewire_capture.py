@@ -13,8 +13,11 @@ never block a caller on a consent dialog.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
+from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -26,7 +29,7 @@ from trcc.adapters.screencast.pipewire import (
     unpad_rows,
 )
 from trcc.core.models import RawFrame
-from trcc.core.ports import ScreenCapture
+from trcc.core.ports import CaptureNotReady, ScreenCapture
 
 
 class _Fallback(ScreenCapture):
@@ -63,6 +66,29 @@ class _Session:
     def stop(self) -> None:
         self.stopped = True
         self.is_running = False
+
+
+class _Pending(_Session):
+    """A session whose start genuinely WAITS, as a consent dialog does.
+
+    ``_Session.start`` flips ``is_running`` the moment the background thread
+    runs, so a test built on it never meets the "still starting" branch --
+    measured: with the old fallback-while-pending policy put back, the test
+    that used it still passed.  This one stays pending until ``stop``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(running=False)
+        self.release = threading.Event()
+
+    def start(self, timeout: float = 30.0) -> bool:
+        self.started.set()
+        self.release.wait(timeout)
+        return False
+
+    def stop(self) -> None:
+        self.release.set()
+        super().stop()
 
 
 def _capture(session: _Session, fallback: _Fallback) -> PipeWireScreenCapture:
@@ -133,27 +159,55 @@ def test_a_region_past_the_edge_is_clamped() -> None:
     assert len(f.data) == 3
 
 
+def test_the_crop_never_logs_the_frame_bytes(caplog) -> None:
+    """The crop line used to write the whole buffer, per frame: 968 KB at
+    capture rate rolled the 10 MB log twice in two seconds and erased the
+    first minute of the run it was meant to explain.  The line itself must
+    stay -- it is the evidence a report needs -- with the geometry only.
+    """
+    w, h = 16, 8
+    data = b"\xab\xcd\xef" * (w * h)
+    with caplog.at_level(logging.DEBUG, logger=pw.frame_log.name):
+        crop_rgb24(data, w, h, 0, 0, 4, 4)
+
+    lines = [r.getMessage() for r in caplog.records
+             if "crop_rgb24" in r.getMessage()]
+    assert lines, "the crop no longer logs at all"
+    assert all(f"{w}x{h}" in line for line in lines), lines
+    assert not any("xab" in line or "xcd" in line for line in lines), (
+        "the frame bytes are back in the log line")
+
+
 # ── the policy ────────────────────────────────────────────────────────
 
 
-def test_the_fallback_answers_until_the_portal_is_up(
+def test_the_fallback_is_not_asked_while_the_portal_is_pending(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A consent dialog must never make a caller wait.
+    """A consent dialog must never make a caller wait, and must never make
+    the fallback hammer the compositor either.
 
-    This is the gui's own policy, kept: start the session in the background
-    and serve the Qt chain meanwhile.  It also dissolves a recorded collision
-    — ``start(timeout=30.0)`` against ``AppProxy``'s 30 s IPC timeout — since
-    nothing waits on the portal any more.
+    This test asserted the OPPOSITE until 2026-09-18 -- "the fallback answers
+    until the portal is up", the gui's old policy.  On Plasma that fallback
+    is spectacle, a full compositor screenshot every 0.4 s from a client not
+    processing its own events while KWin put up its dialog.  Now: no frame,
+    ``CaptureNotReady``, fallback untouched.
     """
     monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
     fallback = _Fallback()
-    session = _Session(running=False)
+    session = _Pending()
+    cap = _capture(session, fallback)
+    try:
+        with pytest.raises(CaptureNotReady, match="still starting"):
+            cap.grab_region(0, 0, 4, 4)
+        assert session.started.wait(1)
+        with pytest.raises(CaptureNotReady, match="still starting"):
+            cap.grab_region(0, 0, 4, 4)       # and still, once the dialog is up
+    finally:
+        cap.stop()
 
-    frame = _capture(session, fallback).grab_region(0, 0, 4, 4)
+    assert fallback.calls == 0, "the fallback was asked during consent"
 
-    assert fallback.calls == 1, "the caller was not served by the fallback"
-    assert frame.width == 4
 
 
 def test_the_portal_frame_wins_once_the_session_is_running(
@@ -171,16 +225,45 @@ def test_the_portal_frame_wins_once_the_session_is_running(
     assert frame.data == bytes([0xAB]) * 12
 
 
-def test_a_running_session_with_no_frame_yet_still_falls_back(
+def test_a_running_session_with_no_frame_yet_is_not_ready_either(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Up but not yet streaming is not a reason to hand back nothing."""
+    """Up but not yet streaming: still "not yet", never the fallback."""
     monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
     fallback = _Fallback()
 
-    _capture(_Session(running=True, frame=None), fallback).grab_region(0, 0, 4, 4)
+    with pytest.raises(CaptureNotReady):
+        _capture(_Session(running=True, frame=None), fallback).grab_region(
+            0, 0, 4, 4)
 
-    assert fallback.calls == 1
+    assert fallback.calls == 0
+
+
+def test_a_portal_that_refuses_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Consent denied or timed out is "no", not "not yet": the fallback
+    answers from then on, and no session is retried behind the user's back.
+    """
+    monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
+    fallback = _Fallback()
+    session = _Session(running=False, start_result=False)
+    cap = _capture(session, fallback)
+
+    with suppress(CaptureNotReady):
+        cap.grab_region(0, 0, 4, 4)           # starts the session, off-thread
+    assert session.started.wait(2), "the session start never ran"
+    deadline = time.monotonic() + 2
+    while cap._session is not None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert cap._session is None, "a refused start was kept as pending"
+    settled = fallback.calls                  # 0, or 1 if the thread won the first grab
+
+    frame = cap.grab_region(0, 0, 4, 4)
+
+    assert fallback.calls == settled + 1, "the fallback did not answer after the refusal"
+    assert frame.width == 4
+
 
 
 def test_without_the_bindings_the_portal_is_never_touched(
@@ -212,7 +295,8 @@ def test_the_session_starts_once_across_many_grabs(
 
     cap = PipeWireScreenCapture(_Fallback(), session_factory=factory)
     for _ in range(5):
-        cap.grab_region(0, 0, 4, 4)
+        with suppress(CaptureNotReady):
+            cap.grab_region(0, 0, 4, 4)
 
     assert len(made) == 1, f"the portal session was built {len(made)} times"
 
@@ -248,28 +332,103 @@ def test_stop_lets_the_next_grab_start_a_fresh_session(
         return made[-1]
 
     cap = PipeWireScreenCapture(_Fallback(), session_factory=factory)
-    cap.grab_region(0, 0, 4, 4)
+    with suppress(CaptureNotReady):
+        cap.grab_region(0, 0, 4, 4)
     cap.stop()
-    cap.grab_region(0, 0, 4, 4)
+    with suppress(CaptureNotReady):
+        cap.grab_region(0, 0, 4, 4)
 
     assert len(made) == 2
     assert made[0].stopped is True
 
 
 def test_the_shared_chooser_puts_the_portal_in_front_of_qt() -> None:
-    """Both callers of ``build_screen_capture`` get the same answer.
+    """Every face gets the same answer for the same session.
 
-    ``BaseOS._build_screen_capture`` and ``ui/gui`` may not reach each other,
-    so "which backend" is one decision here — and it is what makes the CLI,
-    the REST route and qtgui gain Wayland capture at all.
+    ``build_screen_capture`` has one caller, ``BaseOS._build_screen_capture``,
+    behind ``Platform.screen_capture()`` -- and "which backend" is one
+    decision there, which is what makes the CLI, the REST route, qtgui and
+    the gui window gain Wayland capture at once.  On Wayland the portal
+    fronts the desktop's own tool; Qt's grab is not composed at all.
     """
     from trcc.adapters.screencast import build_screen_capture
-    from trcc.adapters.screencast.qt import QtScreenCapture
+    from trcc.adapters.screencast.qt import ToolCapture
+    from trcc.core.models import DisplayServer, DisplaySession
 
-    cap = build_screen_capture()
+    cap = build_screen_capture(DisplaySession(DisplayServer.WAYLAND, ("gnome",)))
 
     assert isinstance(cap, PipeWireScreenCapture)
-    assert isinstance(cap._fallback, QtScreenCapture)
+    assert isinstance(cap._fallback, ToolCapture)
+
+
+def test_a_region_outside_the_shared_area_is_reported_once(
+    monkeypatch: pytest.MonkeyPatch, caplog,
+) -> None:
+    """A region the stream cannot cover must not be cropped in silence.
+
+    ``crop_rgb24`` clamps, which is correct -- the alternative indexes past
+    the buffer -- but it clamped silently, so the panel showed a smaller
+    picture stretched to fit and nothing said why.  MEASURED 2026-09-18: a
+    Plasma grant recorded a hand-drawn 1895x1008 REGION of a 1920x1080
+    screen, was remembered, and replayed for six hours.
+
+    Once per distinct (source, region): this is on the frame path, and a
+    per-frame warning buries the one-shot lines a report is read for.
+    """
+    monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
+    session = _Session(running=True, frame=(40, 20, bytes(40 * 20 * 3)))
+    cap = _capture(session, _Fallback())
+
+    with caplog.at_level(logging.WARNING,
+                         logger="trcc.adapters.screencast.pipewire"):
+        for _ in range(5):
+            cap.grab_region(30, 10, 20, 20)     # runs off a 40x20 source
+
+    warnings = [r.getMessage() for r in caplog.records
+                if "does not fit" in r.getMessage()]
+    assert len(warnings) == 1, warnings
+    assert "40x20" in warnings[0], warnings[0]
+
+
+def test_a_region_inside_the_shared_area_says_nothing(
+    monkeypatch: pytest.MonkeyPatch, caplog,
+) -> None:
+    """The warning must not cry wolf on every ordinary capture."""
+    monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
+    session = _Session(running=True, frame=(40, 20, bytes(40 * 20 * 3)))
+    cap = _capture(session, _Fallback())
+
+    with caplog.at_level(logging.WARNING,
+                         logger="trcc.adapters.screencast.pipewire"):
+        cap.grab_region(0, 0, 40, 20)           # exactly the source
+        cap.grab_region(8, 4, 16, 8)            # comfortably inside
+
+    assert not [r for r in caplog.records if "does not fit" in r.getMessage()]
+
+
+def test_the_granted_stream_size_is_logged(
+    monkeypatch: pytest.MonkeyPatch, caplog,
+) -> None:
+    """What the desktop actually shared is the one fact a report needs.
+
+    Only the PipeWire node id was logged, which says nothing about whether
+    the user shared their screen or a rectangle they drew by accident.
+    """
+    from trcc.adapters.screencast.pipewire import PipeWireScreenCast
+
+    session = PipeWireScreenCast()          # constructing it touches no portal
+    results = {"streams": [(77, {"size": (1895, 1008), "source_type": 1})]}
+    with caplog.at_level(logging.INFO,
+                         logger="trcc.adapters.screencast.pipewire"):
+        try:
+            PipeWireScreenCast._on_start_response(session, 0, results)
+        except Exception:
+            pass                                # the pipeline half needs a portal
+
+    granted = [r.getMessage() for r in caplog.records if "granted" in r.getMessage()]
+    assert granted, [r.getMessage() for r in caplog.records]
+    assert "1895x1008" in granted[0], granted[0]
+    assert session._stream_size == (1895, 1008)
 
 
 # ── the restore token ─────────────────────────────────────────────────
@@ -308,7 +467,8 @@ def test_a_fresh_install_has_no_token_to_replay(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
     cap, made = _token_capture(tmp_path)
 
-    cap.grab_region(0, 0, 4, 4)
+    with suppress(CaptureNotReady):
+        cap.grab_region(0, 0, 4, 4)
 
     assert made["session"].received is None
 
@@ -324,7 +484,8 @@ def test_the_token_the_portal_issues_is_kept(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
     cap, made = _token_capture(tmp_path, issues="tok-abc")
 
-    cap.grab_region(0, 0, 4, 4)
+    with suppress(CaptureNotReady):
+        cap.grab_region(0, 0, 4, 4)
     made["session"].started.wait(2.0)
 
     stored = tmp_path / PipeWireScreenCapture.TOKEN_FILE
@@ -340,7 +501,8 @@ def test_a_stored_token_is_replayed_on_the_next_run(
     (tmp_path / PipeWireScreenCapture.TOKEN_FILE).write_text("tok-xyz")
 
     cap, made = _token_capture(tmp_path)
-    cap.grab_region(0, 0, 4, 4)
+    with suppress(CaptureNotReady):
+        cap.grab_region(0, 0, 4, 4)
 
     assert made["session"].received == "tok-xyz", (
         "the stored token was not handed to the portal — the user is asked "
@@ -353,11 +515,99 @@ def test_the_token_file_is_owner_only(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
     cap, made = _token_capture(tmp_path, issues="tok-secret")
 
-    cap.grab_region(0, 0, 4, 4)
+    with suppress(CaptureNotReady):
+        cap.grab_region(0, 0, 4, 4)
     made["session"].started.wait(2.0)
 
     mode = (tmp_path / PipeWireScreenCapture.TOKEN_FILE).stat().st_mode & 0o777
     assert mode == 0o600, f"token file is {mode:o}, not owner-only"
+
+
+def test_a_torn_write_never_replaces_a_good_token(
+    tmp_path, monkeypatch,
+) -> None:
+    """The write is atomic, so a crash mid-write cannot cost the grant.
+
+    A restore token is SINGLE USE: replaying one makes the portal delete its
+    stored grant and mint a replacement.  So a half-written file is not a
+    stale token, it is NO token -- measured 2026-09-18, where a replayed
+    token's entry answered ``NotFound`` afterwards.  The writer used to be a
+    plain ``write_text`` straight onto the live path.
+    """
+    monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
+    live = tmp_path / PipeWireScreenCapture.TOKEN_FILE
+    live.write_text("good-token-from-last-run")
+
+    real_replace = Path.replace
+
+    def die_before_rename(self, target):        # the crash, mid-write
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "replace", die_before_rename)
+    cap, made = _token_capture(tmp_path, issues="tok-new")
+    with suppress(CaptureNotReady):
+        cap.grab_region(0, 0, 4, 4)
+    made["session"].started.wait(2.0)
+    monkeypatch.setattr(Path, "replace", real_replace)
+
+    assert live.read_text() == "good-token-from-last-run", (
+        "a failed write destroyed the token that was already there")
+    assert not list(tmp_path.glob("*.tmp")), (
+        f"the temp file was left behind: {list(tmp_path.iterdir())}")
+
+
+def test_a_token_that_does_not_read_back_is_an_error_not_a_shrug(
+    tmp_path, monkeypatch, caplog,
+) -> None:
+    """Losing this file costs the grant, so the failure is loud.
+
+    It was a ``log.warning`` saying "the portal will ask again next run",
+    which understated it twice over: the level, and the consequence.
+    """
+    monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
+
+    real_fdopen = os.fdopen
+    monkeypatch.setattr(
+        "os.fdopen", lambda *a, **k: _TruncatingFile(real_fdopen(*a, **k)))
+    cap, made = _token_capture(tmp_path, issues="tok-new")
+    with caplog.at_level(logging.DEBUG, logger="trcc.adapters.screencast.pipewire"):
+        with suppress(CaptureNotReady):
+            cap.grab_region(0, 0, 4, 4)
+        made["session"].started.wait(2.0)
+
+    errors = [r for r in caplog.records
+              if r.levelno >= logging.ERROR and "_write_token" in r.getMessage()]
+    assert errors, [r.getMessage() for r in caplog.records]
+    assert "approved again" in errors[0].getMessage(), errors[0].getMessage()
+
+
+class _TruncatingFile:
+    """Storage that accepts a write, reports success, and keeps nothing.
+
+    Wraps a REAL file so ``fileno`` and ``fsync`` behave -- an earlier
+    version returned fd 0, which made ``fsync`` raise, so the test passed on
+    that error instead of on the read-back check it exists to prove.  Caught
+    by mutation: deleting the read-back left it green.
+    """
+
+    def __init__(self, real) -> None:
+        self._real = real
+
+    def write(self, data: str) -> int:
+        return len(data)            # claims success, writes nothing
+
+    def flush(self) -> None:
+        self._real.flush()
+
+    def fileno(self) -> int:
+        return self._real.fileno()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self._real.close()
+        return False
 
 
 def test_without_a_config_dir_the_token_is_not_written(
@@ -377,7 +627,8 @@ def test_without_a_config_dir_the_token_is_not_written(
 
     cap = PipeWireScreenCapture(_Fallback(), config_dir=None,
                                 session_factory=factory)
-    cap.grab_region(0, 0, 4, 4)
+    with suppress(CaptureNotReady):
+        cap.grab_region(0, 0, 4, 4)
 
     assert list(tmp_path.iterdir()) == []
 
@@ -385,15 +636,20 @@ def test_without_a_config_dir_the_token_is_not_written(
 def test_an_unreadable_token_costs_a_prompt_not_a_capture(
     tmp_path, monkeypatch,
 ) -> None:
-    """A broken token file must never stop the screencast."""
+    """A broken token file must never stop the screencast.
+
+    The session still starts -- the portal will ask, since no token could be
+    replayed -- and the first grab is "not yet", never a file error.
+    """
     monkeypatch.setattr(pw, "PIPEWIRE_AVAILABLE", True)
     bad = tmp_path / PipeWireScreenCapture.TOKEN_FILE
     bad.mkdir()          # a directory where a file belongs
 
     cap, made = _token_capture(tmp_path)
-    frame = cap.grab_region(0, 0, 4, 4)
+    with pytest.raises(CaptureNotReady):
+        cap.grab_region(0, 0, 4, 4)
 
-    assert frame.width == 4, "a bad token file broke the capture"
+    assert made["session"].started.wait(1), "a bad token file stopped the session"
     assert made["session"].received is None
 
 

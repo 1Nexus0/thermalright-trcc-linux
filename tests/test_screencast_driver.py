@@ -161,6 +161,32 @@ def test_a_failing_grab_does_not_raise(casting: App, monkeypatch) -> None:
     assert "portal session revoked" in result.message
 
 
+def test_a_source_that_is_not_ready_yet_is_quiet(
+    casting: App, monkeypatch, caplog,
+) -> None:
+    """The portal's consent seconds are a dropped frame, not an error.
+
+    ``CaptureNotReady`` fires on every tick of a consent window -- seven a
+    second for up to thirty seconds.  ``App.dispatch`` escalates every
+    ``ok=False`` to WARNING regardless of level, so the Command reports a
+    completed tick with no frame, and the only line is a DEBUG one.
+    """
+    from trcc.core.ports import CaptureNotReady
+
+    def not_yet(*_a: object, **_k: object) -> None:
+        raise CaptureNotReady("waiting for consent")
+
+    monkeypatch.setattr(casting.platform.capture, "grab_region", not_yet)
+    with caplog.at_level(logging.DEBUG, logger="trcc"):
+        result = casting.dispatch(CaptureScreencastFrame(key=_KEY))
+
+    assert result.ok is True, "a consent wait was reported as a failure"
+    assert "waiting for consent" in result.message
+    loud = [r for r in caplog.records
+            if r.levelno >= logging.WARNING and "CaptureScreencastFrame" in r.getMessage()]
+    assert not loud, [r.getMessage() for r in loud]
+
+
 # ── the cadence ──────────────────────────────────────────────────────
 
 

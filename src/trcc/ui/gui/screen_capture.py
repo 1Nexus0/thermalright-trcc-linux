@@ -19,8 +19,8 @@ Grabbing a screen region as an IMAGE has no counterpart there at all —
 region picker, which is why only the gesture lives in
 :class:`DragSelectOverlay`.
 
-The frozen-screen primitives this builds on — ``grab_full_screen``,
-``is_wayland`` and ``BaseScreenOverlay`` — live in ``ui/screen_overlay``
+The frozen-screen primitives this builds on — ``grab_full_screen`` and
+``BaseScreenOverlay`` — live in ``ui/screen_overlay``
 and are shared with the qtgui skin.  What stays here is region capture:
 ``ScreenCaptureOverlay``, which says what a dragged rectangle means here.
 """

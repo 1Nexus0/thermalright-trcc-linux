@@ -1145,13 +1145,6 @@ def test_load_video_command_zt_passthrough(gui_app: App, tmp_path) -> None:
     del result
 
 
-def test_screen_overlay_is_wayland_returns_bool() -> None:
-    """is_wayland() is callable + returns a bool regardless of env."""
-    from trcc.ui.screen_overlay import is_wayland
-
-    assert isinstance(is_wayland(), bool)
-
-
 # =========================================================================
 # G3 — LED control sub-tabs
 # =========================================================================

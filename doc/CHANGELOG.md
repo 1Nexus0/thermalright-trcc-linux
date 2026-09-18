@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+**Screen mirroring on Wayland stops guessing which desktop you run.** TRCC
+tried every screenshot tool it knew on every desktop, so a KDE Plasma session
+ran a tool built for a different compositor on every single frame, and an X11
+tool that answers a Wayland desktop with nothing. Each desktop now gets the one
+tool it actually trusts, and X11 keeps all of them, because they all work
+there.
+
+**And it stops making a noise while it does.** One of those tools rings the
+terminal bell on every capture, which Plasma plays as an error sound. Starting
+a screen mirror produced two or three of them a second for as long as it ran.
+
+**Permission to share your screen is remembered per desktop.** The approval
+your desktop gives is meaningful only to that desktop, and TRCC kept all of
+them in one file. Logging into KDE after GNOME meant being asked again, and
+each approval overwrote the other, so you were asked every time you switched.
+
+**Nothing pokes your compositor while it is asking for that permission.**
+While the approval dialog is up, TRCC used to keep taking screenshots by the
+older method, several times a second, from a window that was busy waiting. The
+panel now simply shows nothing for those few seconds.
+
+**If TRCC cannot save that approval, it says so.** The approval is single use:
+using it consumes it and issues a replacement, so failing to write the
+replacement loses your approval entirely rather than leaving an old one. It is
+now written the same careful way as your settings and read back to confirm, and
+a failure is reported plainly instead of being noted quietly.
+
+**The log now says what your desktop actually shared.** If you draw a rectangle
+in the approval dialog instead of picking your screen, everything afterwards
+silently applies to that rectangle, and the picture on the panel is offset with
+no clue why. TRCC now records the size it was given, and says so when the area
+you asked for does not fit inside it.
+
+**Screen mirroring no longer erases the log while it runs.** Every captured
+frame wrote its entire contents into the log file — almost a megabyte per
+frame — which filled and recycled the whole log within seconds. A report sent
+after a problem contained nothing but the last two seconds of frames.
+
 **Your motherboard's temperature sensors are readable now.** If your board has
 an external probe header — ASUS calls it T_SENSOR1 — or a VRM or chipset
 sensor, TRCC never showed it. It was reading that very chip for its fan speeds

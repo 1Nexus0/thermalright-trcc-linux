@@ -106,6 +106,7 @@ if TYPE_CHECKING:
 
 from ..logs import per_frame
 from ..models import MEDIA, MediaKind
+from ..ports import CaptureNotReady
 
 log = logging.getLogger(__name__)
 frame_log = per_frame(__name__)
@@ -1615,6 +1616,20 @@ class CaptureScreencastFrame(Command[ScreencastResult]):
         x, y, w, h = region[0], region[1], region[2], region[3]
         try:
             raw = app.platform.screen_capture().grab_region(x, y, w, h)
+        except CaptureNotReady as e:
+            # The portal is asking for consent, or has not delivered its
+            # first frame: the tick completed and there was nothing to send.
+            # ``ok=True`` on purpose -- ``App.dispatch`` escalates every
+            # ``ok=False`` to WARNING regardless of level, and this fires on
+            # every tick of a consent window, seven a second for up to
+            # thirty seconds.  The message says no frame went out; the
+            # driver's per-tick DEBUG line is its only reader.
+            frame_log.debug("CaptureScreencastFrame: %s not ready: %s",
+                            self.key, e)
+            return ScreencastResult(
+                ok=True, key=self.key,
+                message=f"no frame yet: {e}",
+            )
         except Exception as e:
             # Capture depends on tools and a desktop session that can vanish
             # under us (screen locked, portal revoked, grim uninstalled).  A

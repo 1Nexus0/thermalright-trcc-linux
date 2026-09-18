@@ -351,6 +351,31 @@ class ProductInfo:
 # =========================================================================
 
 
+class DisplayServer(str, Enum):
+    """What draws the desktop this process can see."""
+    X11 = "x11"
+    WAYLAND = "wayland"
+    #: Windows / macOS: the OS's own windowing, read through Qt alone.
+    NATIVE = "native"
+    #: No display session at all: an ssh shell, a service, CI.
+    HEADLESS = "headless"
+
+
+@dataclass(frozen=True, slots=True)
+class DisplaySession:
+    """The display session of the PROCESS asking, produced by
+    ``Platform.display_session()``.
+
+    ``desktops`` is the lower-cased ``XDG_CURRENT_DESKTOP`` list, most
+    specific first, as the spec defines it: ``("ubuntu", "gnome")`` on an
+    Ubuntu GNOME session, ``("kde",)`` on Plasma.  Membership, never the
+    first element, says which family this is.  Empty when the OS does not
+    say.
+    """
+    server: DisplayServer
+    desktops: tuple[str, ...] = ()
+
+
 @dataclass(frozen=True, slots=True)
 class DeviceInfo:
     """Live device, produced by Platform.scan_devices().
