@@ -50,6 +50,7 @@ from ....core.commands import (
     StopScreencastDriver,
 )
 from ....core.geometry import lock_region_to_panel
+from ....core.models import SCREENCAST_TICK_S
 from ..base import BasePanel
 from ..device_picker import DevicePickerWidget
 
@@ -60,7 +61,13 @@ log = logging.getLogger(__name__)
 
 _MIN_FPS = 1
 _MAX_FPS = 30
-_DEFAULT_FPS = 6
+#: Where the slider starts: the app's own cadence, DERIVED rather than
+#: restated.  This was a literal 6, which matched the invented 0.15 s tick
+#: the rest of the tree used until 2026-09-18 -- so once that moved to the
+#: C# oracle's rate, qtgui would have gone on casting at 6 fps while gui,
+#: cli and api ran at 16.7.  See ``SCREENCAST_TICK_S`` for the derivation
+#: from ``FormCZTV.Timer_event``.
+_DEFAULT_FPS = round(1.0 / SCREENCAST_TICK_S)
 
 
 class ScreencastPanel(BasePanel):

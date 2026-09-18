@@ -57,7 +57,12 @@ from ...core.commands import (
     StopVideo,
 )
 from ...core.logs import per_frame
-from ...core.models import HardwareMetrics, Kind, ThemeDir
+from ...core.models import (
+    SCREENCAST_TICK_S,
+    HardwareMetrics,
+    Kind,
+    ThemeDir,
+)
 from ...core.ports import CaptureNotReady, Platform, ScreenCapture
 from ...core.results import LanguageEntry
 from ..bus_bridge import BusBridge
@@ -220,7 +225,10 @@ class ScreencastHandler:
         self._audio_enabled = event.audio
         self._active = True
 
-        self._timer.start(150)
+        # The ONE cadence, not a literal beside it: this said 150 while the
+        # constant said 0.15, so the two would have drifted the moment either
+        # moved -- and the constant is the one grounded in the C# oracle.
+        self._timer.start(int(SCREENCAST_TICK_S * 1000))
 
     def _on_bus_screencast_stopped(self, event: Any) -> None:
         """Bus subscriber — tear down the Qt capture timer.

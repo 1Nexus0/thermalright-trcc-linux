@@ -23,7 +23,7 @@ from trcc.core.commands import (
     StopScreencast,
     StopScreencastDriver,
 )
-from trcc.core.models import RawFrame
+from trcc.core.models import SCREENCAST_TICK_S, RawFrame
 from trcc.services.screencast_driver import ScreencastDriver, task_key
 
 from .conftest import FakePlatform, _CliRenderer
@@ -465,3 +465,59 @@ def test_the_preview_shows_the_same_picture_as_the_panel(tmp_home: Path) -> None
         "the preview path is showing an uncomposited frame — the mask and "
         "metrics reach the panel but not the preview"
     )
+
+
+# ── the cadence is ONE fact, and it comes from the C# ────────────────────
+
+def test_the_screencast_cadence_matches_the_c_sharp_oracle() -> None:
+    """~16.7 fps, because that is what the app being ported does.
+
+    ``TRCC.CZTV/FormCZTV.Timer_event`` runs its screen-cast branch
+    (``myMode == 16``) behind ``if (++TPXSCount >= 4)``, off the one timer
+    interval in the whole 2.1.6 decompile -- ``m_timer.Interval = 15`` at
+    ``TRCC/Form1.cs:502``.  Four ticks of 15 ms is 60 ms.
+
+    This was 0.15 from the cutover until 2026-09-18: invented, never measured
+    against the oracle, and 2.5x slower than the program it ports.
+    """
+    assert pytest.approx(0.06) == SCREENCAST_TICK_S, (
+        f"{1 / SCREENCAST_TICK_S:.1f} fps — the C# casts 4 x 15 ms = 16.7")
+
+
+def test_the_gui_takes_its_cadence_from_that_constant() -> None:
+    """The window must not restate the interval as a literal.
+
+    It did: ``self._timer.start(150)`` sat beside a constant reading 0.15, so
+    the two could only agree by coincidence and drifted the moment either
+    moved.  The Qt timer is in milliseconds, so the source must show the
+    conversion rather than a number.
+    """
+    import inspect
+
+    from trcc.ui.gui.trcc_app import ScreencastHandler
+
+    src = inspect.getsource(ScreencastHandler._on_bus_screencast_started)
+
+    assert "SCREENCAST_TICK_S" in src, src
+    assert "start(150" not in src, "the millisecond literal is back"
+
+
+def test_every_face_starts_at_the_same_cadence() -> None:
+    """Four faces, one rate — and qtgui was the third place it was restated.
+
+    gui had ``start(150)`` beside a 0.15 constant; qtgui had a slider
+    defaulting to a literal ``6``.  cli and api pass no interval at all, so
+    they take the Command's default.  Moving the constant to the oracle's
+    rate would have left qtgui alone at 6 fps.
+    """
+    from trcc.core.commands import StartScreencastDriver
+    from trcc.ui.qtgui.panels import screencast_panel
+
+    expected = round(1.0 / SCREENCAST_TICK_S)
+
+    # cli and api dispatch with no interval; this is what they get.
+    assert StartScreencastDriver(key="0000:0000").interval_s == SCREENCAST_TICK_S
+    assert expected == screencast_panel._DEFAULT_FPS, (
+        f"qtgui starts at {screencast_panel._DEFAULT_FPS} fps, the rest at "
+        f"{expected}")
+    assert screencast_panel._MIN_FPS <= expected <= screencast_panel._MAX_FPS

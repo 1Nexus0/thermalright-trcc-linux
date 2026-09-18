@@ -1081,12 +1081,22 @@ METRICS = MetricCatalog(
     aliases={(10000, 1): "fan:cpu"},
 )
 
-#: Seconds between screencast frames — the gui's own capture cadence, so a
-#: headless cast moves at the same rate as one driven from the window.  Lives
-#: in core because both the driver (``services.screencast_driver``) and the
-#: Command that starts it need it, and a default argument cannot reach a
-#: function-local import.
-SCREENCAST_TICK_S = 0.15
+#: Seconds between screencast frames — one cadence, so a headless cast moves
+#: at the same rate as one driven from the window.  Lives in core because both
+#: the driver (``services.screencast_driver``) and the Command that starts it
+#: need it, and a default argument cannot reach a function-local import.
+#:
+#: **From the C# oracle, not invented.**  ``TRCC.CZTV/FormCZTV.Timer_event``
+#: runs the screen-cast branch (``myMode == 16``, 投屏显示) behind
+#: ``if (++TPXSCount >= 4)``, off a timer whose interval is set once in
+#: ``TRCC/Form1.cs:502`` — ``m_timer.Interval = 15``, the ONLY timer interval
+#: in the whole 2.1.6 decompile.  Four ticks of 15 ms is 60 ms, ~16.7 fps.
+#: ``Timer_Form_event`` calls the cast form every tick with no further gate;
+#: the ``timerCount >= 10`` gate beside it belongs to a different device list.
+#:
+#: This was 0.15 (6.7 fps) from the cutover to 2026-09-18 — never measured
+#: against the oracle, and 2.5x slower than the app being ported.
+SCREENCAST_TICK_S = 0.06
 
 #: How often the slideshow driver ASKS whether a rotation is due.  It is a poll
 #: interval, not the slideshow interval: ``AdvanceSlideshow`` owns due-ness and
