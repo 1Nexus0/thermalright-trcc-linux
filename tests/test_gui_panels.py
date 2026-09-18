@@ -284,76 +284,115 @@ def test_about_panel_constructs(gui_app: App) -> None:
     assert panel.layout() is not None
 
 
-def test_system_panel_constructs(gui_app: App) -> None:
+def test_system_panel_constructs(gui_app: App, qtbot) -> None:
+    """The host stacks six boxes and ticks exactly ONE of them.
+
+    The timer wiring is the load-bearing half: ``ListMemorySlots`` shells out
+    to ``dmidecode``, so a host that refreshed every box on the tick would run
+    a root subprocess every two seconds.  Asserting the layout alone cannot
+    see that, which is why the callback identity is checked here.
+    """
     from trcc.ui.qtgui.panels.system_panel import SystemPanel
 
     panel = SystemPanel(gui_app, _bus(gui_app))
-    assert panel is not None
+    qtbot.addWidget(panel)
     assert panel.layout() is not None
+    assert panel.layout().count() == 7, "six boxes + the action row"
+
+    boxes = (panel._platform, panel._gpu, panel._maintenance,
+             panel._health, panel._sensors, panel._dash)
+    ticked: list[str] = []
+    for box in boxes:
+        real = box.dispatch
+
+        def spy(cmd, _real=real):
+            ticked.append(type(cmd).__name__)
+            return _real(cmd)
+
+        box.dispatch = spy                # pyright: ignore[reportAttributeAccessIssue]
+
+    panel._updates._timer.timeout.emit()  # one real tick
+
+    assert set(ticked) == {"ReadSensors"}, (
+        "a tick must dispatch ReadSensors and NOTHING else; "
+        f"got {sorted(set(ticked))} — ListMemorySlots on this list is "
+        "dmidecode running as root every two seconds"
+    )
 
 
 # =========================================================================
-# SystemPanel — the autostart target picker
+# MaintenanceBox — the autostart target picker
 # =========================================================================
 #
 # The picker chooses WHICH ui login brings up.  Its rules were comments in
 # the panel until these tests: changing it must never enable autostart the
 # user did not ask for, and what it shows must be what is INSTALLED.
+#
+# These build the BOX, not the whole panel: a leaf gate on a leaf.  Reaching
+# it through ``SystemPanel._maintenance`` would also work, but would drag in
+# five unrelated boxes' Commands on every one of them.
 
 
-def test_autostart_picker_offers_every_target(gui_app: App) -> None:
+def _maintenance_box(gui_app: App, qtbot):
+    from trcc.ui.qtgui.panels.system import MaintenanceBox
+
+    box = MaintenanceBox(gui_app)
+    qtbot.addWidget(box)
+    return box
+
+
+def test_autostart_picker_offers_every_target(gui_app: App, qtbot) -> None:
     """The picker's list IS the registry — never a second copy to drift."""
     from trcc.core.models import AUTOSTART_TARGETS
-    from trcc.ui.qtgui.panels.system_panel import SystemPanel
 
-    panel = SystemPanel(gui_app, _bus(gui_app))
-    combo = panel._autostart_target
+    box = _maintenance_box(gui_app, qtbot)
+    combo = box._autostart_target
     offered = {combo.itemData(i) for i in range(combo.count())}
     assert offered == set(AUTOSTART_TARGETS)
 
 
-def test_autostart_picker_does_not_install_while_disabled(gui_app: App) -> None:
+def test_autostart_picker_does_not_install_while_disabled(
+    gui_app: App, qtbot,
+) -> None:
     """Choosing a target with autostart OFF must not turn it ON.
 
     The same invariant ``refresh`` holds: a control that repairs or re-points
     an entry never creates one.
     """
-    from trcc.ui.qtgui.panels.system_panel import SystemPanel
-
-    panel = SystemPanel(gui_app, _bus(gui_app))
-    assert not panel._autostart_check.isChecked()
-    panel._autostart_target.setCurrentIndex(
-        panel._autostart_target.findData("daemon"),
+    box = _maintenance_box(gui_app, qtbot)
+    assert not box._autostart_check.isChecked()
+    box._autostart_target.setCurrentIndex(
+        box._autostart_target.findData("daemon"),
     )
     assert not gui_app.platform.autostart().is_enabled()
 
 
-def test_autostart_picker_reinstalls_for_the_new_target(gui_app: App) -> None:
+def test_autostart_picker_reinstalls_for_the_new_target(
+    gui_app: App, qtbot,
+) -> None:
     """With autostart ON, choosing a target re-installs for THAT target."""
-    from trcc.ui.qtgui.panels.system_panel import SystemPanel
-
-    panel = SystemPanel(gui_app, _bus(gui_app))
-    panel._autostart_check.setChecked(True)         # fires the toggle handler
+    box = _maintenance_box(gui_app, qtbot)
+    box._autostart_check.setChecked(True)           # fires the toggle handler
     assert gui_app.platform.autostart().is_enabled()
 
-    panel._autostart_target.setCurrentIndex(
-        panel._autostart_target.findData("api"),
+    box._autostart_target.setCurrentIndex(
+        box._autostart_target.findData("api"),
     )
     assert gui_app.platform.autostart().installed_target() == "api"
 
 
-def test_autostart_picker_shows_the_installed_target(gui_app: App) -> None:
+def test_autostart_picker_shows_the_installed_target(
+    gui_app: App, qtbot,
+) -> None:
     """A refresh reads the ENTRY, not whatever the widget last showed.
 
     Another surface (cli, api, a second window) may have changed it, and the
     installed entry is the only record of what login will actually launch.
     """
-    from trcc.ui.qtgui.panels.system_panel import SystemPanel
-
-    panel = SystemPanel(gui_app, _bus(gui_app))
+    box = _maintenance_box(gui_app, qtbot)
     gui_app.platform.autostart().enable("qtgui")    # changed behind its back
-    panel._refresh_autostart()
-    assert panel._autostart_target.currentData() == "qtgui"
+    box.refresh()
+    assert box._autostart_target.currentData() == "qtgui"
 
 
 def test_activity_sidebar_emits_selection(gui_app: App) -> None:
@@ -2017,29 +2056,34 @@ def test_disabling_the_slideshow_stops_the_driver(gui_app: App, qtbot) -> None:
 
 
 # =========================================================================
-# SystemPanel — the surfacings cli/api had and qtgui did not
+# SensorsBox / MaintenanceBox — the surfacings cli/api had and qtgui did not
 # =========================================================================
+#
+# These build the BOX the behaviour belongs to.  Spying on ``SystemPanel``
+# would observe nothing: each box dispatches through ITSELF, so a spy on the
+# host silently stops intercepting.  The fix is to re-point at the box, never
+# to add forwarding properties — that re-grows the god class by delegation.
 
 
-def _system_panel(gui_app: App, qtbot):
-    from trcc.ui.qtgui.panels.system_panel import SystemPanel
+def _sensors_box(gui_app: App, qtbot):
+    from trcc.ui.qtgui.panels.system import SensorsBox
 
-    panel = SystemPanel(gui_app, _bus(gui_app))
-    qtbot.addWidget(panel)
-    return panel
+    box = SensorsBox(gui_app)
+    qtbot.addWidget(box)
+    return box
 
 
-def test_system_panel_lists_memory_slots(gui_app: App, qtbot) -> None:
-    """Building the panel populates the DRAM list, or says nothing was found.
+def test_sensors_box_lists_memory_slots(gui_app: App, qtbot) -> None:
+    """Building the box populates the DRAM list, or says nothing was found.
 
     An empty widget is not proof of anything -- the list must say WHICH, so a
-    host with no SPD data reads as "reported nothing" rather than as a panel
+    host with no SPD data reads as "reported nothing" rather than as a box
     that forgot to load.
     """
-    panel = _system_panel(gui_app, qtbot)
+    box = _sensors_box(gui_app, qtbot)
 
-    assert panel._memory_list.count() >= 1, (
-        "memory list was never populated — _refresh_memory is not being called"
+    assert box._memory.count() >= 1, (
+        "memory list was never populated — refresh_memory is not being called"
     )
 
 
@@ -2051,24 +2095,24 @@ def test_the_hdd_toggle_shows_the_persisted_flag(gui_app: App, qtbot) -> None:
     what the user chose.
     """
     gui_app.settings.set_hdd_enabled(False)
-    panel = _system_panel(gui_app, qtbot)
-    assert panel._hdd_check.isChecked() is False
+    box = _sensors_box(gui_app, qtbot)
+    assert box._hdd_check.isChecked() is False
 
     # Asserting the VALUE after a refresh cannot see this bug: the write-back
     # writes the value we just set, so it agrees with the expectation.  What
     # has to be observed is that a WRITE was attempted at all.
     gui_app.settings.set_hdd_enabled(True)
     sent: list[str] = []
-    real = panel.dispatch
+    real = box.dispatch
 
     def spy(cmd):
         sent.append(type(cmd).__name__)
         return real(cmd)
 
-    panel.dispatch = spy                      # pyright: ignore[reportAttributeAccessIssue]
-    panel._refresh_hdd()
+    box.dispatch = spy                        # pyright: ignore[reportAttributeAccessIssue]
+    box.refresh_hdd()
 
-    assert panel._hdd_check.isChecked() is True
+    assert box._hdd_check.isChecked() is True
     assert "SetHddEnabled" not in sent, (
         "refreshing the widget DISPATCHED a write — blockSignals is missing, "
         "so the setting becomes whatever the UI rendered"
@@ -2076,17 +2120,17 @@ def test_the_hdd_toggle_shows_the_persisted_flag(gui_app: App, qtbot) -> None:
 
 
 def test_toggling_hdd_persists_it(gui_app: App, qtbot) -> None:
-    panel = _system_panel(gui_app, qtbot)
+    box = _sensors_box(gui_app, qtbot)
 
-    panel._hdd_check.setChecked(not panel._hdd_check.isChecked())
+    box._hdd_check.setChecked(not box._hdd_check.isChecked())
 
-    assert gui_app.settings.app.hdd_enabled is panel._hdd_check.isChecked()
+    assert gui_app.settings.app.hdd_enabled is box._hdd_check.isChecked()
 
 
 def _drive_upgrade(gui_app: App, qtbot, monkeypatch, *, confirm: bool):
     """Press Upgrade with the confirmation answered *confirm*.
 
-    ``hasattr(panel, "_upgrade_btn")`` was the first version of this and it is
+    ``hasattr(box, "_upgrade_btn")`` was the first version of this and it is
     worthless: it proves a button exists, not that the button is safe.  The
     safety-critical behaviour is that NOTHING runs until the user agrees --
     ``RunUpgrade(dry_run=False)`` spawns a package-manager subprocess under
@@ -2094,8 +2138,8 @@ def _drive_upgrade(gui_app: App, qtbot, monkeypatch, *, confirm: bool):
     """
     from PySide6.QtWidgets import QMessageBox
 
-    panel = _system_panel(gui_app, qtbot)
-    # A host with no package manager makes the DRY RUN fail, and the panel
+    box = _maintenance_box(gui_app, qtbot)
+    # A host with no package manager makes the DRY RUN fail, and the box
     # correctly bails before confirming -- which is right, and would leave the
     # confirm path untested everywhere.  Give it a manager so the gate can
     # reach the branch it exists to guard.
@@ -2108,15 +2152,15 @@ def _drive_upgrade(gui_app: App, qtbot, monkeypatch, *, confirm: bool):
     monkeypatch.setattr(QMessageBox, "question",
                         staticmethod(lambda *a, **k: answer))
     sent: list[bool] = []
-    real = panel.dispatch
+    real = box.dispatch
 
     def spy(cmd):
         if type(cmd).__name__ == "RunUpgrade":
             sent.append(cmd.dry_run)
         return real(cmd)
 
-    panel.dispatch = spy                      # pyright: ignore[reportAttributeAccessIssue]
-    panel._on_upgrade()
+    box.dispatch = spy                        # pyright: ignore[reportAttributeAccessIssue]
+    box._on_upgrade()
     return sent
 
 
@@ -2150,10 +2194,10 @@ def test_the_confirmation_quotes_the_command_that_will_run(
     ``message="Would run: ..."`` plus the ``command`` list, so the text the
     user approves is the text the Command would execute.
     """
-    panel = _system_panel(gui_app, qtbot)
+    box = _maintenance_box(gui_app, qtbot)
     from trcc.core.commands import RunUpgrade
 
-    preview = panel.dispatch(RunUpgrade(dry_run=True))
+    preview = box.dispatch(RunUpgrade(dry_run=True))
 
     if preview.ok:
         assert preview.command, "dry run reported ok with no command to show"
@@ -2412,19 +2456,27 @@ def test_the_background_dialog_offers_the_catalog_image_formats(
 
 
 # =========================================================================
-# SystemPanel — the sensor-dashboard editor
+# DashboardBox — the sensor-dashboard editor
 # =========================================================================
+
+
+def _dashboard_box(gui_app: App, qtbot):
+    from trcc.ui.qtgui.panels.system import DashboardBox
+
+    box = DashboardBox(gui_app)
+    qtbot.addWidget(box)
+    return box
 
 
 def test_the_dashboard_shows_every_panel_and_row(gui_app: App, qtbot) -> None:
     """Rows carry their (panel, row) address, so a rebind knows what it edits."""
-    panel = _system_panel(gui_app, qtbot)
+    box = _dashboard_box(gui_app, qtbot)
 
-    assert panel._dash_tree.topLevelItemCount() == len(panel._dashboard)
-    if panel._dashboard:
-        top = panel._dash_tree.topLevelItem(0)
+    assert box._tree.topLevelItemCount() == len(box._panels)
+    if box._panels:
+        top = box._tree.topLevelItem(0)
         assert top is not None
-        assert top.childCount() == len(panel._dashboard[0].sensors)
+        assert top.childCount() == len(box._panels[0].sensors)
 
 
 def test_an_unbound_row_says_so(gui_app: App, qtbot) -> None:
@@ -2435,53 +2487,53 @@ def test_an_unbound_row_says_so(gui_app: App, qtbot) -> None:
     """
     from trcc.core.models import PanelConfig, SensorBinding
 
-    panel = _system_panel(gui_app, qtbot)
-    panel._dashboard = [PanelConfig(
+    box = _dashboard_box(gui_app, qtbot)
+    box._panels = [PanelConfig(
         category_id=0, name="Test",
         sensors=[SensorBinding(label="Row", sensor_id="", unit="")],
     )]
     # redraw from the working layout
-    real = panel.dispatch
+    real = box.dispatch
     from trcc.core.results import SensorDashboardResult
 
-    panel.dispatch = lambda cmd: (                 # pyright: ignore[reportAttributeAccessIssue]
-        SensorDashboardResult(ok=True, panels=tuple(panel._dashboard))
+    box.dispatch = lambda cmd: (                   # pyright: ignore[reportAttributeAccessIssue]
+        SensorDashboardResult(ok=True, panels=tuple(box._panels))
         if type(cmd).__name__ == "GetSensorDashboard" else real(cmd))
-    panel._refresh_dashboard()
+    box.refresh()
 
-    child = panel._dash_tree.topLevelItem(0).child(0)   # pyright: ignore[reportOptionalMemberAccess]
+    child = box._tree.topLevelItem(0).child(0)     # pyright: ignore[reportOptionalMemberAccess]
     assert child is not None
     assert "unbound" in child.text(1)
 
 
 def test_saving_sends_the_whole_layout(gui_app: App, qtbot) -> None:
     """One bulk verb, matching SetOverlayConfig — the UI holds the whole thing."""
-    panel = _system_panel(gui_app, qtbot)
+    box = _dashboard_box(gui_app, qtbot)
     sent: list = []
-    real = panel.dispatch
+    real = box.dispatch
 
     def spy(cmd):
         if type(cmd).__name__ == "SetSensorDashboard":
             sent.append(cmd.panels)
         return real(cmd)
 
-    panel.dispatch = spy                       # pyright: ignore[reportAttributeAccessIssue]
-    panel._on_save_dashboard()
+    box.dispatch = spy                         # pyright: ignore[reportAttributeAccessIssue]
+    box._on_save()
 
     assert len(sent) == 1
-    assert len(sent[0]) == len(panel._dashboard)
+    assert len(sent[0]) == len(box._panels)
 
 
 def test_binding_refuses_a_panel_heading(gui_app: App, qtbot) -> None:
     """A heading has no row address — binding to it would edit row 0 silently."""
-    panel = _system_panel(gui_app, qtbot)
-    if panel._dash_tree.topLevelItemCount() == 0:
+    box = _dashboard_box(gui_app, qtbot)
+    if box._tree.topLevelItemCount() == 0:
         pytest.skip("host reported no dashboard panels")
-    panel._dash_tree.setCurrentItem(panel._dash_tree.topLevelItem(0))
+    box._tree.setCurrentItem(box._tree.topLevelItem(0))
 
-    panel._on_bind_sensor()
+    box._on_bind()
 
-    assert "row" in panel._dash_status.text().lower()
+    assert "row" in box._status.text().lower()
 
 
 # =========================================================================
