@@ -1652,7 +1652,10 @@ class LCDHandler(BaseHandler):
     def _cleanup_device(self) -> None:
         """Blank the panel and release LCD resources via Commands."""
         self.log.info("_cleanup_device: device_key=%s", self._device_key)
-        self._app.dispatch(StopVideo(key=self._device_key))
+        # Teardown, not "stop": unload playback but keep the persisted
+        # background — clearing it here wiped the user's chosen video from
+        # trcc.json on every GUI close and every disconnect (#271).
+        self._app.dispatch(StopVideo(key=self._device_key, keep_override=True))
         try:
             # ``SleepDevice`` is the INTENT — "turn this screen off", the one
             # Command ``App.close``, ``trcc display sleep`` and ``/sleep`` all

@@ -353,6 +353,23 @@ def test_stop_video_idempotent_on_unattached_device(app: App) -> None:
     assert result.ok is True
 
 
+def test_stop_video_keep_override_unloads_but_keeps_the_persisted_path(
+    connected_app: App, stub_media: list, video_file: Path,
+) -> None:
+    """Teardown stops playback without wiping the user's chosen background;
+    a plain stop still clears it (#271)."""
+    connected_app.settings.set_background_path(_KEY, str(video_file))
+    connected_app.dispatch(PlayVideo(key=_KEY, path=video_file))
+    assert connected_app.media.playback(_KEY) is not None
+
+    connected_app.dispatch(StopVideo(key=_KEY, keep_override=True))
+    assert connected_app.media.playback(_KEY) is None
+    assert connected_app.settings.for_device(_KEY).background_path == str(video_file)
+
+    connected_app.dispatch(StopVideo(key=_KEY))
+    assert connected_app.settings.for_device(_KEY).background_path is None
+
+
 # ── DisplayService playback-override path ────────────────────────────
 
 

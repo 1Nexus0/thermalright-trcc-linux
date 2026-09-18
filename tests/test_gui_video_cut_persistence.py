@@ -1,0 +1,84 @@
+"""A cut video must outlive the export's staging dir and the GUI session.
+
+Two defects, one symptom (#271): the trimmer's Theme.zt was staged under
+``tempfile.mkdtemp`` and persisted as the device's background override
+verbatim, so the override pointed at a file that vanished on reboot; and
+every GUI close ran ``StopVideo``, which cleared the override outright.
+Cut a video, close the app, reopen -- gone.
+
+Drives the real window offscreen against the mock platform, exactly the
+scaffold ``test_gui_empty_state`` uses.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from tests.mock_platform import MockPlatform
+from trcc.adapters.render.qt import QtRenderer
+from trcc.app import App
+from trcc.core.commands import ConnectDevice
+from trcc.services.media import MediaService, Playback
+
+_SPEC = {"vid": "0402", "pid": "3922", "fbl": 100}
+_KEY = "0402:3922"
+
+
+def _jpeg(w: int = 320, h: int = 320) -> bytes:
+    """A real encoded frame -- playbacks hold JPEG bytes, not pixels."""
+    from PySide6.QtCore import QBuffer, QByteArray
+    from PySide6.QtGui import QImage
+
+    img = QImage(w, h, QImage.Format.Format_RGB888)
+    img.fill(0xFF000000)
+    ba = QByteArray()
+    buf = QBuffer(ba)
+    buf.open(QBuffer.OpenModeFlag.WriteOnly)
+    img.save(buf, "JPEG", 100)
+    buf.close()
+    return bytes(ba)
+
+
+def test_cut_video_is_kept_under_user_content_and_survives_close(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from trcc.ui.gui.trcc_app import TRCCApp
+
+    # No ffmpeg in the loop: any .zt "decodes" to three black frames.
+    def fake_load(self, device_key, path, size, **kwargs):  # type: ignore[no-untyped-def]
+        w, h = size if size is not None else (320, 320)
+        playback = Playback(frames=[_jpeg(w, h)] * 3, fps=15)
+        self._playbacks[device_key] = playback
+        return playback
+    monkeypatch.setattr(MediaService, "load_video", fake_load)
+
+    staged = tmp_path / "trcc-videoexport-staging" / "Theme.zt"
+    staged.parent.mkdir()
+    staged.write_bytes(b"ZT\x00staged-by-the-export")
+
+    app = App(MockPlatform([_SPEC], tmp_path), renderer=QtRenderer())
+    try:
+        assert app.dispatch(ConnectDevice(key=_KEY)).ok
+        window = TRCCApp(app=app)
+        window.replay_initial_devices()
+
+        window._on_video_cut_done(str(staged))
+
+        kept = (
+            Path(app.platform.paths().user_content_dir())
+            / "backgrounds" / "0402_3922.zt"
+        )
+        assert kept.read_bytes() == staged.read_bytes(), (
+            "the cut must be copied out of the export's staging dir")
+        assert app.settings.for_device(_KEY).background_path == str(kept), (
+            "the override must point at the kept copy, not the staging file")
+
+        window.close()          # closeEvent -> every handler's cleanup()
+
+        assert app.settings.for_device(_KEY).background_path == str(kept), (
+            "closing the GUI must not wipe the persisted background")
+        assert app.media.playback(_KEY) is None, (
+            "closing the GUI must still unload playback")
+    finally:
+        app.close()

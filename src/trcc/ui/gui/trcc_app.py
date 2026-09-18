@@ -13,6 +13,7 @@ currently-selected device; the rest keep ticking in the background.
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -2127,15 +2128,7 @@ class TRCCApp(QMainWindow):
             return None
         if not (w and hw):
             return None
-        # Scope the file per device so two LCDs don't trample each
-        # other's backgrounds.  ``user_content_dir`` is the data-port
-        # owner for user-supplied content.
-        target_dir = (
-            Path(self._app.dispatch(GetPaths()).user_content_dir) / "backgrounds"
-        )
-        target_dir.mkdir(parents=True, exist_ok=True)
-        safe_key = h.device_key.replace(":", "_") or "default"
-        target = target_dir / f"{safe_key}.png"
+        target = self._user_background_target(h, ".png")
         scaled = image.convertToFormat(_QImage.Format.Format_ARGB32)
         if scaled.width() != w or scaled.height() != hw:
             scaled = scaled.scaled(
@@ -2214,6 +2207,23 @@ class TRCCApp(QMainWindow):
             self.uc_theme_mask.refresh_masks()
         self.uc_preview.set_status(f"Custom mask '{mask_name}' uploaded")
 
+    def _user_background_target(self, h: Any, suffix: str) -> Path:
+        """Per-device file under the user-content tree for a cut background.
+
+        Scoped per device so two LCDs don't trample each other's
+        backgrounds.  ``user_content_dir`` is the data-port owner for
+        user-supplied content — and unlike the export's ``/tmp`` staging
+        dir, it is still there after a reboot.
+        """
+        target_dir = (
+            Path(self._app.dispatch(GetPaths()).user_content_dir) / "backgrounds"
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+        safe_key = h.device_key.replace(":", "_") or "default"
+        target = target_dir / f"{safe_key}{suffix}"
+        log.debug("_user_background_target: %s", target)
+        return target
+
     def _on_video_export_requested(
         self, start_ms: int, end_ms: int, rotation: int,
     ) -> None:
@@ -2271,6 +2281,19 @@ class TRCCApp(QMainWindow):
         self._hide_cutters()
         h = self._active_lcd()
         if zt_path and h:
+            # The export stages its Theme.zt under /tmp, which does not
+            # survive a reboot, and ``SetBackground`` persists whatever path
+            # it is handed.  Keep the file where the image cutter keeps its
+            # PNG so the override still resolves next boot (#271).
+            target = self._user_background_target(h, ".zt")
+            try:
+                shutil.copy2(zt_path, target)
+            except OSError as e:
+                log.warning("_on_video_cut_done: could not keep %s as %s: %s",
+                            zt_path, target, e)
+                self.uc_preview.set_status("Error: could not save video")
+                return
+            log.info("_on_video_cut_done: kept %s as %s", zt_path, target)
             # ``SetBackground`` persists the .zt as the device's
             # background override (``DeviceSettings.background_path``)
             # THEN delegates to ``PlayVideo`` for the decode/animate
@@ -2279,7 +2302,7 @@ class TRCCApp(QMainWindow):
             # no override for ``SaveTheme`` to bake in, so a saved theme
             # lost the video and reloaded with a black background.
             result = self._app.dispatch(SetBackground(
-                key=h.device_key, path=Path(zt_path),
+                key=h.device_key, path=target,
             ))
             if result.ok:
                 self.uc_preview.set_playing(True)

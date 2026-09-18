@@ -1245,8 +1245,14 @@ class StopVideo(Command[VideoResult]):
     take the override branch in ``DisplayService._resolve_background``,
     and silently re-decode the same video via ``MediaService.load_video``
     — turning "stop" into "rewind to frame 0".
+
+    ``keep_override=True`` unloads playback but leaves the persisted path
+    alone.  Teardown — GUI close, device disconnect — has no next render to
+    rewind, and clearing there wiped the user's chosen background from
+    ``trcc.json`` on every exit (#271).
     """
     key: str
+    keep_override: bool = False
 
     def execute(self, app: App) -> VideoResult:
         had_playback = app.media.playback(self.key) is not None
@@ -1254,12 +1260,17 @@ class StopVideo(Command[VideoResult]):
             app.settings.for_device(self.key).background_path is not None
         )
         app.media.unload(self.key)
-        if had_override:
+        if had_override and not self.keep_override:
             log.info(
                 "StopVideo: clearing background_path override for %s",
                 self.key,
             )
             app.settings.set_background_path(self.key, None)
+        elif had_override:
+            log.info(
+                "StopVideo: keeping background_path override for %s "
+                "(keep_override)", self.key,
+            )
         _invalidate_scene(app, self.key)
         if had_playback:
             app.events.publish(VideoStopped(key=self.key))

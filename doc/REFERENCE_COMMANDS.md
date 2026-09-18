@@ -556,6 +556,7 @@ Clear the device's playback override AND the persisted bg override.
 | Field | Type | Required |
 |---|---|---|
 | `key` | `str` | yes |
+| `keep_override` | `bool` | no |
 
 ### `TickDisplay`
 
