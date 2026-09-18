@@ -81,9 +81,15 @@ def main() -> int:
     )
     try:
         if not ipc.wait_for_daemon(timeout=15.0):
-            out, err = daemon.communicate(timeout=2)
+            # Kill BEFORE reading.  A daemon that never bound is usually still
+            # alive -- often blocked writing to these very pipes -- so
+            # ``communicate`` waits for an exit that is not coming and raises
+            # TimeoutExpired.  The error path then destroys the only evidence
+            # of why the daemon failed, which is the one thing it exists for.
+            daemon.kill()
+            out, err = daemon.communicate()
             print("daemon failed to come up.")
-            print(f"  stdout: {out}\n  stderr: {err}")
+            print(f"  stdout: {out}\n  stderr: {err[-2000:]}")
             return 1
 
         proxy = AppProxy()

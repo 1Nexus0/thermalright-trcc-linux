@@ -198,7 +198,14 @@ def resolve_handshake_geometry(product: ProductInfo) -> tuple[int, int, int]:
     want = product.fbl
     prot_log = logging.getLogger("trcc.core.protocol")
     prev = prot_log.level
-    prot_log.setLevel(logging.WARNING)  # silence the per-candidate INFO lines
+    # CRITICAL, not WARNING.  Brute-forcing PM space asks ``get_profile``
+    # about FBLs no device reports, and each miss is a WARNING, not an INFO --
+    # 220 of them, ~64 KB, once a panel's registry row stops declaring an
+    # ``fbl`` and the skip above stops firing (0416:5302, 902620dd).  That
+    # overshot the 64 KB pipe buffer of any harness capturing this process
+    # and deadlocked it BEFORE it could bind.  A candidate probe is not a
+    # diagnosis, so none of the sweep's output is worth a record.
+    prot_log.setLevel(logging.CRITICAL)
     try:
         for pm in range(256):
             fbl = pm_to_fbl(pm)
