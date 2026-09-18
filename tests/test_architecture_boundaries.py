@@ -621,7 +621,7 @@ def test_ok_false_results_carry_a_message() -> None:
 
 
 def test_gui_on_handlers_log_or_are_exempt() -> None:
-    """Every GUI ``_on_*`` user-interaction handler must LOG — a click /
+    """Every ``_on_*`` handler in EITHER Qt skin must LOG — a click /
     selection / value change is a user action and must be visible.
 
     EXEMPT: per-tick handlers (timer-wired via ``timeout.connect`` /
@@ -633,7 +633,11 @@ def test_gui_on_handlers_log_or_are_exempt() -> None:
     import re
 
     log_methods = {"info", "debug", "warning", "error", "exception", "critical"}
-    gui_files = _files_under("trcc/ui/gui")
+    # BOTH Qt skins.  This read ``trcc/ui/gui`` alone until 2026-09-18, so
+    # every ``_on_*`` handler in the newer skin was ungated — and qtgui is
+    # where new panels land.  Measured when widened: 0 offenders, so it cost
+    # nothing to close and would have cost a silent handler to leave open.
+    gui_files = _files_under("trcc/ui/gui") + _files_under("trcc/ui/qtgui")
     alltext = "\n".join(p.read_text(encoding="utf-8") for p in gui_files)
     timer_wired = set(re.findall(
         r"(?:timeout\.connect|make_timer)\(\s*self\.(\w+)", alltext))
