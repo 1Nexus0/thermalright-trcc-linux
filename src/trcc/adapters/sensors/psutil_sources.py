@@ -14,6 +14,7 @@ subclassed (HwmonCpu adds temp on Linux).
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 import psutil  # pyright: ignore[reportMissingImports]
@@ -196,6 +197,57 @@ def _slug(chip: str, label: str, index: int) -> str:
     return f"{chip}_{cleaned}" if cleaned else f"{chip}_temp{index}"
 
 
+#: How long one ``sensors_temperatures()`` result is reused.  The poll reads
+#: every board source back to back, in milliseconds, and ``MIN_REFRESH_INTERVAL_S``
+#: clamps the metric poll to 1 s -- so this collapses ONE poll's reads and can
+#: never serve a second poll a stale scan.
+_SCAN_TTL_S = 0.25
+
+
+class _TemperatureScan:
+    """One ``psutil.sensors_temperatures()`` result, shared by the sources.
+
+    ``sensors_temperatures()`` returns EVERY chip on every call, so a source
+    that calls it to read its own chip pays for all of them.  Each board source
+    called it independently, which made the cost scale with how many sensors
+    the board exposes: 9 sources on the dev box meant 9 full rescans per poll,
+    ~2,500 file opens, and a metric poll that went from 27.7 ms to 180.8 ms
+    when board temperatures landed (49b8143c) -- 1.4% to 9.0% of a core, with
+    nothing measuring it.
+
+    One instance is shared by every source ``discover_board_temps`` builds, so
+    a poll scans once however many sensors the board has.
+    """
+
+    def __init__(self, ttl_s: float = _SCAN_TTL_S) -> None:
+        log.debug("_TemperatureScan.__init__: ttl=%.2fs", ttl_s)
+        self._ttl_s = ttl_s
+        self._lock = threading.Lock()
+        self._chips: dict[str, list] | None = None
+        self._read_at = 0.0
+
+    def chips(self) -> dict[str, list]:
+        """The current scan, rescanning only when the cached one has expired.
+
+        Returns ``{}`` when psutil cannot answer -- callers read their own chip
+        out of it, and a missing chip already means "no reading".
+        """
+        with self._lock:
+            age = time.monotonic() - self._read_at
+            if self._chips is not None and age < self._ttl_s:
+                frame_log.debug("_TemperatureScan.chips: cached (%.3fs old)", age)
+                return self._chips
+            try:
+                self._chips = psutil.sensors_temperatures()
+            except (psutil.Error, AttributeError, OSError) as e:
+                log.debug("_TemperatureScan.chips: psutil unreadable (%s)", e)
+                self._chips = {}
+            self._read_at = time.monotonic()
+            frame_log.debug("_TemperatureScan.chips: rescanned, %d chip(s)",
+                            len(self._chips))
+            return self._chips
+
+
 class PsutilBoardTemp(BoardTempSource):
     """One board temperature, read through psutil rather than raw sysfs.
 
@@ -213,13 +265,17 @@ class PsutilBoardTemp(BoardTempSource):
     supports, for no new dependency.
     """
 
-    def __init__(self, chip: str, label: str, index: int) -> None:
-        log.debug("PsutilBoardTemp: chip=%s label=%s index=%d",
-                  chip, label, index)
+    def __init__(self, chip: str, label: str, index: int,
+                 scan: _TemperatureScan | None = None) -> None:
+        log.debug("PsutilBoardTemp: chip=%s label=%s index=%d shared_scan=%s",
+                  chip, label, index, scan is not None)
         self._chip = chip
         self._label = label
         self._index = index
         self._key = _slug(chip, label, index)
+        # Own scan when constructed alone (tests, a single ad-hoc source);
+        # discover_board_temps hands every source the SAME one.
+        self._scan = scan if scan is not None else _TemperatureScan()
 
     @property
     def key(self) -> str:
@@ -232,11 +288,9 @@ class PsutilBoardTemp(BoardTempSource):
         return f"{self._label or f'temp{self._index}'} ({self._chip})"
 
     def temp(self) -> float | None:
-        try:
-            entries = psutil.sensors_temperatures().get(self._chip, [])
-        except (psutil.Error, AttributeError, OSError) as e:
-            log.debug("PsutilBoardTemp.temp: %s unreadable (%s)", self._chip, e)
-            return None
+        entries = self._scan.chips().get(self._chip, [])
+        frame_log.debug("PsutilBoardTemp.temp: %s has %d entry(ies)",
+                        self._chip, len(entries))
         for i, entry in enumerate(entries, start=1):
             if i == self._index:
                 return float(entry.current) if entry.current else None
@@ -260,6 +314,9 @@ def discover_board_temps() -> list[BoardTempSource]:
     asking for.
     """
     sources: list[BoardTempSource] = []
+    # Every source this builds shares ONE scan, so a poll rescans once no
+    # matter how many sensors the board exposes.
+    scan = _TemperatureScan()
     try:
         chips = psutil.sensors_temperatures()
     except (psutil.Error, AttributeError, OSError) as e:
@@ -273,7 +330,8 @@ def discover_board_temps() -> list[BoardTempSource]:
                 log.debug("discover_board_temps: %s/%s reads 0 — unconnected "
                           "header, skipped", chip, entry.label or index)
                 continue
-            sources.append(PsutilBoardTemp(chip, entry.label or "", index))
-    log.info("discover_board_temps: %d board sensor(s) across %d chip(s)",
-             len(sources), len(chips))
+            sources.append(
+                PsutilBoardTemp(chip, entry.label or "", index, scan))
+    log.info("discover_board_temps: %d board sensor(s) across %d chip(s), "
+             "one shared scan", len(sources), len(chips))
     return sources

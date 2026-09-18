@@ -120,3 +120,44 @@ def test_psutil_refusing_is_not_an_error(
     monkeypatch.setattr(
         psutil_sources.psutil, "sensors_temperatures", _boom)
     assert psutil_sources.discover_board_temps() == []
+
+
+def test_one_poll_rescans_once_however_many_sensors_the_board_has(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``sensors_temperatures()`` returns EVERY chip, so calling it per source
+    makes the cost scale with the sensor count.
+
+    Each source called it independently until this was fixed: 9 sources on the
+    dev box meant 9 full rescans per poll (~2,500 file opens), and the metric
+    poll went 27.7 ms -> 180.8 ms when board temperatures landed (49b8143c) --
+    1.4% to 9.0% of a core.  That commit shipped 122 lines of tests and none of
+    them asked how long a poll takes.  This is that question.
+    """
+    chips = {
+        "nct6798": [
+            _Entry(f"SYS_TEMP{i}", 30.0 + i) for i in range(1, 10)
+        ],
+    }
+    calls = {"n": 0}
+
+    def counting() -> dict:
+        calls["n"] += 1
+        return chips
+
+    monkeypatch.setattr(psutil_sources.psutil, "sensors_temperatures", counting)
+
+    sources = psutil_sources.discover_board_temps()
+    assert len(sources) == 9, "fixture should build nine board sensors"
+
+    calls["n"] = 0
+    readings = [s.temp() for s in sources]
+
+    assert calls["n"] == 1, (
+        f"one poll over {len(sources)} board sensors rescanned "
+        f"{calls['n']} time(s) — each source is calling "
+        "psutil.sensors_temperatures() again, which returns every chip"
+    )
+    assert readings == [30.0 + i for i in range(1, 10)], (
+        "sharing the scan must not change what each source reads"
+    )
