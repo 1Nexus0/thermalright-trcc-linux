@@ -82,7 +82,27 @@ ALL_DEVICES: dict[tuple[int, int], ProductInfo] = {
         product="USBDISPLAY",
         wire=Wire.HID, kind=Kind.LCD,
         device_type=2,
-        native_resolution=(240, 320),
+        # (0, 0) is "the catalog does not know" -- the same spelling the LED
+        # row uses -- and it is the TRUTH here.  This one USB id covers at
+        # least 240x320, 320x240 and 1280x480; the panel is identified by its
+        # PM byte, which only a handshake supplies.
+        #
+        # Declaring a guess did REAL harm, because a guess is not inert:
+        # `DiscoverDevices` never handshakes, and it installs themes/masks for
+        # whatever this field says.  On a 1280x480 Trofeo Vision it fetched
+        # theme240320 and the browser then pointed there -- "locked at
+        # 240x320" -- two minutes AFTER the handshake had correctly reported
+        # (1280, 480).  Five reporters: #244, #257, #267, #268, #300.
+        #
+        # Nothing downstream needs the guess.  `DiscoverDevices` skips a
+        # (0, 0) row, `_resolve_resolution` returns None for it, the qtgui
+        # browsers guard it, and `ConnectDevice` installs for the HANDSHAKE
+        # resolution -- so a device that connects still gets its data.  The
+        # cost is that a device which NEVER connects shows empty grids
+        # instead of wrong-sized ones, which is the better failure: empty
+        # self-heals on connect (DataInstalled -> notify_data_ready), wrong
+        # is what pinned those five.
+        native_resolution=(0, 0),
         orientations=(0, 90, 180, 270),
     ),
 

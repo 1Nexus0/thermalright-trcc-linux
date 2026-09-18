@@ -77,3 +77,59 @@ def test_http_data_installer_implements_the_core_data_installer_port() -> None:
 
     assert issubclass(HttpDataInstaller, DataInstaller)
     assert isinstance(HttpDataInstaller(http=_FakeHttp()), DataInstaller)
+
+
+# =========================================================================
+# WHO asks for an install — a guess must not fetch the wrong library
+# =========================================================================
+
+
+def test_discovery_installs_nothing_for_a_panel_it_cannot_identify(
+    tmp_home: Path, monkeypatch,
+) -> None:
+    """``DiscoverDevices`` must not install for a resolution it GUESSED.
+
+    It never handshakes, so the only resolution available to it is the static
+    registry row.  For ``0416:5302`` that row is honest about not knowing --
+    one USB id covers at least 240x320, 320x240 and 1280x480, and only the PM
+    byte tells them apart.
+
+    A guess is not inert.  While the row said ``(240, 320)``, discovery
+    fetched theme240320 for a 1280x480 Trofeo Vision and the browser then
+    pointed there, two minutes AFTER the handshake reported ``(1280, 480)``:
+    "locked at 240x320" (#300, and the same shape in #244 / #257 / #267 /
+    #268).  The panel's real data still arrives -- ``ConnectDevice`` installs
+    for the HANDSHAKE resolution.
+
+    Asserting on what was SUBMITTED, not on what landed on disk: the install
+    itself is stubbed suite-wide, so a disk assertion would pass either way.
+    """
+    from trcc.app import App
+    from trcc.core.commands import DiscoverDevices
+    from trcc.core.models import DeviceInfo
+
+    platform = FakePlatform(tmp_home)
+    monkeypatch.setattr(
+        platform, "scan_devices",
+        lambda: [DeviceInfo(vid=0x0416, pid=0x5302)],
+    )
+    app = App(platform=platform)
+
+    submitted: list[tuple] = []
+    real = app.data_install_runner.submit
+    monkeypatch.setattr(
+        app.data_install_runner, "submit",
+        lambda *a, **k: (submitted.append(a), real(*a, **k))[1],
+    )
+
+    result = app.dispatch(DiscoverDevices())
+
+    assert result.ok is True
+    assert [prod.key for prod in result.products] == ["0416:5302"], (
+        "the device must still be DISCOVERED — only the guessed install goes"
+    )
+    assert submitted == [], (
+        f"discovery installed for a guessed resolution: {submitted}. "
+        f"0416:5302 spans 240x320 / 320x240 / 1280x480 and is identified by "
+        f"its PM byte, which discovery never reads (#300)."
+    )
