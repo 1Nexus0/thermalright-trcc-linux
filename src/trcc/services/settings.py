@@ -24,6 +24,7 @@ from ..core.errors import ConfigError
 from ..core.led_models import LedDeviceSettings, LEDMode, LedZoneSettings
 from ..core.logs import per_frame
 from ..core.models import (
+    DEFAULT_REFRESH_INTERVAL_S,
     MAX_REFRESH_INTERVAL_S,
     MIN_REFRESH_INTERVAL_S,
     DeviceSettings,
@@ -46,7 +47,7 @@ frame_log = per_frame(__name__)
 class AppSettings:
     """Global user preferences."""
     language: str = "en"
-    refresh_interval_s: float = 2.0
+    refresh_interval_s: float = DEFAULT_REFRESH_INTERVAL_S
     autostart_configured: bool = False
     ui_theme: Literal["dark", "light", "system"] = "system"
     # Include HDD metrics (disk temp / activity / read / write) in sensor

@@ -8,6 +8,7 @@ import pytest
 
 from trcc.adapters.sensors import hwmon
 from trcc.adapters.sensors.aggregator import BaselineSensors
+from trcc.core.models import MIN_REFRESH_INTERVAL_S
 from trcc.core.ports import CpuSource, DiskSource, DramSource, FanSource, GpuSource
 
 from .conftest import FakeCpu, FakeGpu, FakeMemory
@@ -1169,3 +1170,68 @@ def test_discover_still_advertises_a_key_that_is_merely_absent_now() -> None:
     ids = {r.sensor_id for r in s.discover()}
     assert "cpu:power" in ids, "implemented but empty right now — still offered"
     assert {"disk:read", "net:up"} <= ids
+
+
+# ── Poll cadence must be changeable in flight ────────────────────────
+
+
+def test_set_interval_changes_the_poll_cadence_while_the_thread_runs() -> None:
+    """The user's refresh-interval lever must reach the SWEEP, not just the
+    publish.
+
+    ``_interval_s`` used to be written only by ``__init__`` and
+    ``start_polling`` — and ``start_polling`` early-returns once its thread is
+    alive.  So a ``SetRefreshInterval`` moved the broadcast cadence and left
+    the sensor sweep running at whatever rate it booted with, for the life of
+    the process: a user who raised the interval to save CPU kept paying every
+    sweep, and one who lowered it got duplicate broadcasts off a cache that
+    refreshed half as often.
+
+    Counting SWEEPS, not reading ``_interval_s``: a value assertion passes
+    whether or not the sleeping thread ever acts on the new number.  This
+    starts the thread SLOW (60 s — it polls once, then sleeps well past the
+    end of this test) and then asks for fast.  Nothing but a woken thread
+    honouring the new cadence can make the count move.
+
+    MUTATION CHECK: drop the ``_wake.set()`` from ``_interval_changed`` and
+    this fails with 0 further polls (measured, not predicted) — the thread is
+    still asleep on its original 60 s.
+    """
+    s, cpu = _counting_sensors()
+    s.start_polling(60.0)
+    try:
+        idle = threading.Event()
+        for _ in range(500):                  # bounded: never hang the suite
+            if s._last_poll:                  # the bootstrap poll landed
+                break
+            idle.wait(0.01)
+        assert s._last_poll, "background poll never landed"
+        settled = cpu.reads
+
+        s.set_interval(MIN_REFRESH_INTERVAL_S)
+
+        for _ in range(500):                  # ~5 s ceiling for >=2 fast polls
+            if cpu.reads >= settled + 2:
+                break
+            idle.wait(0.01)
+        assert cpu.reads >= settled + 2, (
+            f"sweep cadence ignored the change — {cpu.reads - settled} poll(s) "
+            f"after set_interval({MIN_REFRESH_INTERVAL_S}s); the thread is "
+            f"still sleeping out its original 60 s"
+        )
+    finally:
+        s.stop_polling()
+
+
+def test_set_interval_clamps_to_the_floor_like_start_polling_does() -> None:
+    """One writer, one clamp — the sweep can never outrun the published range.
+
+    ``start_polling`` clamped and ``set_interval`` is now the writer it
+    delegates to, so the floor has to live in the delegate or the second path
+    would be the unclamped one.
+    """
+    s, _ = _counting_sensors()
+
+    s.set_interval(0.001)
+
+    assert s._interval_s == MIN_REFRESH_INTERVAL_S

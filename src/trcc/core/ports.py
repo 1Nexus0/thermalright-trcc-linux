@@ -17,7 +17,11 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from ._safe import is_under
 from .errors import DeviceDisconnectedError, UnsupportedOperationError
 from .logs import per_frame
-from .models import VideoExportRequest
+from .models import (
+    DEFAULT_REFRESH_INTERVAL_S,
+    MIN_REFRESH_INTERVAL_S,
+    VideoExportRequest,
+)
 
 log = logging.getLogger(__name__)
 frame_log = per_frame(__name__)
@@ -867,6 +871,13 @@ class SensorEnumerator(ABC):
     _preferred_disk_key: str | None = None
     _warned_missing_disk_key: str | None = None
 
+    # Poll cadence, in seconds.  Lives here rather than on the concrete
+    # enumerator for the same reason the preference keys do: it is pure state
+    # with no OS-specific variation, so every implementation would write the
+    # identical setter.  ``AppSettings.refresh_interval_s`` is the source of
+    # truth; ``MetricsLoop`` pushes it down each iteration.
+    _interval_s: float = DEFAULT_REFRESH_INTERVAL_S
+
     # ── Structured access ───────────────────────────────────────────
     @abstractmethod
     def cpu(self) -> CpuSource: ...
@@ -901,6 +912,33 @@ class SensorEnumerator(ABC):
         self._preferred_gpu_key = normalized
         # A fresh choice re-arms the missing-GPU warning.
         self._warned_missing_gpu_key = None
+
+    def set_interval(self, seconds: float) -> None:
+        """Change the poll cadence, in flight.
+
+        The ONE writer of :attr:`_interval_s` — ``start_polling`` delegates
+        here so a second path cannot skip the floor clamp.
+
+        Waking the sleeper is the load-bearing half: a poll loop that is
+        mid-``wait`` on the OLD interval would otherwise honour the new one
+        only after sleeping out the old, so lowering 100 s to 1 s would leave
+        the sweep 100 s behind the broadcast it feeds.
+        """
+        clamped = max(MIN_REFRESH_INTERVAL_S, seconds)
+        if clamped == self._interval_s:
+            log.debug("set_interval: already %.2fs — no change", clamped)
+            return
+        log.info("set_interval: %.2fs -> %.2fs", self._interval_s, clamped)
+        self._interval_s = clamped
+        self._interval_changed()
+
+    def _interval_changed(self) -> None:
+        """Hook: cut a running poll loop's sleep short.  No-op by default.
+
+        An enumerator that does not poll on a thread has nothing to wake, so
+        the base does nothing and only a polling implementation overrides.
+        """
+        log.debug("_interval_changed: nothing to wake")
 
     def primary_gpu(self) -> GpuSource | None:
         """The user-preferred GPU if set and still present, else the first
@@ -1107,7 +1145,9 @@ class SensorEnumerator(ABC):
         """
 
     @abstractmethod
-    def start_polling(self, interval_s: float = 2.0) -> None: ...
+    def start_polling(
+        self, interval_s: float = DEFAULT_REFRESH_INTERVAL_S,
+    ) -> None: ...
 
     @abstractmethod
     def stop_polling(self) -> None: ...

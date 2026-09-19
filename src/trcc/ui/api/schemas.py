@@ -10,6 +10,7 @@ from typing import Generic, TypeVar
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 from ...core.models import (
+    DEFAULT_REFRESH_INTERVAL_S,
     MAX_REFRESH_INTERVAL_S,
     MIN_REFRESH_INTERVAL_S,
     OVERLAY_DEFAULT_CLOCK_SOURCE,
@@ -560,7 +561,7 @@ class AppStatusResponse(ResultBase):
     language: str = ""
     temp_unit: str = "C"
     hdd_enabled: bool = False
-    refresh_interval_s: float = 2.0
+    refresh_interval_s: float = DEFAULT_REFRESH_INTERVAL_S
     active_gpu: str | None = None
     autostart_enabled: bool = False
     lcd_devices: list[AppStatusEntry] = []

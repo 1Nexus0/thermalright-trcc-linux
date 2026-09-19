@@ -27,7 +27,10 @@ from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
 
 from ...core.logs import per_frame
-from ...core.models import MIN_REFRESH_INTERVAL_S, SensorReading
+from ...core.models import (
+    DEFAULT_REFRESH_INTERVAL_S,
+    SensorReading,
+)
 from ...core.ports import (
     BoardTempSource,
     CpuSource,
@@ -200,7 +203,11 @@ class BaselineSensors(SensorEnumerator):
         self._last_poll: float = 0.0
         self._poll_thread: threading.Thread | None = None
         self._stop = threading.Event()
-        self._interval_s: float = 2.0
+        # Set by ``_interval_changed`` to cut a sleeping poll loop's wait
+        # short.  ``_stop`` is the authoritative shutdown flag and is checked
+        # separately after every wake — same discrimination ``MetricsLoop``
+        # makes between "stop" and "the cadence moved".
+        self._wake = threading.Event()
         # Labels whose read has already raised — warn once, then DEBUG, so a
         # persistently-broken sensor doesn't spam a line every poll interval.
         self._read_failures: set[str] = set()
@@ -465,16 +472,31 @@ class BaselineSensors(SensorEnumerator):
 
     # ── Polling ────────────────────────────────────────────────────
 
-    def start_polling(self, interval_s: float = 2.0) -> None:
+    def start_polling(
+        self, interval_s: float = DEFAULT_REFRESH_INTERVAL_S,
+    ) -> None:
         if self._poll_thread and self._poll_thread.is_alive():
             log.debug("sensor polling already running — start_polling ignored")
             return
-        self._interval_s = max(MIN_REFRESH_INTERVAL_S, interval_s)
+        # Delegate rather than assign: ``set_interval`` owns the clamp, so a
+        # second writer here is how the floor gets skipped on one path only.
+        self.set_interval(interval_s)
         self._stop.clear()
+        self._wake.clear()
         self._poll_thread = threading.Thread(
             target=self._poll_loop, daemon=True, name="sensor-poll")
         self._poll_thread.start()
         log.info("sensor polling started (interval=%.1fs)", self._interval_s)
+
+    def _interval_changed(self) -> None:
+        """Cut a sleeping poll loop's wait short so the new cadence starts now.
+
+        Without this the thread honours the change only after sleeping out the
+        OLD interval — up to 100 s of the sweep running at the wrong rate
+        while the broadcast it feeds already runs at the new one.
+        """
+        log.debug("_interval_changed: waking the poll loop")
+        self._wake.set()
 
     def stop_polling(self) -> None:
         if not (self._poll_thread and self._poll_thread.is_alive()):
@@ -482,6 +504,7 @@ class BaselineSensors(SensorEnumerator):
             return
         log.info("sensor polling: stopping")
         self._stop.set()
+        self._wake.set()
         if self._poll_thread is not None:
             self._poll_thread.join(timeout=3)
             self._poll_thread = None
@@ -497,7 +520,10 @@ class BaselineSensors(SensorEnumerator):
                     self._poll_once()
                 except Exception:
                     log.exception("sensor poll iteration failed")
-                self._stop.wait(self._interval_s)
+                # Re-read the interval every pass: ``set_interval`` may have
+                # moved it while this iteration was polling.
+                self._wake.wait(self._interval_s)
+                self._wake.clear()
 
     def _poll_once(self) -> None:
         frame_log.debug("_poll_once: called")

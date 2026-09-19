@@ -116,6 +116,16 @@ TempUnit = Literal["C", "F"]
 # sensor poll thread, so the poll can never run faster than the GUI minimum.
 MIN_REFRESH_INTERVAL_S: float = 1.0
 MAX_REFRESH_INTERVAL_S: float = 100.0
+#: What a fresh install polls at, before the user touches the control.
+#: Spelled here ONCE.  It was a bare ``2.0`` in seven places — AppSettings,
+#: the ControlCenterSnapshot Result, the API status schema, the GUI's
+#: no-App fallback, the SensorEnumerator port, and twice in the aggregator —
+#: none of which any gate compared, so changing "the default" meant finding
+#: all seven by hand and a miss would have shipped a UI that disagreed with
+#: the value it was reporting.  Every other cadence in the tree is already a
+#: named constant (``SLIDESHOW_POLL_S``, ``SCREENCAST_TICK_S``); this was the
+#: exception.
+DEFAULT_REFRESH_INTERVAL_S: float = 2.0
 
 
 def parse_resolution(resolution: str) -> tuple[int, int]:

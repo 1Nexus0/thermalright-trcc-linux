@@ -165,6 +165,16 @@ class MetricsLoop:
                 MIN_REFRESH_INTERVAL_S,
                 float(self._app.settings.app.refresh_interval_s),
             )
+            # Push the cadence down to the sweep at the one place we already
+            # read it.  The enumerator polls on its OWN thread, and its
+            # interval used to be set once at ``start_polling`` and never
+            # again — so a ``SetRefreshInterval`` moved this broadcast and
+            # left the sweep feeding it running at the boot-time rate for the
+            # life of the process.  A push here (rather than a second
+            # subscription to ``RefreshIntervalChanged``) keeps ONE reader of
+            # the setting and needs no branch: ``set_interval`` returns
+            # immediately when the value has not moved.
+            self._app.platform.sensors().set_interval(interval)
             # Wait on ``_wake`` (set by stop() OR by an interval
             # change).  Clear AFTER the wait so a wake-up during the
             # NEXT iteration's wait is still observed.  ``_stop`` is

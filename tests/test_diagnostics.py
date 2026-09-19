@@ -2466,6 +2466,14 @@ _ENUMERATOR_LOGGERS: dict[str, frozenset[str]] = {
     "start_polling": frozenset({"log"}),
     "stop_polling": frozenset({"log"}),
     "_poll_loop": frozenset({"log"}),
+    # Cadence control: fires when the USER moves the refresh interval, not per
+    # tick — the ABC's ``set_interval`` returns early when the value has not
+    # changed, so ``MetricsLoop`` pushing it down every iteration costs one
+    # comparison and calls this hook not at all.  Ordinary logger: "the sweep
+    # cadence changed" is precisely the line that explains a report's poll
+    # rate.  (``set_interval`` itself is concrete ON THE PORT and so is not a
+    # member of this class — this record covers the override only.)
+    "_interval_changed": frozenset({"log"}),
     # DEAD, not lifecycle — recorded as such so the disposition is not lost:
     # abstract on the port, one implementation, ZERO callers in src/.  Retire
     # it, or wire the single-sensor Query it implies; do not quietly classify.

@@ -43,6 +43,7 @@ from ...core.commands import (
     GetPlatformInfo,
     RefreshAutostart,
 )
+from ...core.models import DEFAULT_REFRESH_INTERVAL_S
 from .assets import Assets
 from .base import BasePanel, create_image_button, set_background_pixmap
 from .constants import Layout, Sizes, Styles
@@ -159,7 +160,7 @@ class UCAbout(BasePanel):
         else:
             self._autostart = False
             self._read_hdd = False
-            self._refresh_interval = 2
+            self._refresh_interval = int(DEFAULT_REFRESH_INTERVAL_S)
             self._gpu_device = ''
 
         # Load checkbox pixmaps

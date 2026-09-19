@@ -11,6 +11,7 @@ came up owning USB with nothing connected.
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -105,3 +106,48 @@ def test_close_undoes_start_session(app: App) -> None:
     assert not app.metrics_loop.is_running
     assert not app.led_animation_loop.is_running
     assert not app.platform.hotplug().is_running
+
+
+# ── The refresh interval must reach the SWEEP, not just the broadcast ──
+
+
+def test_set_refresh_interval_reaches_the_sensor_sweep(app: App) -> None:
+    """The user's one CPU lever has to move both halves of its own pipeline.
+
+    ``MetricsLoop`` re-read ``refresh_interval_s`` every iteration, so the
+    BROADCAST obeyed a ``SetRefreshInterval`` immediately.  The sweep feeding
+    it did not: the enumerator's ``_interval_s`` was written once at
+    ``start_polling`` and that call early-returns while its thread is alive.
+    Driven on the real App before the fix, publishes fell 0.50/s -> 0.08/s
+    while sweeps stayed at 0.50/s — a user who raised the interval to save CPU
+    kept paying every sweep, forever.
+
+    The cadence half of this contract is proved by counting sweeps in
+    ``test_set_interval_changes_the_poll_cadence_while_the_thread_runs``; what
+    is left to prove here is that the SETTING reaches that writer at all.  The
+    existing ``SetRefreshInterval`` tests assert the stored value and the
+    published event, and both pass whether or not the sweep ever hears about
+    it — which is exactly how this survived.
+
+    MUTATION CHECK: drop the ``set_interval`` push from ``MetricsLoop._loop``
+    and this fails holding the boot-time default.
+    """
+    from trcc.core.commands import SetRefreshInterval
+    from trcc.core.models import DEFAULT_REFRESH_INTERVAL_S
+
+    sensors = app.platform.sensors()
+    app.metrics_loop.start()
+    try:
+        assert sensors._interval_s == DEFAULT_REFRESH_INTERVAL_S
+
+        assert app.dispatch(SetRefreshInterval(seconds=7.0)).ok
+
+        deadline = time.monotonic() + 5.0     # bounded: never hang the suite
+        while sensors._interval_s != 7.0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert sensors._interval_s == 7.0, (
+            f"the sweep never heard about the change — still polling every "
+            f"{sensors._interval_s}s while the broadcast runs at 7.0s"
+        )
+    finally:
+        app.metrics_loop.stop()

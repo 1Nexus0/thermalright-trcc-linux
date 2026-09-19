@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .models import (
+    DEFAULT_REFRESH_INTERVAL_S,
     OVERLAY_DEFAULT_CLOCK_SOURCE,
     OVERLAY_DEFAULT_COLOR,
     OVERLAY_DEFAULT_FORMAT,
@@ -809,7 +810,7 @@ class ControlCenterSnapshotResult(Result):
     temp_unit: str = "C"
     active_gpu: str | None = None
     active_disk: str | None = None
-    refresh_interval_s: float = 2.0
+    refresh_interval_s: float = DEFAULT_REFRESH_INTERVAL_S
     hdd_enabled: bool = False
 
 

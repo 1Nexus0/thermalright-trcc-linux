@@ -222,3 +222,74 @@ def test_settings_persist_across_app_restart(
     assert app2.settings.app.language == "zh"
     assert app2.settings.app.active_gpu == "nvidia:0"
     assert app2.settings.app.refresh_interval_s == pytest.approx(5.0)
+
+
+# ── The default is ONE fact ──────────────────────────────────────────
+
+
+def test_every_declared_refresh_default_agrees_with_the_constant() -> None:
+    """One fact, one spelling — checked structurally, not restated.
+
+    A bare ``2.0`` used to sit in SEVEN places: ``AppSettings``, the
+    ``ControlCenterSnapshot`` Result, the API status schema, the GUI's no-App
+    fallback, the ``SensorEnumerator`` port, and twice in the aggregator.  No
+    gate compared them, so "change the default" meant finding all seven by
+    hand, and a miss would have shipped a UI reporting a cadence the app was
+    not running at.  Every OTHER cadence in the tree is already a named
+    constant (``SLIDESHOW_POLL_S``, ``SCREENCAST_TICK_S``); this was the one
+    exception, and it is the one the maintainer wants to change.
+
+    Deliberately asserts AGREEMENT, not the value: pinning ``== 2.0`` here
+    would make this test the eighth copy, and changing the default would then
+    mean editing the gate that exists to protect it
+    ([[feedback_gate_the_invariant_not_the_instance]]).
+    """
+    import dataclasses
+    import inspect
+
+    from trcc.adapters.sensors.aggregator import BaselineSensors
+    from trcc.core.models import DEFAULT_REFRESH_INTERVAL_S
+    from trcc.core.ports import SensorEnumerator
+    from trcc.core.results import ControlCenterSnapshotResult
+    from trcc.services.settings import AppSettings
+    from trcc.ui.api.schemas import AppStatusResponse
+
+    def _field_default(cls: type, name: str) -> object:
+        """The DECLARED default, read without constructing the class.
+
+        Instantiating would drag in every unrelated required field — the
+        Pydantic response model has several — and a gate that cannot be
+        evaluated is a gate that gets deleted.
+        """
+        for f in dataclasses.fields(cls):        # type: ignore[arg-type]
+            if f.name == name:
+                return f.default
+        raise AssertionError(f"{cls.__name__} has no field {name}")
+
+    def _param_default(fn: object, name: str) -> object:
+        return inspect.signature(fn).parameters[name].default  # type: ignore[arg-type]
+
+    declared = {
+        "AppSettings.refresh_interval_s":
+            _field_default(AppSettings, "refresh_interval_s"),
+        "ControlCenterSnapshotResult.refresh_interval_s":
+            _field_default(ControlCenterSnapshotResult, "refresh_interval_s"),
+        "AppStatusResponse.refresh_interval_s":
+            AppStatusResponse.model_fields["refresh_interval_s"].default,
+        "SensorEnumerator._interval_s":
+            SensorEnumerator._interval_s,
+        "SensorEnumerator.start_polling(interval_s=)":
+            _param_default(SensorEnumerator.start_polling, "interval_s"),
+        "BaselineSensors.start_polling(interval_s=)":
+            _param_default(BaselineSensors.start_polling, "interval_s"),
+    }
+
+    disagree = {
+        where: value for where, value in declared.items()
+        if value != DEFAULT_REFRESH_INTERVAL_S
+    }
+    assert not disagree, (
+        f"these declare a refresh default that is not "
+        f"DEFAULT_REFRESH_INTERVAL_S={DEFAULT_REFRESH_INTERVAL_S}: {disagree} "
+        f"— point them at the constant instead of spelling the number again"
+    )
