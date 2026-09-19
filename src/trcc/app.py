@@ -1161,23 +1161,12 @@ class _DeviceRenderObserver:
                     type(event).__name__, key,
                 )
                 continue
-            # A screencast OWNS the panel while it runs: its tick already
-            # composes background + mask + metrics at capture rate, so a
-            # reactive theme render here is a SECOND producer writing the same
-            # device.  It is not a harmless extra frame -- the two composites
-            # differ (the screencast's background is the captured region, this
-            # one's is the theme), so at ~7 fps capture against a 2 s sensor
-            # tick the panel alternated ~13 screen frames with one theme frame:
-            # the reported "blinking metrics mask" (2026-09-14).
-            #
-            # Gating the PRODUCER, not the send: the metrics still refresh,
-            # sooner in fact, because the capture tick composes them at 7 fps
-            # instead of 0.5 Hz.
-            if self._app.settings.for_device(key).screencast_region is not None:
+            owner = self._cadence_owner(key)
+            if owner is not None:
                 log.debug(
-                    "DeviceRenderObserver: skip %s for %s (screencast owns "
-                    "the panel; its tick renders at capture rate)",
-                    type(event).__name__, key,
+                    "DeviceRenderObserver: skip %s for %s (%s owns the panel; "
+                    "its tick renders at its own rate)",
+                    type(event).__name__, key, owner,
                 )
                 continue
             log.debug(
@@ -1185,3 +1174,44 @@ class _DeviceRenderObserver:
                 type(event).__name__, key,
             )
             self._app.dispatch(self._RenderAndSend(key=key))
+
+    def _cadence_owner(self, key: str) -> str | None:
+        """Which OTHER producer already drives this panel, if any.
+
+        A reactive render is only worth dispatching when nothing else is
+        writing the device.  When something is, the extra frame is at best
+        redundant and at worst visible:
+
+        * **screencast** — its tick composes background + mask + metrics at
+          capture rate, and its background is the captured region while this
+          one's is the theme.  Two DIFFERENT pictures, so at ~7 fps capture
+          against a 2 s sensor tick the panel alternated ~13 screen frames
+          with one theme frame: the "blinking metrics mask" (2026-09-14).
+        * **video** — the animation tick already sends at the video's fps.
+          Measured on the mock 320x320 panel: 40 composites and 40 wire writes
+          per 40 ``SensorsUpdated``, on top of the tick's own.
+
+        ``paused`` is load-bearing, not a detail.  ``lcd_handler.play_pause``
+        stops the animation timer while ``PauseVideo`` leaves the ``Playback``
+        in place, so a paused video has a playback and NO producer.  Keying
+        off the playback's existence would freeze a paused panel's clock and
+        metrics — which is why this reads the flag and not the object.
+
+        Gating the PRODUCER, not the send: metrics still refresh, and sooner,
+        because the owning tick composes them faster than the sensor cadence.
+
+        The LED animation loop deliberately does NOT appear here.  It answers
+        a different question: its devices are filtered out of the device-wide
+        branch above, because a reactive LED render is not a duplicate but a
+        deliberately different one — ``RenderLed(advance=False)`` HOLDS the
+        carousel so a slider drag cannot race the metric page forward (#193 /
+        #202).  Folding it in would be duplication removal that changes
+        behaviour.
+        """
+        if self._app.settings.for_device(key).screencast_region is not None:
+            return "screencast"
+        playback = self._app.media.playback(key)
+        if playback is not None and not playback.paused:
+            return "video"
+        log.debug("_cadence_owner: %s — nothing else owns this panel", key)
+        return None

@@ -10,6 +10,7 @@ monkeypatched to return a synthetic Playback so tests run without ffmpeg.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -1176,3 +1177,120 @@ def test_a_real_gif_decodes_to_many_frames(tmp_home: Path) -> None:
     playback = Playback(frames=frames, fps=5)
     assert playback.frame_count == 10
     assert playback.advance() is not None      # it rolls, unlike a still
+
+
+# ── one producer owns the panel ──────────────────────────────────────
+
+
+def _render_observer(app: App):
+    """The App's own ``_DeviceRenderObserver``, whichever bus slot it sits in."""
+    from trcc.app import _DeviceRenderObserver
+    for attr in vars(app).values():
+        if isinstance(attr, _DeviceRenderObserver):
+            return attr
+    raise AssertionError("no _DeviceRenderObserver on the App")
+
+
+class _Noop:
+    """Stands in for the Command the observer would dispatch.
+
+    Carries ``LOG_LEVEL`` because ``App.dispatch`` reads it to pick a logger:
+    without it the guard's failure arrives as an AttributeError from the
+    dispatcher instead of the assertion that says what actually went wrong.
+    """
+
+    LOG_LEVEL = logging.DEBUG
+
+
+def test_a_playing_video_suppresses_the_reactive_theme_render(
+    rendering_app: App, stub_media: Any, tmp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The video tick owns the wire; a sensor tick must not write it too.
+
+    ``_DeviceRenderObserver`` guarded an LED device the animation loop owns
+    (#202) and one a screencast owns (2026-09-14), but not an LCD whose video
+    timer owns the wire — so a playing video got a full composite AND a full
+    wire write per ``SensorsUpdated``, on top of the frames its own tick was
+    already sending.  The gui's ``_render_and_send`` skips for exactly this
+    reason (``_animation_timer.isActive()``); the App-level observer did not,
+    so every UI paid it.
+
+    Measured on the mock 320x320 panel before the fix: 40 composites and 40
+    sends for 40 ``SensorsUpdated``, identical with and without a video
+    playing.
+
+    Metrics do not go stale — they refresh FASTER, because the video tick
+    composes them at 15 fps instead of the sensor cadence.  Same argument the
+    screencast guard rests on.
+
+    MUTATION CHECK: drop the ``video`` arm of ``_cadence_owner`` and this
+    fails with the key rendered.
+    """
+    from trcc.core.events import SensorsUpdated
+
+    theme = _write_video_theme(tmp_home, "owned")
+    rendering_app.active_themes[_KEY] = FileContentStore().load(theme)
+    playback = _playback_for(rendering_app, theme / "Theme.mp4")
+
+    rendered: list[str] = []
+    observer = _render_observer(rendering_app)
+    monkeypatch.setattr(
+        observer, "_RenderAndSend",
+        lambda key: (rendered.append(key), _Noop())[1],
+    )
+
+    rendering_app.events.publish(SensorsUpdated(readings={}, metrics=None))
+    assert rendered == [], (
+        "a theme render was dispatched while the video tick owned the wire — "
+        "two producers for one panel"
+    )
+
+    # …and it resumes the moment playback ends.
+    rendering_app.media.unload(_KEY)
+    rendering_app.events.publish(SensorsUpdated(readings={}, metrics=None))
+    assert rendered == [_KEY], (
+        "the theme render did not resume after the video was unloaded"
+    )
+    assert playback is not None
+
+
+def test_a_PAUSED_video_still_gets_the_reactive_render(
+    rendering_app: App, stub_media: Any, tmp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pause stops the TIMER but keeps the PLAYBACK — so the guard must not
+    key off the playback's mere existence.
+
+    ``lcd_handler.play_pause`` calls ``_stop_animation_timer`` while
+    ``PauseVideo`` leaves the ``Playback`` object in place.  A guard reading
+    "this device has a playback" would therefore skip the one producer left,
+    and a paused video's clock and metrics would freeze on the panel until the
+    user pressed play — a worse bug than the duplicate it set out to fix.
+
+    Found by driving it, not by reading it: the naive predicate looked right
+    in the source and is wrong on the glass.
+
+    MUTATION CHECK: change ``_cadence_owner``'s video arm to
+    ``playback is not None`` and this fails with nothing rendered.
+    """
+    from trcc.core.events import SensorsUpdated
+
+    theme = _write_video_theme(tmp_home, "paused")
+    rendering_app.active_themes[_KEY] = FileContentStore().load(theme)
+    playback = _playback_for(rendering_app, theme / "Theme.mp4")
+    playback.paused = True
+
+    rendered: list[str] = []
+    observer = _render_observer(rendering_app)
+    monkeypatch.setattr(
+        observer, "_RenderAndSend",
+        lambda key: (rendered.append(key), _Noop())[1],
+    )
+
+    rendering_app.events.publish(SensorsUpdated(readings={}, metrics=None))
+
+    assert rendered == [_KEY], (
+        "a paused video's overlay was not refreshed — nothing else is ticking "
+        "this panel, so the metrics are frozen on the glass"
+    )
