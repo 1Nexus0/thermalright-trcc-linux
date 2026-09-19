@@ -20,6 +20,34 @@ it was disassembled separately with Ghidra and is written up in
 wrapper (SetupApi/HidD/Kernel32 P/Invoke) with no vendor identifiers and no
 protocol; it has no oracle value.
 
+### The 2.1.6 package is now fully inventoried — nothing is left unread
+
+| binary | oracle |
+|---|---|
+| `TRCC.exe` | decompiled — composes + encodes |
+| `USBLCDNEW.dll` | decompiled — **this document** |
+| `USBLCD.exe` | disassembled — [`AUDIT_SCSI.md`](AUDIT_SCSI.md) |
+| `USBLCDNEW.exe` | **none — measured, see below** |
+
+**`USBLCDNEW.exe` is NOT a gap and needs no disassembly.** It is native x86-64
+C++, but it imports only `KERNEL32`, `USER32`, `SHELL32`, `ADVAPI32` and the
+CRT — **no `DeviceIoControl`, no `SetupDi*`, no `CreateFile`, no shared-memory
+calls** — and its strings are `std::error_category` boilerplate. It cannot
+speak to a device; with `SHELL32` it is a launcher/supervisor for the managed
+`USBLCDNEW.dll`. Listing it beside `USBLCD.exe` as "native, no decompile" read
+like an open question; it is closed.
+
+Everything else shipped is third-party: `dotnet.exe`, `ffmpeg.exe`,
+`Newtonsoft.Json.dll`, `CSCore.dll`, `LibUsbDotNet`, `UsbHid.dll`, the
+uninstaller. Two of those are findings rather than noise:
+
+* **`HWiNFO64.dll` + `HWINFO.exe` — the vendor reads Windows sensors through
+  HWiNFO shared memory.** `CLAUDE.md`'s cross-platform section lists HWiNFO as
+  one option among several and leans toward LibreHardwareMonitor; the oracle
+  answers the question directly, and the answer is HWiNFO. Relevant whenever
+  Windows sensor support is revisited.
+* **`LibUsbDotNet`** — the bulk path goes through LibUsbDotNet, not raw WinUSB.
+
 ## Entry point
 
 - `Main` (ReadWriteAsync.cs:5) — the whole process: construct `DCReadWriteAsync`
