@@ -622,3 +622,33 @@ def test_render_dc_standalone_sees_only_readings_that_exist(
         "a metric with no reading reached the renderer as 0.0 and will be "
         f"DRAWN as 0: {sorted(coalesced & set(captured['sensors']))}"
     )
+
+
+def test_read_sensors_declares_the_unit_its_values_are_in(fake_platform) -> None:
+    """°F values must arrive labelled °F -- and °C values labelled °C.
+
+    ``personalize_readings`` converts the VALUE of every ``:temp`` key; the
+    SYMBOL beside it is a separate decision, and it was expressed once, inline,
+    with no test anywhere asserting it.  A consumer that renders ``unit``
+    verbatim -- every sensor list in the app -- shows "122.0 °C" the moment the
+    two disagree.
+
+    Both directions on purpose: a one-directional rule is one nobody re-reads,
+    and a catalog cached under °F has to come back to °C when the user does.
+
+    MUTATION CHECK: make ``personalize_unit`` return ``unit`` unchanged and the
+    Fahrenheit half fails, naming the reading that lied about its unit.
+    """
+    app = App(fake_platform)
+
+    app.settings.set_global_temp_unit("F")
+    by_id = {r.sensor_id: r for r in app.dispatch(ReadSensors()).readings}
+    assert by_id["cpu:temp"].value == 107.6, "42°C is 107.6°F"
+    assert by_id["cpu:temp"].unit == "°F"
+    # A non-temperature reading keeps its own unit whatever the pref says.
+    assert by_id["cpu:usage"].unit == "%"
+
+    app.settings.set_global_temp_unit("C")
+    by_id = {r.sensor_id: r for r in app.dispatch(ReadSensors()).readings}
+    assert by_id["cpu:temp"].value == 42.0
+    assert by_id["cpu:temp"].unit == "°C"

@@ -1,12 +1,17 @@
 """sensor_display — pure-Python tests (NO Qt, NO QApplication).
 
-Locks the value-format ladder (shared by the picker + the system-info panel)
-and the discover()→grouped-SensorInfo adaptation.
+Locks the value-format ladder (shared by the picker + the system-info panel),
+the discover()→grouped-SensorInfo adaptation, and the catalog×broadcast merge
+that lets a view ride the bus instead of polling ``ReadSensors`` on a timer.
 """
 from __future__ import annotations
 
 from trcc.core.models import SensorReading
-from trcc.ui.presentation.sensor_display import format_sensor_value, group_sensors
+from trcc.ui.presentation.sensor_display import (
+    apply_live_values,
+    format_sensor_value,
+    group_sensors,
+)
 
 
 def _reading(sensor_id: str, *, unit: str = "°C", label: str = "",
@@ -96,3 +101,68 @@ def test_group_drops_clock_sources() -> None:
         _reading("cpu:temp", label="C"),
     ])
     assert [h for h, _ in groups] == ["CPU"]
+
+
+# ── apply_live_values ────────────────────────────────────────────────────
+
+
+def test_live_values_replace_catalog_values() -> None:
+    """Identity is kept from the catalog; only the number moves."""
+    catalog = [_reading("cpu:temp", label="CPU", category="temperature"),
+               _reading("cpu:usage", unit="%", label="CPU", category="load")]
+
+    out = apply_live_values(catalog, {"cpu:temp": 61.0, "cpu:usage": 12.5})
+
+    assert [(r.sensor_id, r.value, r.unit, r.category, r.label) for r in out] == [
+        ("cpu:temp", 61.0, "°C", "temperature", "CPU"),
+        ("cpu:usage", 12.5, "%", "load", "CPU"),
+    ]
+
+
+def test_a_sensor_absent_from_the_broadcast_is_dropped_not_zeroed() -> None:
+    """The user disabling HDD drops ``disk:*`` from the broadcast entirely.
+
+    A view that zeroed them instead would show a 0°C SSD forever — which is a
+    READING, and wrong.  Same semantics ``ReadSensors`` applies to the same
+    dict, so the bus path and the one-shot path agree about what exists.
+
+    MUTATION CHECK: drop the ``if reading.sensor_id in values`` filter and this
+    fails with a KeyError, naming the absent sensor.
+    """
+    catalog = [_reading("cpu:temp"), _reading("disk:temp", label="SSD")]
+
+    out = apply_live_values(catalog, {"cpu:temp": 40.0})
+
+    assert [r.sensor_id for r in out] == ["cpu:temp"]
+
+
+def test_a_catalog_read_under_celsius_renders_under_fahrenheit() -> None:
+    """And back, because the user can flip the toggle twice.
+
+    The catalog is cached per view and refreshed on view-switch; the broadcast
+    self-describes its unit.  Without this the panel keeps labelling a 122°F
+    reading "°C" until the user navigates away and back.
+
+    MUTATION CHECK: pass ``unit=reading.unit`` straight through and the first
+    assertion fails, naming the reading that lied about its unit.
+    """
+    catalog = [_reading("cpu:temp", unit="°C")]
+
+    hot = apply_live_values(catalog, {"cpu:temp": 122.0}, temp_unit="F")
+    assert (hot[0].value, hot[0].unit) == (122.0, "°F")
+
+    back = apply_live_values(hot, {"cpu:temp": 50.0}, temp_unit="C")
+    assert (back[0].value, back[0].unit) == (50.0, "°C")
+
+
+def test_live_values_ignore_a_sensor_the_catalog_never_had() -> None:
+    """A broadcast key with no catalog row is not invented.
+
+    The catalog is the identity source: a row needs a label, a category and a
+    unit, and the broadcast carries none of them.  A sensor that appears at
+    runtime arrives on the next explicit refresh, not as an unlabelled row.
+    """
+    out = apply_live_values([_reading("cpu:temp")],
+                           {"cpu:temp": 40.0, "gpu:temp": 70.0})
+
+    assert [r.sensor_id for r in out] == ["cpu:temp"]

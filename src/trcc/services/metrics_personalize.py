@@ -6,7 +6,7 @@ Fahrenheit conversion when the user picks °F, and disk-key filtering
 when the user disables HDD — belong at the metrics broadcast boundary,
 not scattered across every renderer.  This module is that boundary.
 
-Two callers in next/:
+Callers:
 
   * :func:`trcc.services.metrics_loop.MetricsLoop._publish_once` —
     the periodic poll that publishes ``SensorsUpdated`` to the event
@@ -17,8 +17,11 @@ Two callers in next/:
     dispatch used by CLI / API / tests and by the GUI's
     view-switch immediate-populate path.  Returns the same shape the
     broadcast carries so periodic + one-shot agree.
+  * :func:`trcc.ui.presentation.sensor_display.apply_live_values` —
+    the GUIs merge broadcast VALUES onto the sensor catalog they hold,
+    so a list that shows a unit renders the one the values are in.
 
-Pure function — no I/O, no state, no settings dependency.  The caller
+Pure functions — no I/O, no state, no settings dependency.  The caller
 supplies the prefs; this module just applies them.  Matches legacy's
 ``PollingMetricsLoop._poll_metrics`` lines 116-145 which did exactly
 this work at the same architectural location.
@@ -85,6 +88,42 @@ def personalize_readings(
             value = celsius_to_fahrenheit(value)
         out[key] = value
     return out
+
+
+def personalize_unit(
+    sensor_id: str,
+    unit: str,
+    *,
+    temp_unit: TempUnit = "C",
+) -> str:
+    """The unit SYMBOL a personalized reading declares.
+
+    The value half of this decision is :func:`personalize_readings`, which
+    converts every ``:temp`` key when the user picks °F.  The symbol beside it
+    is the same fact stated for a reader, and it lived inline in
+    ``ReadSensors.execute`` with nothing asserting it — so a second consumer
+    (the GUIs, which cache a sensor CATALOG and refresh only its values from
+    the broadcast) had to either re-spell the rule or render "122.0 °C".
+
+    Keyed on the SAME ``:temp`` predicate the value conversion uses, never on
+    the unit alone: a reading that reads "°C" without a ``:temp`` id is not
+    converted, and relabelling it would make the pair lie.
+
+    Symmetric on purpose.  A catalog built under °F has to come back to °C
+    when the user does, and a one-directional rule is one nobody re-reads.
+
+    >>> personalize_unit("cpu:temp", "°C", temp_unit="F")
+    '°F'
+    >>> personalize_unit("cpu:temp", "°F", temp_unit="C")
+    '°C'
+    >>> personalize_unit("cpu:usage", "%", temp_unit="F")
+    '%'
+    """
+    frame_log.debug("personalize_unit: %s unit=%s temp_unit=%s",
+                    sensor_id, unit, temp_unit)
+    if not sensor_id.endswith(":temp") or unit not in ("°C", "°F"):
+        return unit
+    return "°F" if temp_unit == "F" else "°C"
 
 
 def personalize_metrics(

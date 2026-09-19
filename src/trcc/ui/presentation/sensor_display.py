@@ -9,12 +9,25 @@ of the widgets so they're shared + unit-testable without Qt:
 * ``group_sensors`` — adapt discover()'s :class:`SensorReading` list into
   :class:`SensorInfo` (source inferred from the id prefix), grouped + ordered by
   hardware source, ready for the picker to render as headers + rows.
+* ``apply_live_values`` — merge a ``SensorsUpdated`` broadcast onto a sensor
+  CATALOG, so a view can ride the bus instead of polling ``ReadSensors`` on a
+  private timer.
+
+The third exists because the two halves of a sensor row have different
+lifetimes.  Identity — id, label, category, unit — comes from ``discover()``
+and changes when hardware does; VALUES change every tick.  The broadcast
+carries values only (``SensorsUpdated.readings`` is ``{sensor_id: value}``), so
+a view that renders a unit or a category needs both, and the merge is the same
+in every view that does.
 """
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 
-from ...core.models import SensorInfo, SensorReading
+from ...core.models import SensorInfo, SensorReading, TempUnit
+from ...services.metrics_personalize import personalize_unit
 
 log = logging.getLogger(__name__)
 
@@ -92,3 +105,38 @@ def group_sensors(
     log.info("group_sensors: %d readings → %d groups: %s", len(readings), len(result),
              ", ".join(f"{h}({len(g)})" for h, g in result))
     return result
+
+
+def apply_live_values(
+    catalog: Sequence[SensorReading],
+    values: Mapping[str, float],
+    *,
+    temp_unit: TempUnit = "C",
+) -> list[SensorReading]:
+    """Return *catalog* carrying the broadcast's ``values``.
+
+    The bus half of what ``ReadSensors`` does in one dispatch: a view holds the
+    catalog it last read and refreshes only the numbers, on the cadence the
+    user configured (``refresh_interval_s``) rather than on a timer of its own.
+
+    **A sensor missing from ``values`` is DROPPED, not zeroed** — the same
+    semantics ``ReadSensors`` applies to the same dict, and the reason the user
+    disabling HDD makes ``disk:*`` rows disappear rather than read 0.  A row
+    that cannot be read is absent; ``0`` is a reading.
+
+    The unit comes from :func:`personalize_unit`, so a catalog cached under one
+    temperature preference renders correctly under the other without being
+    re-fetched.
+    """
+    out = [
+        replace(
+            reading,
+            value=values[reading.sensor_id],
+            unit=personalize_unit(reading.sensor_id, reading.unit,
+                                  temp_unit=temp_unit),
+        )
+        for reading in catalog if reading.sensor_id in values
+    ]
+    log.debug("apply_live_values: %d catalog × %d values → %d reading(s), "
+              "temp_unit=%s", len(catalog), len(values), len(out), temp_unit)
+    return out

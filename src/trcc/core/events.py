@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .logs import per_frame
-from .models import HardwareMetrics
+from .models import HardwareMetrics, TempUnit
 
 log = logging.getLogger(__name__)
 frame_log = per_frame(__name__)
@@ -304,7 +304,10 @@ class SensorsUpdated(Event):
     """
     reading_count: int = 0
     readings: dict[str, float] = field(default_factory=dict)
-    temp_unit: str = "C"
+    # ``TempUnit``, not ``str``: the docstring above has always promised "C" or
+    # "F", and a consumer that merges this onto a cached sensor catalog has to
+    # pass it to ``personalize_unit``, which accepts exactly those two.
+    temp_unit: TempUnit = "C"
     # Typed snapshot the OS dispatcher produces this tick, personalized to
     # the same prefs as ``readings``.  The app OBSERVES this — it never
     # re-polls; subscribers read ``metrics.cpu_temp`` directly.  ALWAYS a

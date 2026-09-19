@@ -1,14 +1,21 @@
 """SystemPanel — host for the system boxes.
 
 Stacks one :class:`~.system.SystemBox` per concern and owns two things no
-box can own alone: the vertical layout, and the single periodic timer.
+box can own alone: the vertical layout, and the one live subscription.
 
 Each box states its own ``TITLE`` and ``STRETCH``, so adding one is a line
-in ``_setup_ui`` and nothing else.  The timer is wired to exactly ONE named
-method — ``SensorsBox.refresh_live`` — rather than looped over every box, so
-``ListMemorySlots`` (which shells out to ``dmidecode``) cannot drift onto a
-two-second tick and the log a reporter pastes gains one record per tick
-rather than six.
+in ``_setup_ui`` and nothing else.  The broadcast is wired to exactly ONE
+named method — ``SensorsBox.on_sensors_updated`` — rather than looped over
+every box, so ``ListMemorySlots`` (which shells out to ``dmidecode``) cannot
+drift onto the live path and the log a reporter pastes gains one record per
+broadcast rather than six.
+
+**It is a subscription, not a timer.**  This panel held a hardcoded 2 s
+``QTimer`` that ignored ``refresh_interval_s`` entirely, so it re-read sensors
+ten times per broadcast at a 10 s interval and rendered half as often as data
+arrived at 1 s.  ``MetricsLoop`` already publishes ``SensorsUpdated`` on the
+user's cadence and ``ui/gui`` has observed it all along; this was the last
+qtgui surface polling a datum the bus was already delivering.
 
 Replaces the 28-method monolith this file used to hold: qtgui's only god
 class, and a 65% outlier in its own skin.
@@ -17,6 +24,7 @@ from __future__ import annotations
 
 import logging
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout
 
 from ..base import BasePanel
@@ -30,8 +38,6 @@ from .system import (
 )
 
 log = logging.getLogger(__name__)
-
-_SENSOR_REFRESH_MS = 2000
 
 
 class SystemPanel(BasePanel):
@@ -54,11 +60,14 @@ class SystemPanel(BasePanel):
             outer.addWidget(box, box.STRETCH)
         outer.addLayout(self._build_action_row())
 
-        log.info("_setup_ui: six boxes built; ticking sensors every %d ms",
-                 _SENSOR_REFRESH_MS)
-        self.start_periodic_updates(
-            _SENSOR_REFRESH_MS, self._sensors.refresh_live,
+        # Queued, like every other bridge connection: ``SensorsUpdated`` is
+        # published from the MetricsLoop thread and Qt widgets are main-thread
+        # only.
+        self._bus.sensors_updated.connect(
+            self._sensors.on_sensors_updated,
+            type=Qt.ConnectionType.QueuedConnection,
         )
+        log.info("_setup_ui: six boxes built; sensors ride SensorsUpdated")
 
     def _build_action_row(self) -> QHBoxLayout:
         """The two health actions, kept below the boxes they act on."""

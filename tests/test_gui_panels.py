@@ -285,13 +285,21 @@ def test_about_panel_constructs(gui_app: App) -> None:
 
 
 def test_system_panel_constructs(gui_app: App, qtbot) -> None:
-    """The host stacks six boxes and ticks exactly ONE of them.
+    """The host stacks six boxes and refreshes exactly ONE of them.
 
-    The timer wiring is the load-bearing half: ``ListMemorySlots`` shells out
-    to ``dmidecode``, so a host that refreshed every box on the tick would run
-    a root subprocess every two seconds.  Asserting the layout alone cannot
-    see that, which is why the callback identity is checked here.
+    The live wiring is the load-bearing half: ``ListMemorySlots`` shells out
+    to ``dmidecode``, so a host that refreshed every box would run a root
+    subprocess on every update.  Asserting the layout alone cannot see that,
+    which is why what the live path dispatches is checked here.
+
+    The TRIGGER changed on 2026-09-19 and the property did not.  The panel
+    held a 2 s ``QTimer`` that ignored ``refresh_interval_s``; sensors now ride
+    ``SensorsUpdated``, so the two live paths are a view-switch (identity, one
+    ``ReadSensors``) and a broadcast (values, no dispatch at all).  Both are
+    driven below — the second is the stronger statement the timer could never
+    make.
     """
+    from trcc.core.events import SensorsUpdated
     from trcc.ui.qtgui.panels.system_panel import SystemPanel
 
     panel = SystemPanel(gui_app, _bus(gui_app))
@@ -311,12 +319,23 @@ def test_system_panel_constructs(gui_app: App, qtbot) -> None:
 
         box.dispatch = spy                # pyright: ignore[reportAttributeAccessIssue]
 
-    panel._updates._timer.timeout.emit()  # one real tick
+    panel.show()                          # a real view-switch
+    qtbot.waitExposed(panel)
 
     assert set(ticked) == {"ReadSensors"}, (
-        "a tick must dispatch ReadSensors and NOTHING else; "
+        "opening the panel must dispatch ReadSensors and NOTHING else; "
         f"got {sorted(set(ticked))} — ListMemorySlots on this list is "
-        "dmidecode running as root every two seconds"
+        "dmidecode running as root every time the user opens the panel"
+    )
+
+    ticked.clear()
+    gui_app.events.publish(SensorsUpdated(
+        reading_count=1, readings={"cpu:temp": 44.0}, temp_unit="C"))
+    qtbot.wait(50)
+
+    assert ticked == [], (
+        "a broadcast must be RENDERED, not re-read: the panel was handed the "
+        f"values and dispatched {sorted(set(ticked))} anyway"
     )
 
 

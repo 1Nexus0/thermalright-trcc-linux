@@ -394,6 +394,7 @@ class ReadSensors(Query[SensorsResult]):
         from ...services.metrics_personalize import (
             personalize_metrics,
             personalize_readings,
+            personalize_unit,
         )
         from ..models import SensorReading
 
@@ -416,25 +417,22 @@ class ReadSensors(Query[SensorsResult]):
         )
         # Filter descriptors to only those that survived
         # personalization (HDD-disable drops disk:* keys entirely so
-        # callers don't see them at value=0).  Temperature unit
-        # override: if the sensor is a temp and the user picked °F,
-        # the value is already in °F — adjust .unit so callers that
-        # render unit suffixes don't mislabel.
-        readings: list[SensorReading] = []
-        is_fahrenheit = s.temp_unit == "F"
-        for d in descriptors:
-            if d.sensor_id not in personalized:
-                continue
-            unit = d.unit
-            if is_fahrenheit and d.sensor_id.endswith(":temp") and unit == "°C":
-                unit = "°F"
-            readings.append(SensorReading(
+        # callers don't see them at value=0).  The unit SYMBOL comes from
+        # ``personalize_unit`` rather than a rule spelled here: the GUIs
+        # cache this catalog and refresh only its VALUES from the
+        # broadcast, so both paths have to label a reading identically or
+        # one of them renders "122.0 °C".
+        readings: list[SensorReading] = [
+            SensorReading(
                 sensor_id=d.sensor_id,
                 category=d.category,
                 value=personalized[d.sensor_id],
-                unit=unit,
+                unit=personalize_unit(d.sensor_id, d.unit,
+                                      temp_unit=s.temp_unit),
                 label=d.label,
-            ))
+            )
+            for d in descriptors if d.sensor_id in personalized
+        ]
         # The gap between descriptors and readings is where a metric goes
         # missing, and it is normal (hdd_enabled=False drops every disk:* key)
         # right up until it is not.  Counts at DEBUG; nothing surviving at all

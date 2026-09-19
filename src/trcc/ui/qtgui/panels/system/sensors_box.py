@@ -1,19 +1,31 @@
 """SensorsBox — the live readings, the HDD toggle, and the DRAM slots.
 
-**This is the only box on a timer.**  :meth:`refresh_live` is what
-:class:`SystemPanel` hands to ``start_periodic_updates``, and it reads
-``ReadSensors`` and nothing else.
+**This is the only box that moves, and it moves on the BUS.**  It used to be
+the only box on a timer, at a hardcoded 2 s that ignored the user's
+``refresh_interval_s`` entirely: at 10 s it re-read ten times per broadcast,
+at 1 s it rendered half as often as data arrived.  ``MetricsLoop`` is the OS
+dispatcher — one sweep, one broadcast — and this box now observes it, the way
+``ui/gui`` always has.
+
+**Two feeders, one render, because the halves have different lifetimes.**
+Identity (id, label, category, unit) comes from ``ReadSensors`` and changes
+when hardware does; VALUES change every tick, and the broadcast carries values
+only.  So :meth:`refresh_live` reads the catalog on build and on every
+view-switch, :meth:`on_sensors_updated` merges each broadcast onto it, and both
+end in :meth:`_render`.
 
 The HDD flag and the DRAM slot list are loaded ONCE, in ``_build_ui``, and
-deliberately stay out of :meth:`refresh_live`: ``ListMemorySlots`` shells
-out to ``dmidecode`` under a privilege helper, so folding it onto the tick
-would run a root subprocess every two seconds for a list that cannot change
-without opening the case.
+deliberately stay out of both: ``ListMemorySlots`` shells out to ``dmidecode``
+under a privilege helper, so folding it onto the broadcast would run a root
+subprocess every interval for a list that cannot change without opening the
+case.
 """
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import QCheckBox, QLabel, QListWidget, QListWidgetItem, QVBoxLayout
 
 from .....core.commands import (
@@ -22,6 +34,9 @@ from .....core.commands import (
     ReadSensors,
     SetHddEnabled,
 )
+from .....core.events import SensorsUpdated
+from .....core.models import SensorReading
+from ....presentation.sensor_display import apply_live_values
 from ._base import SystemBox
 
 log = logging.getLogger(__name__)
@@ -38,6 +53,10 @@ class SensorsBox(SystemBox):
 
     def _build_ui(self) -> None:
         log.debug("_build_ui")
+        # Identity for every row the broadcast can carry a value for.  Empty
+        # until the first read, so a broadcast arriving first renders nothing
+        # rather than inventing unlabelled rows.
+        self._catalog: list[SensorReading] = []
         layout = QVBoxLayout(self)
         # Whether disk metrics reach sensor broadcasts at all.  Spinning a
         # sleeping disk to read its temperature is a real cost, which is why
@@ -64,11 +83,46 @@ class SensorsBox(SystemBox):
         self.refresh_live()
 
     def refresh_live(self) -> None:
-        """The ONE method on the two-second timer.  Readings only."""
+        """Re-read the catalog AND show it.  The explicit path.
+
+        Called on build and on every view-switch (:meth:`showEvent`), never on
+        a clock: one dispatch when the user opens the panel, so it populates
+        instead of showing whatever was on screen when it last left.
+        """
         log.debug("refresh_live")
         r = self.dispatch(ReadSensors())
+        self._catalog = list(r.readings)
+        self._render(r.readings)
+
+    def on_sensors_updated(self, event: SensorsUpdated) -> None:
+        """Render one broadcast.  Wired by :class:`SystemPanel`.
+
+        **The visibility gate is here and not on the host**, because a Qt
+        signal fires whether or not anyone is looking — unlike the timer this
+        replaces, which ``BasePanel.hideEvent`` suspended.  Without it,
+        retiring the timer would quietly undo the hidden-panel fix.
+
+        Per-broadcast, so DEBUG.
+        """
+        if not self.isVisible():
+            log.debug("on_sensors_updated: skipped — box is off screen")
+            return
+        log.debug("on_sensors_updated: %d value(s), temp_unit=%s",
+                  event.reading_count, event.temp_unit)
+        self._render(apply_live_values(
+            self._catalog, event.readings, temp_unit=event.temp_unit))
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Repopulate the moment the panel comes back on screen."""
+        log.debug("showEvent: back on screen — re-reading the catalog")
+        super().showEvent(event)
+        self.refresh_live()
+
+    def _render(self, readings: Sequence[SensorReading]) -> None:
+        """The ONE writer of the readings list — both feeders end here."""
+        log.debug("_render: %d reading(s)", len(readings))
         self._list.clear()
-        for reading in r.readings:
+        for reading in readings:
             self._list.addItem(QListWidgetItem(
                 f"{reading.sensor_id:30}  "
                 f"{reading.value:>10.2f} {reading.unit:<6}  "
