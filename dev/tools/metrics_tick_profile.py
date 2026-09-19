@@ -39,24 +39,39 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 REPORT_S = 20.0
 
 _lock = threading.Lock()
-_total: dict[str, float] = defaultdict(float)
+_cpu: dict[str, float] = defaultdict(float)
+_wall: dict[str, float] = defaultdict(float)
 _count: dict[str, int] = defaultdict(int)
 
 
-def _record(stage: str, secs: float) -> None:
+def _thread_cpu() -> float:
+    """CPU time burned by THIS thread.
+
+    ``perf_counter`` was the first cut and it is the wrong clock here: the
+    sweep runs on the poll thread while the render loop composites at 15 fps,
+    so wall time counts every moment the thread sat descheduled.  Measured the
+    same sweep two ways -- 47-53 ms wall inside the GUI against 16.4 ms of
+    actual CPU -- and the wall figure got quoted beside CPU%-derived numbers,
+    which made the sweep look like the biggest block when it is not.
+    """
+    return time.clock_gettime(time.CLOCK_THREAD_CPUTIME_ID)
+
+
+def _record(stage: str, cpu: float, wall: float) -> None:
     with _lock:
-        _total[stage] += secs
+        _cpu[stage] += cpu
+        _wall[stage] += wall
         _count[stage] += 1
 
 
 def _timed(stage: str, fn):
-    """Wrap *fn* so every call adds its wall time to *stage*."""
+    """Wrap *fn* so every call adds its CPU (and wall) time to *stage*."""
     def wrapper(*a, **k):
-        t0 = time.perf_counter()
+        c0, w0 = _thread_cpu(), time.perf_counter()
         try:
             return fn(*a, **k)
         finally:
-            _record(stage, time.perf_counter() - t0)
+            _record(stage, _thread_cpu() - c0, time.perf_counter() - w0)
     return wrapper
 
 
@@ -94,19 +109,34 @@ def install_probes() -> None:
         name = type(event).__name__
         if name != "SensorsUpdated":
             return real_publish(self, event)
-        t0 = time.perf_counter()
+        c0, w0 = _thread_cpu(), time.perf_counter()
         for handler in list(self._handlers[type(event)]):
-            h0 = time.perf_counter()
+            hc, hw = _thread_cpu(), time.perf_counter()
             try:
                 handler(event)
             except Exception:
                 logging.getLogger(__name__).exception("handler failed")
             _record(f"  subscriber: {_handler_name(handler)}",
-                    time.perf_counter() - h0)
+                    _thread_cpu() - hc, time.perf_counter() - hw)
         _record("publish SensorsUpdated (all subscribers)",
-                time.perf_counter() - t0)
+                _thread_cpu() - c0, time.perf_counter() - w0)
 
     ev.EventBus.publish = publish
+
+    # The bus forwarder emits a QUEUED Qt signal, so everything below runs on
+    # the GUI thread AFTER publish() has returned -- outside the per-subscriber
+    # timing, and therefore missing from the first version of this tool.
+    from trcc.ui.gui import trcc_app as ta
+    from trcc.ui.gui import uc_system_info as usi
+
+    ta.TRCCApp._on_bus_sensors_updated = _timed(
+        "GUI: TRCCApp._on_bus_sensors_updated",
+        ta.TRCCApp._on_bus_sensors_updated)
+    ta.TRCCApp._fan_out_metrics = _timed(
+        "GUI:   _fan_out_metrics", ta.TRCCApp._fan_out_metrics)
+    usi.UCSystemInfo.update_from_metrics = _timed(
+        "GUI:     UCSystemInfo.update_from_metrics",
+        usi.UCSystemInfo.update_from_metrics)
 
 
 def report_forever() -> None:
@@ -115,14 +145,16 @@ def report_forever() -> None:
         time.sleep(REPORT_S)
         elapsed = time.monotonic() - started
         with _lock:
-            rows = sorted(_total.items(), key=lambda kv: -kv[1])
-            counts = dict(_count)
+            rows = sorted(_cpu.items(), key=lambda kv: -kv[1])
+            counts, wall = dict(_count), dict(_wall)
         print(f"\n=== metrics tick breakdown after {elapsed:.0f}s ===", flush=True)
-        print(f"{'stage':<52}{'calls':>7}{'ms/call':>10}{'ms/s':>9}", flush=True)
+        print(f"{'stage':<46}{'calls':>6}{'cpu ms/call':>13}"
+              f"{'wall ms/call':>14}{'cpu ms/s':>10}", flush=True)
         for stage, total in rows:
-            n = counts[stage]
-            print(f"{stage:<52}{n:>7}{1000*total/max(n,1):>10.2f}"
-                  f"{1000*total/elapsed:>9.2f}", flush=True)
+            n = max(counts[stage], 1)
+            print(f"{stage:<46}{counts[stage]:>6}{1000*total/n:>13.2f}"
+                  f"{1000*wall[stage]/n:>14.2f}{1000*total/elapsed:>10.2f}",
+                  flush=True)
 
 
 def main() -> int:
