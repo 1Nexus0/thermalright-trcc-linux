@@ -161,9 +161,10 @@ not the bulk path.
 - **SCSI**: no longer a gap — disassembled 2026-09-18, see
   [`AUDIT_SCSI.md`](AUDIT_SCSI.md).  Every command word and chunk size matches
   our `ScsiLcd` byte for byte across all three panel classes.
-- **This document's component is MANAGED, and the vendor copied us.** 2.1.4
-  shows ad-hoc copy-paste from this project, which shipped ~6 months before
-  2.1.6.  `.NET` assemblies cannot be dated (Roslyn writes a content hash into
+- **This document's component is MANAGED, and POST-DATES our public release.**
+  `USBLCDNEW.dll` is dated 2026-05-21 against our first commit of 2026-02-05
+  (2.1.4, the release we built FROM, is Dec 2025 - Jan 2026).  Its PE stamp
+  cannot confirm that — `.NET` writes a content hash into
   the PE timestamp: `TRCC.exe` reads "2061", `USBLCDNEW.dll` "2092"), so
   agreement between `USBLCDNEW.dll` and our code is NOT independent
   confirmation — it may be our own reflection.  Disagreement still is

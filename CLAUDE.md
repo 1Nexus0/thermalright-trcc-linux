@@ -251,15 +251,20 @@ Measuring 163 green tests against a 2.0.3 tree proved the whole oracle suite
 passes on the wrong program. That is why the row above ends in a gate, not a
 reminder.
 
-### The oracle's authority is ASYMMETRIC — the vendor copied US
+### The oracle's authority is ASYMMETRIC — check the DATE before citing it
 
-2.1.6 shipped roughly six months after this project was out and gaining
-traction, and **2.1.4 shows ad-hoc copy-paste from our code**. So "the C#
-oracle" is not one authority:
+**2.1.4 is the release this project was built FROM** (its tree is dated
+Dec 2025 - Jan 2026; our first commit is 2026-02-05). **2.1.6 came after**, and
+its managed components are dated *after this project was public and gaining
+traction* — `TRCC.exe` 2026-06-01, `USBLCDNEW.dll` 2026-05-21. We rebased onto
+it because it added devices, not because it was a cleaner source.
 
-* **Agreement with the MANAGED assemblies (`TRCC.exe`, `USBLCDNEW.dll`) proves
-  nothing.** It may be our own reflection. Any audit measuring our coverage
-  *against* them is, in the areas they took, measuring against a mirror.
+So "the C# oracle" is not one authority:
+
+* **Agreement with 2.1.6's MANAGED assemblies is not automatically
+  independent.** They post-date our public release, so in any area the vendor
+  took from us, an audit measuring our coverage *against* them measures a
+  mirror. Anything dated before 2026-02-05 cannot be downstream of us.
 * **Disagreement is still informative** — they had a reason.
 * **Real glass is the only unconditional oracle**
   ([[feedback_no_definites_without_hardware]]).

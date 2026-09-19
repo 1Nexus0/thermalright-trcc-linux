@@ -14,9 +14,11 @@ Ghidra 12.0.1 on **2026-09-18**; this is what it does.
 
 ## Provenance — and why this one IS independent
 
-**The vendor copied us.**  2.1.4 shows ad-hoc copy-paste from this project,
-which shipped roughly six months before 2.1.6.  So agreement between our code
-and the *managed* assemblies proves nothing — it may be our own reflection.
+**Check the date before citing a component.**  2.1.4 is the release this
+project was built FROM (tree dated Dec 2025 - Jan 2026; our first commit is
+2026-02-05).  2.1.6's MANAGED components post-date our public release —
+`TRCC.exe` 2026-06-01, `USBLCDNEW.dll` 2026-05-21 — so agreement with them is
+not automatically independent confirmation.
 
 This binary is the exception, on two independent signals:
 
