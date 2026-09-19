@@ -1,29 +1,38 @@
 """Where does ONE metrics tick's time go?  Measured inside the real GUI.
 
-The refresh interval is the biggest single user-facing CPU lever on this app:
-measured on a 320x320 SCSI panel playing a 15 fps video with the window in the
-tray, the whole process costs
+The refresh interval is the biggest single user-facing CPU lever on this app,
+so the question is what one tick actually costs and which stage owns it.
 
-    1 s interval   13.28%   of one core
-    2 s interval   10.90%
-    10 s interval   8.03%
+**No figures are quoted in this docstring on purpose.**  They used to be, and
+they went stale without anyone noticing: the header claimed ~5.8% of a core
+per Hz and a 16.6 ms sysfs sweep long after ``c3c07256`` (every tick read the
+sensors twice) and ``fa4805d0`` (board temps re-read per tick) had moved both.
+A number with no commit and no box beside it is unfalsifiable prose, and this
+file is an instrument -- it should PRODUCE numbers, not assert them.  Record
+what you measure in ``memory/`` with the commit you measured at, and re-run
+this rather than trusting a past run.
 
-which is a straight line -- about **5.8% of a core per Hz**, i.e. ~58 ms of CPU
-for every tick.  The sysfs sweep is only **16.6 ms** of that (timed directly,
-steady state), so roughly two thirds of a tick is spent somewhere nobody has
-ever looked.  Guessing produced two wrong answers already: the GUI fan-out is
-ALREADY visibility-gated (``trcc_app.py`` checks ``isVisible()`` per panel), and
-per-frame logging was fixed without moving this number.
+Guessing has already produced two wrong answers here: the GUI fan-out is
+ALREADY visibility-gated (``trcc_app.py`` checks ``isVisible()`` per panel),
+and per-frame logging was fixed without moving this number.
 
 So: time every stage, in the shipping process, at the real cadence.
 
     PYTHONPATH=src python3.12 dev/tools/metrics_tick_profile.py           # tray
     PYTHONPATH=src python3.12 dev/tools/metrics_tick_profile.py --shown
+    PYTHONPATH=src python3.12 dev/tools/metrics_tick_profile.py --selftest
+
+**Run ``--selftest`` before trusting any number this prints.**  It checks the
+clock against a known answer from outside the app -- that burning CPU is
+counted and that SLEEPING is not.  That distinction is the whole instrument:
+this tool timed WALL until ``5dddca87``, and wall time counts every moment a
+thread sat descheduled, which made the sweep look like the biggest block when
+it is not.
 
 Needs a real device.  Prints a breakdown every REPORT_S to stdout and keeps
 running; Ctrl-C or SIGTERM to stop.  Timings are wall time on the calling
-thread -- the sweep runs on the poll thread and the publish on the loop thread,
-so their totals are NOT additive with each other, only within a stage.
+thread -- the sweep runs on the poll thread and the publish on the loop
+thread, so their totals are NOT additive with each other, only within a stage.
 """
 from __future__ import annotations
 
@@ -157,6 +166,51 @@ def report_forever() -> None:
                   flush=True)
 
 
+def _selftest() -> int:
+    """A known answer from OUTSIDE the app, measured the SAME way as the app.
+
+    Two properties, and the second is the one that matters.  A clock that
+    counts BLOCKED time reports a thread's idle wait as cost, which is exactly
+    how ``cProfile``'s ``tottime`` attributed 15.6 s to an ``ioctl`` that burns
+    no CPU, and how this tool itself read 47-53 ms for a 16.4 ms sweep before
+    ``5dddca87``.
+
+      1. burning ~200 ms of CPU must READ as ~200 ms
+      2. sleeping ~200 ms must read as ~0 ms
+
+    If (2) fails, this is a wall clock wearing a CPU clock's name and no
+    number this tool prints can be trusted.
+    """
+    burn_budget = 0.200
+
+    t0 = _thread_cpu()
+    end = time.perf_counter() + burn_budget
+    x = 0
+    while time.perf_counter() < end:          # burn, do not sleep
+        x += 1
+    burned = _thread_cpu() - t0
+
+    t1 = _thread_cpu()
+    time.sleep(burn_budget)                   # block, do not burn
+    slept = _thread_cpu() - t1
+
+    print(f"  burn {burn_budget * 1000:.0f} ms of CPU -> clock reports "
+          f"{burned * 1000:6.1f} ms   (want ~{burn_budget * 1000:.0f})")
+    print(f"  sleep {burn_budget * 1000:.0f} ms        -> clock reports "
+          f"{slept * 1000:6.1f} ms   (want ~0)")
+
+    ok = True
+    if not 0.5 * burn_budget <= burned <= 1.5 * burn_budget:
+        print("  FAIL: burned CPU is not being counted")
+        ok = False
+    if slept > 0.25 * burn_budget:
+        print("  FAIL: sleep counted as cost — this is a WALL clock, and every "
+              "number this tool prints is inflated by descheduled time")
+        ok = False
+    print("  selftest PASSED" if ok else "  selftest FAILED")
+    return 0 if ok else 1
+
+
 def main() -> int:
     install_probes()
     from trcc.adapters.infra.logging import configure_logging
@@ -169,6 +223,8 @@ def main() -> int:
                       level=ladder.file, stderr_level=ladder.terminal,
                       per_frame=ladder.per_frame)
     threading.Thread(target=report_forever, daemon=True).start()
+    if "--selftest" in sys.argv:
+        return _selftest()
     return launch(start_hidden="--shown" not in sys.argv)
 
 
