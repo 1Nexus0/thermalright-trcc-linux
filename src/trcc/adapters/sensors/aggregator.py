@@ -210,6 +210,8 @@ class BaselineSensors(SensorEnumerator):
         # reads as infinitely stale — see ``_refresh_if_stale``.
         self._last_poll: float = 0.0
         self._poll_thread: threading.Thread | None = None
+        # Set by ``start_polling``; called after each completed sweep.
+        self._on_sweep: Callable[[], None] | None = None
         self._stop = threading.Event()
         # Set by ``_interval_changed`` to cut a sleeping poll loop's wait
         # short.  ``_stop`` is the authoritative shutdown flag and is checked
@@ -482,10 +484,14 @@ class BaselineSensors(SensorEnumerator):
 
     def start_polling(
         self, interval_s: float = DEFAULT_REFRESH_INTERVAL_S,
+        on_sweep: Callable[[], None] | None = None,
     ) -> None:
         if self._poll_thread and self._poll_thread.is_alive():
             log.debug("sensor polling already running — start_polling ignored")
             return
+        log.info("start_polling: on_sweep listener=%s",
+                 "yes" if on_sweep is not None else "none")
+        self._on_sweep = on_sweep
         # Delegate rather than assign: ``set_interval`` owns the clamp, so a
         # second writer here is how the floor gets skipped on one path only.
         self.set_interval(interval_s)
@@ -517,6 +523,25 @@ class BaselineSensors(SensorEnumerator):
             self._poll_thread.join(timeout=3)
             self._poll_thread = None
 
+    def _notify_swept(self) -> None:
+        """Tell the listener a sweep just produced fresh readings.
+
+        In the ``else`` of the poll's ``try`` deliberately: a sweep that
+        RAISED produced nothing, so waking a consumer would hand it the
+        previous pass's data while implying it is new.
+
+        Guarded because this runs on the poll thread and a listener fault
+        must not kill the cadence every other consumer depends on — the
+        thread dying silently is how ``read_all`` went back to returning
+        boot-time values (#270).
+        """
+        if self._on_sweep is None:
+            return
+        try:
+            self._on_sweep()
+        except Exception:
+            log.exception("sensor sweep listener raised — cadence continues")
+
     def _poll_loop(self) -> None:
         log.debug("_poll_loop: starting interval=%.1fs", self._interval_s)
         # Enter the OS thread context ONCE for the poll thread's lifetime
@@ -528,6 +553,8 @@ class BaselineSensors(SensorEnumerator):
                     self._poll_once()
                 except Exception:
                     log.exception("sensor poll iteration failed")
+                else:
+                    self._notify_swept()
                 # Re-read the interval every pass: ``set_interval`` may have
                 # moved it while this iteration was polling.
                 self._wake.wait(self._interval_s)

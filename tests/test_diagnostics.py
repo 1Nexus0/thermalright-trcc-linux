@@ -2461,6 +2461,13 @@ _ENUMERATOR_LOGGERS: dict[str, frozenset[str]] = {
     # ever becomes per-tick, the cache is what broke, not this record.
     "unsupported": frozenset({"log"}),
     "_optional_reads": frozenset({"log"}),
+    # Per-sweep, and ONLY a failure line — deliberately.  Its whole observable
+    # behaviour is "the sweep listener ran, or it raised"; an entry line would
+    # repeat what ``_poll_once``'s own frame line already said, once per sweep.
+    # The raise is the part a reporter needs, and a listener fault that killed
+    # the poll thread silently is how ``read_all`` went back to boot-time
+    # values (#270), so it stays on the ordinary logger.
+    "_notify_swept": frozenset({"log"}),
     # Lifecycle: fires once per start/stop, so it belongs in the file always.
     "__init__": frozenset({"log"}),
     "start_polling": frozenset({"log"}),

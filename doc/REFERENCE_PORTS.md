@@ -668,7 +668,7 @@ gpus() -> list[GpuSource]
 memory() -> MemorySource
 read_all() -> dict[str, float]
 read_one(sensor_id: 'str') -> float | None
-start_polling(interval_s: 'float' = 2.0) -> None
+start_polling(interval_s: 'float' = 2.0, on_sweep: 'Callable[[], None] | None' = None) -> None
 stop_polling() -> None
 unsupported() -> frozenset[str]
 ```

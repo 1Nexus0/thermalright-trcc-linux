@@ -1147,7 +1147,19 @@ class SensorEnumerator(ABC):
     @abstractmethod
     def start_polling(
         self, interval_s: float = DEFAULT_REFRESH_INTERVAL_S,
-    ) -> None: ...
+        on_sweep: Callable[[], None] | None = None,
+    ) -> None:
+        """Begin refreshing the cache in the background every *interval_s*.
+
+        ``on_sweep`` is called once after each completed sweep, ON THE POLL
+        THREAD, so it must be trivial and must not raise — the only intended
+        argument is an ``Event.set``.  It exists so a consumer can publish
+        when the data actually changed instead of on a clock of its own:
+        two independent timers on one period drift against each other, and
+        measured on 2026-09-19 that cost ``MetricsLoop`` a full interval of
+        staleness on the fakes and a mean of half an interval on real
+        hardware, plus an intermittent first broadcast of an UNSWEPT cache.
+        """
 
     @abstractmethod
     def stop_polling(self) -> None: ...

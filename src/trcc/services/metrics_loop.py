@@ -35,6 +35,11 @@ from ..core.models import MIN_REFRESH_INTERVAL_S
 
 log = logging.getLogger(__name__)
 
+#: How many refresh intervals to wait for a sweep before publishing anyway.
+#: Only reached when the poll thread never started or has died, so it trades a
+#: slower degraded cadence for never tying with a healthy sweep.
+_SWEEP_GRACE = 2.0
+
 
 class MetricsLoop:
     """Background poller that publishes ``SensorsUpdated`` on the bus.
@@ -101,7 +106,13 @@ class MetricsLoop:
         # lifecycle here.
         interval = float(self._app.settings.app.refresh_interval_s)
         try:
-            self._app.platform.sensors().start_polling(interval)
+            # ``self._wake.set`` is the listener: the poll thread calls it
+            # after every completed sweep, so this loop's existing wait wakes
+            # on FRESH DATA rather than on a private clock.  ``_wake`` was
+            # already set by pref changes and by ``stop()``; a sweep is simply
+            # a third setter, which is why this needs no new mechanism.
+            self._app.platform.sensors().start_polling(
+                interval, on_sweep=self._wake.set)
         except Exception as e:
             log.warning(
                 "MetricsLoop: sensors.start_polling(%.2fs) raised %s — "
@@ -157,10 +168,6 @@ class MetricsLoop:
     def _loop(self) -> None:
         events: EventBus = self._app.events
         while not self._stop.is_set():
-            try:
-                self._publish_once(events)
-            except Exception:
-                log.exception("MetricsLoop: poll iteration failed")
             interval = max(
                 MIN_REFRESH_INTERVAL_S,
                 float(self._app.settings.app.refresh_interval_s),
@@ -175,13 +182,43 @@ class MetricsLoop:
             # the setting and needs no branch: ``set_interval`` returns
             # immediately when the value has not moved.
             self._app.platform.sensors().set_interval(interval)
-            # Wait on ``_wake`` (set by stop() OR by an interval
-            # change).  Clear AFTER the wait so a wake-up during the
-            # NEXT iteration's wait is still observed.  ``_stop`` is
-            # the authoritative shutdown flag — check it at the top
-            # of the while loop.
-            self._wake.wait(interval)
+            # WAIT FIRST, then publish — the order is the fix, not a detail.
+            # Publishing at the top of the loop raced the poll thread's first
+            # sweep, and losing that race broadcast the EMPTY bootstrap cache:
+            # measured 1 start in 3, subscribers showed 0 °C and held it for a
+            # full interval.  Waiting first means no broadcast can precede the
+            # sweep that fills it.
+            #
+            # ``_wake`` is set by a completed sweep, by a pref change, and by
+            # ``stop()``.  The wait here is therefore a FALLBACK, not the
+            # clock: it keeps broadcasts flowing if the poll thread never
+            # started (``start_polling`` raised, which warns) or has died.
+            #
+            # That degraded path publishes at HALF the configured rate, not at
+            # the old rate — worth stating plainly rather than calling it
+            # unchanged.  The DATA is still fresh there, because with no poll
+            # thread alive ``read_all`` falls through ``_refresh_if_stale``
+            # and sweeps inline on this thread; it is only the cadence that
+            # halves.  Clear AFTER the wait, so a sweep landing during the
+            # publish below is still observed on the next pass.
+            #
+            # It waits a MULTIPLE of the interval, and that is load-bearing.
+            # A bare ``interval`` ties with the sweep's own period, and
+            # measured it lost the tie: the timeout fired just BEFORE each
+            # sweep, so every cycle published twice — once on the timeout at a
+            # full interval of staleness, once on the sweep at ~0 — which is
+            # the defect this change exists to remove, at double the rate.
+            # The fallback must only fire when a sweep genuinely did not come.
+            self._wake.wait(interval * _SWEEP_GRACE)
             self._wake.clear()
+            # Re-checked because ``stop()`` wakes us too, and a stopping loop
+            # must not emit one last broadcast on its way out.
+            if self._stop.is_set():
+                break
+            try:
+                self._publish_once(events)
+            except Exception:
+                log.exception("MetricsLoop: poll iteration failed")
 
     def _publish_once(self, events: EventBus) -> None:
         """Trigger one sensor read + broadcast.
