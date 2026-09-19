@@ -21,11 +21,13 @@ import threading
 from typing import TYPE_CHECKING
 
 from ..core.led_models import LEDMode
+from ..core.logs import per_frame
 
 if TYPE_CHECKING:
     from ..app import App
 
 log = logging.getLogger(__name__)
+frame_log = per_frame(__name__)
 
 # ~the C# FormLED Timer_event cadence (167 ms); a touch faster for smoothness.
 _TICK_INTERVAL_S = 0.15
@@ -87,7 +89,7 @@ class LedAnimationLoop:
         individual zones (with "select all"/``zone_sync`` off) would never tick
         and stay frozen (#193).
         """
-        log.debug("animating_keys")
+        frame_log.debug("animating_keys")
         keys: list[str] = []
         for key, device in self._app.devices.items():
             if not (device.is_led and device.is_connected):

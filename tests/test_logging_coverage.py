@@ -407,9 +407,17 @@ def _hot_lines() -> list[str]:
     root.addHandler(handler)
     previous = root.level
     root.setLevel(_logging.DEBUG)
-    # Per-frame lines are a separate family, silenced by default and dumped
-    # deliberately at -vvv; they are not what this gate is about.
-    _logging.getLogger("trcc.frame").setLevel(_logging.WARNING)
+    # The frame family is ENABLED here, and that is the point.  This gate gets
+    # its answer from the RENDERED SIZE on paths that run hot, which has
+    # nothing to do with which family carries the line -- an oversized line
+    # costs most exactly when a reporter turns the family on to diagnose
+    # something.  It was silenced until 2026-09-19, when the three hot
+    # emitters below moved onto it (they were 56 of the sensor tick's 57
+    # records); that silencing would have made this gate blind to the very
+    # lines it was written for, and its control test said so.
+    frame = _logging.getLogger("trcc.frame")
+    previous_frame = frame.level
+    frame.setLevel(_logging.DEBUG)
     try:
         readings: dict[str, float] = {}
         for i, key in enumerate([
@@ -439,6 +447,10 @@ def _hot_lines() -> list[str]:
     finally:
         root.removeHandler(handler)
         root.setLevel(previous)
+        # Restored, unlike the level this replaced: WARNING happened to be the
+        # family's default, so leaking it was harmless.  DEBUG is not — it
+        # would un-silence the frame family for every later test in this worker.
+        frame.setLevel(previous_frame)
     return [line for line in buf.getvalue().splitlines() if line.strip()]
 
 

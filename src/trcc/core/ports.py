@@ -948,7 +948,7 @@ class SensorEnumerator(ABC):
         stays here because it is a property of the sources (discrete-first) and
         needs no readings.
         """
-        log.debug("primary_gpu")
+        frame_log.debug("primary_gpu")
         gpus = self.gpus()
         match, self._warned_missing_gpu_key = _resolve_preferred(
             gpus, self._preferred_gpu_key, self._warned_missing_gpu_key, "gpu",

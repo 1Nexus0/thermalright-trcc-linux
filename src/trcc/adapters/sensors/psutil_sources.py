@@ -128,7 +128,7 @@ class ComputedIo:
         # Entry says only that we are polling; the readings it ADDS are logged
         # on the way out.  Dumping the accumulator here cost 1,797 bytes a
         # call -- see ``_store``.
-        log.debug("_poll_disk: now=%s", now)
+        frame_log.debug("_poll_disk: now=%s", now)
         try:
             disk = psutil.disk_io_counters()
         except (psutil.Error, AttributeError, OSError):
@@ -149,7 +149,7 @@ class ComputedIo:
         self._disk_prev = (disk, now)
 
     def _poll_net(self, readings: dict[str, float], now: float) -> None:
-        log.debug("_poll_net: now=%s", now)
+        frame_log.debug("_poll_net: now=%s", now)
         try:
             net = psutil.net_io_counters()
         except (psutil.Error, AttributeError, OSError):

@@ -93,7 +93,15 @@ def _store(readings: dict[str, float], key: str, value: float | None) -> None:
     # than a minute held nothing but the last seconds of sensor polls.
     # This one alone was 4.37 MB over 5,035 lines, 867 bytes to record one
     # number.
-    log.debug("_store: %s=%s", key, value)
+    #
+    # And on the FRAME FAMILY, because trimming the payload was only half of
+    # it.  MEASURED 2026-09-19: this line still fired 53 times per tick -- 53
+    # of that tick's 57 records -- because every reading is stored under up to
+    # three alias keys (indexed, vendor, primary).  ``_read`` already logs the
+    # same ``label = value`` once per actual read and already on the frame
+    # family, so all 53 duplicated a line that WAS gated.  The tick went
+    # 6,217 -> 174 bytes; a 1 MB ring segment, from 5.6 min to 3.3 hours.
+    frame_log.debug("_store: %s=%s", key, value)
     if value is not None:
         readings[key] = float(value)
 
