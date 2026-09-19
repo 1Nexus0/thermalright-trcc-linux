@@ -111,43 +111,61 @@ def test_close_undoes_start_session(app: App) -> None:
 # ── The refresh interval must reach the SWEEP, not just the broadcast ──
 
 
-def test_set_refresh_interval_reaches_the_sensor_sweep(app: App) -> None:
-    """The user's one CPU lever has to move both halves of its own pipeline.
+def test_set_refresh_interval_changes_the_observed_sweep_RATE(app: App) -> None:
+    """The user's one CPU lever, driven end to end and COUNTED.
 
-    ``MetricsLoop`` re-read ``refresh_interval_s`` every iteration, so the
-    BROADCAST obeyed a ``SetRefreshInterval`` immediately.  The sweep feeding
-    it did not: the enumerator's ``_interval_s`` was written once at
-    ``start_polling`` and that call early-returns while its thread is alive.
-    Driven on the real App before the fix, publishes fell 0.50/s -> 0.08/s
-    while sweeps stayed at 0.50/s — a user who raised the interval to save CPU
-    kept paying every sweep, forever.
+    Before the fix, publishes fell 0.50/s -> 0.08/s on a real App while sweeps
+    stayed at 0.50/s: ``_interval_s`` was written once at ``start_polling``,
+    which early-returns while its thread is alive.
 
-    The cadence half of this contract is proved by counting sweeps in
-    ``test_set_interval_changes_the_poll_cadence_while_the_thread_runs``; what
-    is left to prove here is that the SETTING reaches that writer at all.  The
-    existing ``SetRefreshInterval`` tests assert the stored value and the
-    published event, and both pass whether or not the sweep ever hears about
-    it — which is exactly how this survived.
+    This asserts the RATE, not the field.  The first version of this gate read
+    back ``sensors._interval_s`` and called it proved — the same value
+    assertion this very module's docstring criticises, and it cannot tell a
+    stored number from a thread that acted on it.  The seam that actually
+    broke is *Command dispatched -> thread re-cadences*, and only counting
+    sweeps crosses it.
+
+    The bar is arithmetic, not a fudge: at the 2 s default at most 2 sweeps
+    can land in a 3.5 s window, so seeing 3 is reachable ONLY at 1 s.
 
     MUTATION CHECK: drop the ``set_interval`` push from ``MetricsLoop._loop``
-    and this fails holding the boot-time default.
+    and this fails having seen 1-2 sweeps in the window.
     """
     from trcc.core.commands import SetRefreshInterval
     from trcc.core.models import DEFAULT_REFRESH_INTERVAL_S
 
     sensors = app.platform.sensors()
+    sweeps: list[float] = []
+    real = sensors._poll_once
+
+    def counted() -> None:
+        sweeps.append(time.monotonic())
+        real()
+
+    sensors._poll_once = counted                    # type: ignore[method-assign]
+
+    assert DEFAULT_REFRESH_INTERVAL_S >= 2.0, (
+        "this gate's arithmetic assumes the default is >= 2 s; at a faster "
+        "default, 3 sweeps in 3.5 s no longer distinguishes the two cadences"
+    )
+
     app.metrics_loop.start()
     try:
-        assert sensors._interval_s == DEFAULT_REFRESH_INTERVAL_S
+        assert app.dispatch(SetRefreshInterval(seconds=1.0)).ok
 
-        assert app.dispatch(SetRefreshInterval(seconds=7.0)).ok
-
-        deadline = time.monotonic() + 5.0     # bounded: never hang the suite
-        while sensors._interval_s != 7.0 and time.monotonic() < deadline:
+        # Let the push land, then start counting from a clean mark.
+        deadline = time.monotonic() + 3.0
+        while sensors._interval_s != 1.0 and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert sensors._interval_s == 7.0, (
-            f"the sweep never heard about the change — still polling every "
-            f"{sensors._interval_s}s while the broadcast runs at 7.0s"
+        sweeps.clear()
+        window_end = time.monotonic() + 3.5
+        while time.monotonic() < window_end:
+            time.sleep(0.05)
+
+        assert len(sweeps) >= 3, (
+            f"only {len(sweeps)} sweep(s) in 3.5 s — at the {DEFAULT_REFRESH_INTERVAL_S}s "
+            f"default at most 2 can land, so the sweep never took the 1 s "
+            f"cadence the user asked for"
         )
     finally:
         app.metrics_loop.stop()

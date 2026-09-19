@@ -1202,57 +1202,72 @@ class _Noop:
     LOG_LEVEL = logging.DEBUG
 
 
+def _count_real_work(app: App, monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    """Count COMPOSITES and WIRE WRITES, letting the real Command run.
+
+    The first version of these gates stubbed ``_RenderAndSend`` and counted
+    list entries, which proves only that a stub was not called.  What a user
+    feels is the work: a second full ``build_frame`` and a second write to the
+    panel.  Counting those is also what the scratchpad driver did when the bug
+    was found (40/40 -> 0/0), so the gate now measures what the finding
+    measured instead of a weaker proxy for it.
+    """
+    n = {"build_frame": 0, "send": 0}
+    _bf, _send = app.display.build_frame, app.send
+    monkeypatch.setattr(
+        app.display, "build_frame",
+        lambda *a, **k: (n.__setitem__("build_frame", n["build_frame"] + 1),
+                         _bf(*a, **k))[1],
+    )
+    monkeypatch.setattr(
+        app, "send",
+        lambda *a, **k: (n.__setitem__("send", n["send"] + 1),
+                         _send(*a, **k))[1],
+    )
+    return n
+
+
 def test_a_playing_video_suppresses_the_reactive_theme_render(
     rendering_app: App, stub_media: Any, tmp_home: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The video tick owns the wire; a sensor tick must not write it too.
+    """The video tick owns the wire; a sensor tick must not composite too.
 
     ``_DeviceRenderObserver`` guarded an LED device the animation loop owns
     (#202) and one a screencast owns (2026-09-14), but not an LCD whose video
-    timer owns the wire — so a playing video got a full composite AND a full
+    timer owns the wire — so a playing video paid a full composite AND a full
     wire write per ``SensorsUpdated``, on top of the frames its own tick was
     already sending.  The gui's ``_render_and_send`` skips for exactly this
-    reason (``_animation_timer.isActive()``); the App-level observer did not,
-    so every UI paid it.
+    reason; the App-level observer did not, so every UI paid it.
 
     Measured on the mock 320x320 panel before the fix: 40 composites and 40
-    sends for 40 ``SensorsUpdated``, identical with and without a video
-    playing.
-
-    Metrics do not go stale — they refresh FASTER, because the video tick
-    composes them at 15 fps instead of the sensor cadence.  Same argument the
-    screencast guard rests on.
+    sends per 40 ``SensorsUpdated``, identical with and without a video.
 
     MUTATION CHECK: drop the ``video`` arm of ``_cadence_owner`` and this
-    fails with the key rendered.
+    fails having composited.
     """
     from trcc.core.events import SensorsUpdated
 
     theme = _write_video_theme(tmp_home, "owned")
     rendering_app.active_themes[_KEY] = FileContentStore().load(theme)
-    playback = _playback_for(rendering_app, theme / "Theme.mp4")
+    _playback_for(rendering_app, theme / "Theme.mp4")
 
-    rendered: list[str] = []
-    observer = _render_observer(rendering_app)
-    monkeypatch.setattr(
-        observer, "_RenderAndSend",
-        lambda key: (rendered.append(key), _Noop())[1],
-    )
-
+    n = _count_real_work(rendering_app, monkeypatch)
     rendering_app.events.publish(SensorsUpdated(readings={}, metrics=None))
-    assert rendered == [], (
-        "a theme render was dispatched while the video tick owned the wire — "
-        "two producers for one panel"
+
+    assert (n["build_frame"], n["send"]) == (0, 0), (
+        f"the video tick owns the wire, but a sensor tick still did "
+        f"{n['build_frame']} composite(s) and {n['send']} wire write(s) — "
+        f"two producers for one panel"
     )
 
-    # …and it resumes the moment playback ends.
+    # …and the panel is not abandoned: work resumes once playback ends.
     rendering_app.media.unload(_KEY)
     rendering_app.events.publish(SensorsUpdated(readings={}, metrics=None))
-    assert rendered == [_KEY], (
-        "the theme render did not resume after the video was unloaded"
+    assert n["build_frame"] >= 1, (
+        "no composite after the video was unloaded — the guard is stuck on "
+        "and the panel would freeze"
     )
-    assert playback is not None
 
 
 def test_a_PAUSED_video_still_gets_the_reactive_render(
@@ -1263,16 +1278,17 @@ def test_a_PAUSED_video_still_gets_the_reactive_render(
     key off the playback's mere existence.
 
     ``lcd_handler.play_pause`` calls ``_stop_animation_timer`` while
-    ``PauseVideo`` leaves the ``Playback`` object in place.  A guard reading
-    "this device has a playback" would therefore skip the one producer left,
-    and a paused video's clock and metrics would freeze on the panel until the
-    user pressed play — a worse bug than the duplicate it set out to fix.
+    ``PauseVideo`` leaves the ``Playback`` in place, so a paused video has a
+    playback and NO producer.  A guard reading "this device has a playback"
+    would skip the one producer left, and a paused video's clock and metrics
+    would freeze on the panel until the user pressed play — worse than the
+    duplicate it set out to fix.
 
-    Found by driving it, not by reading it: the naive predicate looked right
-    in the source and is wrong on the glass.
+    Found by driving it, not by reading it: the naive predicate looks right in
+    the source and is wrong on the glass.
 
     MUTATION CHECK: change ``_cadence_owner``'s video arm to
-    ``playback is not None`` and this fails with nothing rendered.
+    ``playback is not None`` and this fails having composited nothing.
     """
     from trcc.core.events import SensorsUpdated
 
@@ -1281,16 +1297,10 @@ def test_a_PAUSED_video_still_gets_the_reactive_render(
     playback = _playback_for(rendering_app, theme / "Theme.mp4")
     playback.paused = True
 
-    rendered: list[str] = []
-    observer = _render_observer(rendering_app)
-    monkeypatch.setattr(
-        observer, "_RenderAndSend",
-        lambda key: (rendered.append(key), _Noop())[1],
-    )
-
+    n = _count_real_work(rendering_app, monkeypatch)
     rendering_app.events.publish(SensorsUpdated(readings={}, metrics=None))
 
-    assert rendered == [_KEY], (
-        "a paused video's overlay was not refreshed — nothing else is ticking "
-        "this panel, so the metrics are frozen on the glass"
+    assert n["build_frame"] >= 1, (
+        "a paused video's overlay was not re-composited — nothing else is "
+        "ticking this panel, so the metrics are frozen on the glass"
     )
