@@ -29,12 +29,17 @@ class PeriodicUpdater:
     and a closed panel can't keep ticking.
     """
 
-    __slots__ = ("_owner", "_timer")
+    __slots__ = ("_owner", "_timer", "_wanted")
 
     def __init__(self, owner: QWidget) -> None:
         log.debug("__init__: owner=%s", owner)
         self._owner = owner
         self._timer: QTimer | None = None
+        # Whether the OWNER wants ticks at all, as opposed to whether the
+        # timer happens to be running.  ``suspend``/``resume`` move the
+        # second without touching the first, so a panel hidden and shown
+        # again resumes while one that deliberately stopped stays stopped.
+        self._wanted = False
 
     def start(self, interval_ms: int, callback: Callable[[], None]) -> None:
         """Call *callback* every *interval_ms* ms on the Qt main thread.
@@ -57,14 +62,43 @@ class PeriodicUpdater:
                 # Nothing was connected — a fresh timer, nothing to undo.
                 pass
         self._timer.timeout.connect(callback)
+        self._wanted = True
         self._timer.start(interval_ms)
 
     def stop(self) -> None:
-        """Stop ticking.  A no-op if never started."""
+        """Stop ticking for good.  A no-op if never started.
+
+        Clears the WANT, so a later ``resume`` will not restart it — that is
+        what separates this from :meth:`suspend`.
+        """
         log.info("%s.stop_periodic_updates: active=%s",
                  type(self._owner).__name__, self.is_active)
+        self._wanted = False
         if self._timer is not None:
             self._timer.stop()
+
+    def suspend(self) -> None:
+        """Pause ticking WITHOUT forgetting that the owner wants it.
+
+        For a panel that has left the screen: qtgui shows one panel at a time
+        in a ``QStackedWidget``, and measured 2026-09-19 the hidden ones kept
+        dispatching ``BuildPreview`` (a real composite) and ``ReadSensors`` at
+        exactly the same rate as the visible one.
+        """
+        log.debug("%s.suspend: active=%s wanted=%s",
+                  type(self._owner).__name__, self.is_active, self._wanted)
+        if self._timer is not None:
+            self._timer.stop()
+
+    def resume(self) -> None:
+        """Tick again at the cadence already set, if the owner still wants it.
+
+        ``QTimer.start()`` with no argument reuses the interval, and ``stop``
+        does not drop the connection, so nothing needs re-plumbing here.
+        """
+        log.debug("%s.resume: wanted=%s", type(self._owner).__name__, self._wanted)
+        if self._wanted and self._timer is not None:
+            self._timer.start()
 
     @property
     def is_active(self) -> bool:

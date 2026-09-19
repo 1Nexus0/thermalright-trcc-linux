@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 
 from ...app import App
 from ...core.commands import ReadSensors
+from ..qt_periodic import PeriodicUpdater
 
 log = logging.getLogger(__name__)
 
@@ -56,9 +57,14 @@ class SensorPickerWidget(QWidget):
         self._all_readings: list = []
         self._build()
         self._refresh()
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._refresh)
-        self._timer.start(_REFRESH_MS)
+        # A ``PeriodicUpdater`` rather than a bare ``QTimer``, for the suspend
+        # /resume pair below: this widget is embedded in a panel
+        # (``dashboard_box``) and a dialog (``overlay_editor``), so it goes off
+        # screen with its host while its timer kept dispatching ``ReadSensors``
+        # -- measured 0.48/s with every host hidden, after the BasePanel hooks
+        # had already silenced the other poller.
+        self._updates = PeriodicUpdater(self)
+        self._updates.start(_REFRESH_MS, self._tick)
 
     def _build(self) -> None:
         log.debug("_build")
@@ -113,6 +119,32 @@ class SensorPickerWidget(QWidget):
                 return
 
     # ── Internals ─────────────────────────────────────────────────────
+
+    def _tick(self) -> None:
+        """The TIMER's callback — skips while nothing can see the result.
+
+        **The gate is on the SCHEDULE, never on ``_refresh`` itself.**  An
+        earlier version put ``isVisible()`` inside ``_refresh`` and broke three
+        existing tests, correctly: ``_refresh`` is also the EXPLICIT refresh
+        path, called from ``__init__`` to populate the list and directly by
+        callers who want it now.  Gating the operation made a manual refresh
+        silently do nothing.
+
+        **And it is ``isVisible()`` rather than a hide/show hook, which is a
+        measurement, not a preference.**  This widget is a GRANDCHILD
+        (``SensorPickerWidget < DashboardBox < SystemPanel < QStackedWidget``)
+        and its timer starts in ``__init__``.  A panel that has never been the
+        stack's current widget was never shown, so there is no hide event to
+        react to.  Driven in the real skin with ``AboutPanel`` showing, the
+        instrumented widget reported ``isVisible=False timer_active=True``
+        and was still dispatching ``ReadSensors`` at 0.52/s; with this gate it
+        reports 0.00/s.  ``BasePanel`` CAN use hooks, because a panel is the
+        stack's DIRECT child and the stack hides it explicitly.
+        """
+        if not self.isVisible():
+            log.debug("_tick: skipped — no ancestor on screen")
+            return
+        self._refresh()
 
     def _refresh(self) -> None:
         log.debug("_refresh")

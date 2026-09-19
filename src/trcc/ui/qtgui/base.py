@@ -70,6 +70,31 @@ class BasePanel(QFrame):
         self._updates = PeriodicUpdater(self)
         self._setup_ui()
 
+    # ── Visibility ────────────────────────────────────────────────────
+    #
+    # qtgui stacks its panels (``app.py:102``), so all but one are hidden at
+    # any moment — and nothing stopped them.  ``stop_periodic_updates`` had
+    # ZERO callers and there were no show/hide hooks in the skin, while
+    # ``ui/gui`` has gated on visibility all along (``trcc_app.py:342``).
+    #
+    # This lives on the PANEL, not on ``PeriodicUpdater``, although the
+    # updater looks like the DRYer home: ``app.py:181`` holds
+    # ``self._video: dict[str, PeriodicUpdater]`` and video playback drives
+    # the PHYSICAL DEVICE.  Gating the updater itself would freeze a playing
+    # panel whenever the window is hidden — worse than the waste it fixes.
+    # Those updaters are owned by the window, so a panel-level hook cannot
+    # reach them by construction.
+
+    def showEvent(self, event: object) -> None:
+        log.debug("showEvent: %s back on screen", type(self).__name__)
+        super().showEvent(event)      # type: ignore[arg-type]
+        self._updates.resume()
+
+    def hideEvent(self, event: object) -> None:
+        log.debug("hideEvent: %s left the screen", type(self).__name__)
+        super().hideEvent(event)      # type: ignore[arg-type]
+        self._updates.suspend()
+
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Reject concrete subclasses that forget to implement _setup_ui."""
         log.debug("__init_subclass__")
