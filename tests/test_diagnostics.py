@@ -2534,6 +2534,383 @@ def test_enumerator_members_use_their_recorded_logger() -> None:
     )
 
 
+# =========================================================================
+# What the tick REACHES — Gate D
+#
+# Gates A-C above are each rigorous and each mutation-tested, and they share
+# ONE blind spot: every one of them is scoped by CLASS MEMBERSHIP.  A is
+# role-port subclasses x role-port member names; C is the methods of
+# ``BaselineSensors`` in ``aggregator.py``.  Measured 2026-09-19 with
+# ``record_rate.py --sensors``, the sensor tick wrote **57 records per tick,
+# 56 of them on the ordinary logger**, across four sites no membership scope
+# can reach:
+#
+#   * ``_store``                -- a module-level FUNCTION (53 of the 57)
+#   * ``primary_gpu``           -- inherited, and DEFINED in ``core/ports.py``
+#   * ``ComputedIo._poll_disk`` -- a collaborator with no port relationship
+#   * ``ComputedIo._poll_net``  -- the same
+#
+# 6,217 bytes per tick.  At the 2 s default a 1 MB ring segment turned over in
+# 5.6 minutes, so a ``trcc report`` filed half an hour after an incident held
+# nothing but sensor polls -- the defect this file already fought twice.
+#
+# The scope here is therefore DERIVED: the transitive closure of UNCONDITIONAL
+# calls out of each loop's tick.  Anything in it runs every tick by
+# construction, so a helper added to the tick tomorrow is in scope the moment
+# it is called.  That is the one property a membership list cannot have, and
+# it is why all four sites survived three gates.
+#
+# Static and AST-only, for Gate A's reasons -- a dynamic check sees only the
+# backends that run on THIS box.  That costs nothing here: run against the
+# tree on 2026-09-19 this derivation returned EXACTLY the five sites
+# ``record_rate.py --sensors`` measured, the four above plus the one declared
+# payload line.
+#
+# ``_ENUMERATOR_LOGGERS`` is not duplicated.  It records WHICH logger each
+# ``BaselineSensors`` member may use, lifecycle members included.  This derives
+# WHICH functions run per tick, and enforces one direction only.  Where the two
+# overlap they agree by construction.
+# =========================================================================
+
+#: The background loops whose ticks must stay off the ordinary logger, as
+#: ``(class, method)``.  A RECORD -- "this is a background loop" cannot be
+#: derived -- but the ONLY one: everything the ticks reach is computed from it.
+#: Pinned by ``test_the_loop_entry_points_still_exist``, so a rename cannot
+#: quietly empty the closure and leave this gate green.
+_LOOP_ENTRY_POINTS: frozenset[tuple[str, str]] = frozenset({
+    # The sensor tick has two doors: the poll thread's, and the consumer's --
+    # ``snapshot`` -> ``read_all`` -> ``_refresh_if_stale`` -> ``_poll_once``
+    # when no thread owns the cadence.  Both are ticks.
+    ("BaselineSensors", "snapshot"),
+    ("BaselineSensors", "_poll_once"),
+    # ~150 ms, and it runs with ZERO LED devices attached -- measured
+    # 2026-09-19 by driving it: 6.67 wakes/s on an empty fleet, each logging.
+    ("LedAnimationLoop", "tick"),
+})
+
+
+class _Index(NamedTuple):
+    """Every class and every module-level function under a root, by name."""
+
+    classes: dict[str, tuple[Path, ast.ClassDef]]
+    functions: dict[tuple[Path, str], Any]
+
+
+class _Reached(NamedTuple):
+    """One function the closure proved runs on every tick.
+
+    ``owner`` is the class whose ``self`` resolves the function's own calls,
+    and is empty for a module-level function -- which has no ``self`` and so
+    resolves none.
+    """
+
+    path: Path
+    owner: str
+    fn: Any
+
+    @property
+    def label(self) -> str:
+        return f"{self.owner}.{self.fn.name}" if self.owner else self.fn.name
+
+
+def _index_tree(root: Path) -> _Index:
+    classes: dict[str, tuple[Path, ast.ClassDef]] = {}
+    functions: dict[tuple[Path, str], Any] = {}
+    for path in sorted(root.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            # ``encoding=`` for the reason spelled out at ``_classes_by_file``:
+            # the locale default is cp1252 on Windows and cannot read our
+            # box-drawing characters.
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:                   # pragma: no cover - not our code
+            continue
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                classes.setdefault(node.name, (path, node))
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                functions[(path, node.name)] = node
+    return _Index(classes, functions)
+
+
+def _methods_of(name: str, index: _Index) -> dict[str, tuple[Path, Any]]:
+    """Methods of *name* and, transitively, of its bases.
+
+    Transitive because ``primary_gpu`` is called through ``BaselineSensors``
+    but DEFINED on ``SensorEnumerator`` in another file -- the exact shape
+    Gate C cannot see.
+    """
+    out: dict[str, tuple[Path, Any]] = {}
+    seen: set[str] = set()
+    stack = [name]
+    while stack:
+        current = stack.pop()
+        if current in seen or current not in index.classes:
+            continue
+        seen.add(current)
+        path, cls = index.classes[current]
+        for node in cls.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                out.setdefault(node.name, (path, node))
+        stack += [b.id for b in cls.bases if isinstance(b, ast.Name)]
+    return out
+
+
+def _collaborators_of(name: str, index: _Index) -> dict[str, str]:
+    """``self._x = Cls(...)`` -> ``{"_x": "Cls"}``, over *name* and its bases.
+
+    Only constructions are resolved, never constructor PARAMETERS: an injected
+    port is dynamic dispatch and belongs to Gate A, which covers every backend
+    whether or not it runs on this box.  ``self._io = ComputedIo()`` is a
+    construction, which is why the two ``ComputedIo`` floods land here.
+    """
+    out: dict[str, str] = {}
+    seen: set[str] = set()
+    stack = [name]
+    while stack:
+        current = stack.pop()
+        if current in seen or current not in index.classes:
+            continue
+        seen.add(current)
+        _, cls = index.classes[current]
+        for node in ast.walk(cls):
+            if not (isinstance(node, ast.Assign)
+                    and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id in index.classes):
+                continue
+            for target in node.targets:
+                if (isinstance(target, ast.Attribute)
+                        and isinstance(target.value, ast.Name)
+                        and target.value.id == "self"):
+                    out.setdefault(target.attr, node.value.func.id)
+        stack += [b.id for b in cls.bases if isinstance(b, ast.Name)]
+    return out
+
+
+def _unconditional_calls(fn: Any) -> list[ast.expr]:
+    """Call targets that run on EVERY execution of *fn*.
+
+    ``If`` / ``ExceptHandler`` / ``While`` are skipped, so the closure means
+    "definitely runs every tick" -- without that, walking into a rarely-taken
+    branch would flag its one-shot lines as per-tick, which is the over-reach
+    ``_role_port_members`` documents catching before it shipped.  ``For`` and
+    ``With`` are NOT skipped, matching ``_log_calls``: a call in a loop body on
+    a per-tick path runs per tick.
+    """
+    parent: dict[int, ast.AST] = {}
+    for node in ast.walk(fn):
+        for child in ast.iter_child_nodes(node):
+            parent[id(child)] = node
+    out: list[ast.expr] = []
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.Call):
+            continue
+        skip, current = False, node
+        while id(current) in parent:
+            current = parent[id(current)]
+            if isinstance(current, (ast.If, ast.ExceptHandler, ast.While)):
+                skip = True
+            if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                break
+        if not skip:
+            out.append(node.func)
+    return out
+
+
+def _tick_closure(root: Path,
+                  entries: frozenset[tuple[str, str]]) -> list[_Reached]:
+    """Every function reachable by unconditional calls from *entries*.
+
+    Three edge kinds are resolved, and they are exactly the three shapes the
+    membership-scoped gates miss: a bare ``helper()`` in the same module, a
+    ``self.method()`` defined anywhere in the MRO, and a ``self._x.method()``
+    on a constructed collaborator.
+    """
+    index = _index_tree(root)
+    work: list[tuple[Path, Any, str]] = []
+    for cls_name, method in sorted(entries):
+        methods = _methods_of(cls_name, index)
+        assert method in methods, (
+            f"loop entry point {cls_name}.{method} no longer exists — the "
+            "closure below would be empty and this gate would pass on nothing"
+        )
+        path, fn = methods[method]
+        work.append((path, fn, cls_name))
+
+    seen: set[tuple[Path, str, str]] = set()
+    out: list[_Reached] = []
+    while work:
+        path, fn, owner = work.pop()
+        key = (path, owner, fn.name)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(_Reached(path, owner, fn))
+        methods = _methods_of(owner, index)
+        collaborators = _collaborators_of(owner, index)
+        for target in _unconditional_calls(fn):
+            if isinstance(target, ast.Name):
+                found = index.functions.get((path, target.id))
+                if found is not None:
+                    work.append((path, found, ""))
+                continue
+            if not isinstance(target, ast.Attribute):
+                continue
+            value = target.value
+            if isinstance(value, ast.Name) and value.id == "self":
+                if target.attr in methods:
+                    next_path, next_fn = methods[target.attr]
+                    work.append((next_path, next_fn, owner))
+            elif (isinstance(value, ast.Attribute)
+                  and isinstance(value.value, ast.Name)
+                  and value.value.id == "self"):
+                other = collaborators.get(value.attr)
+                if other is None:
+                    continue
+                other_methods = _methods_of(other, index)
+                if target.attr in other_methods:
+                    next_path, next_fn = other_methods[target.attr]
+                    work.append((next_path, next_fn, other))
+    return out
+
+
+def _site_name(root: Path, reached: _Reached) -> str:
+    """``trcc.core.ports:BaselineSensors.snapshot`` — the runtime record's key.
+
+    Built so the allowance can be READ from ``record_rate.py`` rather than
+    restated here.  The logger is module-level in every one of these files, so
+    its name is the defining module's, which is what a log record carries.
+    """
+    module = reached.path.relative_to(root).with_suffix("").as_posix()
+    return f"trcc.{module.replace('/', '.')}:{reached.label}"
+
+
+def _tick_offenders(root: Path = _SRC) -> list[str]:
+    """Unconditional ordinary-logger lines in the closure, minus the payload.
+
+    ONE-WAY on purpose, unlike Gate A.  There a conditional line is a FAILURE
+    branch and therefore rare, which makes "conditional => ordinary logger"
+    safe to assert both ways.  Here that is false: ``_refresh_if_stale``'s
+    branches are conditional AND fire every tick, which is the very case
+    ``_ENUMERATOR_LOGGERS`` was written down to judge by hand.  So this
+    asserts only the direction true of every member of the closure -- an
+    unconditional ordinary-logger line in a function the tick always reaches
+    writes a record per tick.
+    """
+    import sys as _sys
+
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "dev" / "tools"))
+    import record_rate  # pyright: ignore[reportMissingImports]
+
+    # The allowance lives ONCE, in the tool that measures it.  Restating it
+    # here would be the same fact in two files, which is the shape that drifts.
+    allowed = record_rate.SENSOR_ALLOWED
+    offenders = []
+    for reached in _tick_closure(root, _LOOP_ENTRY_POINTS):
+        if _site_name(root, reached) in allowed:
+            continue
+        for lineno, obj, conditional in _log_calls(reached.fn):
+            if obj == "log" and not conditional:
+                offenders.append(
+                    f"{reached.path.relative_to(root)}:{lineno} "
+                    f"{reached.label}"
+                )
+    return sorted(offenders)
+
+
+def test_the_loop_entry_points_still_exist() -> None:
+    """A renamed tick would empty the closure and leave Gate D green.
+
+    ``_tick_closure`` asserts each entry resolves, so this is that assertion
+    reached directly rather than as a side effect of the gate below -- a
+    failure here says "the record is stale", not "the tree is clean".
+    """
+    reached = _tick_closure(_SRC, _LOOP_ENTRY_POINTS)
+    owners = {r.owner for r in reached}
+    assert owners >= {cls for cls, _ in _LOOP_ENTRY_POINTS}, (
+        f"a loop entry point resolved to nothing: reached owners {sorted(owners)}"
+    )
+
+
+def test_the_tick_closure_reaches_past_class_membership() -> None:
+    """The witness: "no offenders" must be a finding, not silence.
+
+    Gates A-C are all scoped by class membership, so a closure that only
+    reproduced their scope would add nothing and pass for the wrong reason.
+    This pins the two structural properties they lack -- the closure spans
+    MORE THAN ONE FILE, and it contains at least one MODULE-LEVEL function.
+    Both are independent of what this session changed, which was log lines and
+    not structure (the lesson ``_TickRun`` records: a witness must not depend
+    on the thing being fixed).
+    """
+    reached = _tick_closure(_SRC, _LOOP_ENTRY_POINTS)
+    assert len({r.path for r in reached}) > 1, (
+        "the closure never left one file — call resolution is broken and "
+        "every pass this gate reports is worthless"
+    )
+    assert any(not r.owner for r in reached), (
+        "the closure contains no module-level function — `_store`, the "
+        "53-records-per-tick site, is exactly that shape"
+    )
+
+
+def test_no_function_the_tick_reaches_logs_on_the_ordinary_logger() -> None:
+    """Every per-tick function must log through ``core.logs.per_frame``.
+
+    MUTATION CHECK: ``test_gate_d_can_see_a_module_level_flood`` below rebuilds
+    the ``_store`` shape in a synthetic tree and asserts this rule catches it.
+    """
+    offenders = _tick_offenders()
+    assert not offenders, (
+        "these functions run on EVERY background-loop tick and write through "
+        "the ordinary logger, so each one writes a record per tick into the "
+        "file a `trcc report` sends us — move each onto "
+        "core.logs.per_frame(__name__):\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_gate_d_can_see_a_module_level_flood(tmp_path: Path) -> None:
+    """Mutation check, on the shape that defeated all three earlier gates.
+
+    A gate never broken on purpose is not known to guard anything.  This builds
+    a module-level helper called from a tick — ``_store``'s exact shape — and
+    asserts the closure resolves the call AND the rule flags the line, while
+    leaving a ``frame_log`` sibling alone.  If this stops failing by
+    construction, Gate D is dead.
+    """
+    (tmp_path / "m.py").write_text(
+        "import logging\n"
+        "log = logging.getLogger(__name__)\n"
+        "frame_log = logging.getLogger('trcc.frame')\n"
+        "def flooding_helper():\n"
+        "    log.debug('one record per tick')\n"
+        "def quiet_helper():\n"
+        "    frame_log.debug('silent by default')\n"
+        "class Loop:\n"
+        "    def tick(self):\n"
+        "        flooding_helper()\n"
+        "        quiet_helper()\n",
+        encoding="utf-8",
+    )
+    reached = _tick_closure(tmp_path, frozenset({("Loop", "tick")}))
+    names = {r.fn.name for r in reached}
+    assert "flooding_helper" in names, (
+        "the closure did not follow a module-level call — it cannot see "
+        "`_store`, which was 53 of the 57 records a real tick wrote"
+    )
+    flagged = [
+        r.fn.name for r in reached
+        for _, obj, conditional in _log_calls(r.fn)
+        if obj == "log" and not conditional
+    ]
+    assert flagged == ["flooding_helper"], (
+        f"the rule flagged {flagged}, want only the ordinary-logger helper — "
+        "either it misses floods or it fires on frame-family lines"
+    )
+
+
 def test_a_per_frame_info_line_is_silenced_too(tmp_path: Path) -> None:
     """The family silences INFO as well as DEBUG, by construction.
 
