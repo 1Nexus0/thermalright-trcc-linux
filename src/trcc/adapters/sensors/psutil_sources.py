@@ -197,11 +197,32 @@ def _slug(chip: str, label: str, index: int) -> str:
     return f"{chip}_{cleaned}" if cleaned else f"{chip}_temp{index}"
 
 
-#: How long one ``sensors_temperatures()`` result is reused.  The poll reads
-#: every board source back to back, in milliseconds, and ``MIN_REFRESH_INTERVAL_S``
-#: clamps the metric poll to 1 s -- so this collapses ONE poll's reads and can
-#: never serve a second poll a stale scan.
-_SCAN_TTL_S = 0.25
+#: How long one ``sensors_temperatures()`` result is reused.
+#:
+#: This started at 0.25 s, chosen so the scan could collapse ONE poll's nine
+#: board reads and "never serve a second poll a stale scan".  That fixed the
+#: 9-rescans-per-poll regression but left the bigger one: every poll still
+#: paid a full scan.
+#:
+#: MEASURED, and it is the most expensive thing a sweep does --
+#: ``sensors_temperatures()`` opens **260 of the sweep's 316 files**, because
+#: it reads ``temp_input``, ``temp_max``, ``temp_crit``, ``temp_label`` and
+#: ``name`` for ALL 35 temperature sensors on the machine to serve 9 board
+#: readings that need one file each.  Every other source family (gpus, fans,
+#: disks, dram, spd clock) contributes ~0 opens.
+#:
+#: So the scan spans several polls now: **316 -> 99.3 opens per sweep, -69%**,
+#: with all 9 board keys still present on every poll (a cached scan still
+#: answers every sensor, so nothing downstream sees a key disappear and render
+#: "--").  The cost is granularity: a motherboard temperature can be up to
+#: this old.  They move over tens of seconds, and this is the one number to
+#: turn if that is ever too coarse.
+#:
+#: Cadence lives HERE and nowhere else, deliberately.  ``chips()`` rescans
+#: whenever ANY source is due, so nine sources each holding their own schedule
+#: would drift apart and re-create a rescan on every poll.  One scan, one
+#: timestamp, lockstep by construction.
+_SCAN_TTL_S = 5.0
 
 
 class _TemperatureScan:

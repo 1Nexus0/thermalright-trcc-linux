@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from trcc.adapters.sensors import psutil_sources
+from trcc.core.models import MIN_REFRESH_INTERVAL_S
 
 
 class _Entry:
@@ -160,4 +161,61 @@ def test_one_poll_rescans_once_however_many_sensors_the_board_has(
     )
     assert readings == [30.0 + i for i in range(1, 10)], (
         "sharing the scan must not change what each source reads"
+    )
+
+
+def test_board_temps_are_not_rescanned_on_every_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Motherboard temperatures do not move at 1 Hz, and reading them is the
+    single most expensive thing a sensor sweep does.
+
+    MEASURED on the dev box: ``psutil.sensors_temperatures()`` opens **260 of
+    the sweep's 316 files** — it reads ``temp_input``, ``temp_max``,
+    ``temp_crit``, ``temp_label`` and ``name`` for ALL 35 temperature sensors,
+    to serve 9 board readings from one file each.  Every other source family
+    (gpus, fans, disks, dram, spd) contributes ~0 opens.
+
+    The scan is already shared, so a poll rescans once rather than nine times.
+    This is the other half: it must not rescan on every POLL either.  At a 5 s
+    TTL, 5 polls one second apart cost ONE scan instead of five — measured
+    316 -> 99.3 opens per sweep, a 69% cut, with all 9 keys still present.
+
+    Cadence belongs on the shared scan and nowhere else: ``chips()`` rescans
+    whenever ANY source is due, so nine sources each holding their own
+    schedule would drift apart and re-create the very rescan-per-poll this
+    prevents.  One scan, one timestamp, lockstep by construction.
+    """
+    chips = {"nct6798": [_Entry(f"SYS_TEMP{i}", 30.0 + i) for i in range(1, 10)]}
+    clock = {"t": 1000.0}
+    calls = {"n": 0}
+
+    def counting() -> dict:
+        calls["n"] += 1
+        return chips
+
+    monkeypatch.setattr(psutil_sources.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(psutil_sources.psutil, "sensors_temperatures", counting)
+
+    sources = psutil_sources.discover_board_temps()
+    assert len(sources) == 9, "fixture should build nine board sensors"
+    calls["n"] = 0
+
+    polls, seen = 5, []
+    for _ in range(polls):
+        clock["t"] += MIN_REFRESH_INTERVAL_S          # one poll apart
+        seen.append(frozenset(
+            s.key for s in sources if s.temp() is not None))
+
+    assert calls["n"] <= 2, (
+        f"{polls} polls {MIN_REFRESH_INTERVAL_S}s apart rescanned every chip "
+        f"on the machine {calls['n']} time(s).  psutil.sensors_temperatures() "
+        "is ~260 file opens; the shared scan's TTL must span at least one "
+        "poll interval so slow-moving board temperatures are not re-read at "
+        "the metric refresh rate."
+    )
+    assert len(set(seen)) == 1 and len(seen[0]) == 9, (
+        "a cached scan must still answer EVERY board sensor — a key that "
+        "disappears between polls reads as 'sensor not present' downstream "
+        f"and renders '--', not a stale value: {[len(s) for s in seen]}"
     )
