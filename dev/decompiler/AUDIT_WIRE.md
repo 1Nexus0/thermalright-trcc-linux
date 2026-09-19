@@ -14,10 +14,11 @@ why `oracle-spec.json` recorded `bulk`, `ly` and `scsi` as absent for so long.
 They were never in the main assembly to find.
 
 **Scope, stated up front.** `USBLCD.exe` (2.7 MB) and `USBLCDNEW.exe` (164 KB)
-are NATIVE — no CLR directory, so no decompile. **SCSI is not here and is not
-answered by this document.** `UsbHid.dll` is a generic third-party HID wrapper
-(SetupApi/HidD/Kernel32 P/Invoke) with no vendor identifiers and no protocol; it
-has no oracle value.
+are NATIVE — no CLR directory, so no decompile. **SCSI is not in THIS document**;
+it was disassembled separately with Ghidra and is written up in
+[`AUDIT_SCSI.md`](AUDIT_SCSI.md). `UsbHid.dll` is a generic third-party HID
+wrapper (SetupApi/HidD/Kernel32 P/Invoke) with no vendor identifiers and no
+protocol; it has no oracle value.
 
 ## Entry point
 
@@ -157,6 +158,15 @@ not the bulk path.
 
 ## Gaps — what this does NOT establish
 
-- **SCSI**: absent. Native `USBLCD.exe`; needs disassembly, not decompilation.
+- **SCSI**: no longer a gap — disassembled 2026-09-18, see
+  [`AUDIT_SCSI.md`](AUDIT_SCSI.md).  Every command word and chunk size matches
+  our `ScsiLcd` byte for byte across all three panel classes.
+- **This document's component is MANAGED, and the vendor copied us.** 2.1.4
+  shows ad-hoc copy-paste from this project, which shipped ~6 months before
+  2.1.6.  `.NET` assemblies cannot be dated (Roslyn writes a content hash into
+  the PE timestamp: `TRCC.exe` reads "2061", `USBLCDNEW.dll` "2092"), so
+  agreement between `USBLCDNEW.dll` and our code is NOT independent
+  confirmation — it may be our own reflection.  Disagreement still is
+  informative.  Real glass remains the only unconditional oracle.
 - **Nothing here is glass-verified.** This is what the vendor's code does, not
   proof that our code matching it produces a correct picture on a panel.

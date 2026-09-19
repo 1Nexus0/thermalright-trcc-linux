@@ -251,6 +251,27 @@ Measuring 163 green tests against a 2.0.3 tree proved the whole oracle suite
 passes on the wrong program. That is why the row above ends in a gate, not a
 reminder.
 
+### The oracle's authority is ASYMMETRIC — the vendor copied US
+
+2.1.6 shipped roughly six months after this project was out and gaining
+traction, and **2.1.4 shows ad-hoc copy-paste from our code**. So "the C#
+oracle" is not one authority:
+
+* **Agreement with the MANAGED assemblies (`TRCC.exe`, `USBLCDNEW.dll`) proves
+  nothing.** It may be our own reflection. Any audit measuring our coverage
+  *against* them is, in the areas they took, measuring against a mirror.
+* **Disagreement is still informative** — they had a reason.
+* **Real glass is the only unconditional oracle**
+  ([[feedback_no_definites_without_hardware]]).
+* **Native binaries are the exception, and they are datable.** `USBLCD.exe` is
+  **2024-03-25**, ~23 months before our first commit, so the SCSI findings in
+  `dev/decompiler/AUDIT_SCSI.md` ARE independent confirmation.
+
+**.NET assemblies cannot be dated at all**: Roslyn writes a content hash into
+the PE `TimeDateStamp`, which is why `TRCC.exe` reads "2061-12-05" and
+`USBLCDNEW.dll` "2092-03-15". Never cite a managed-assembly timestamp as a
+date. Detail: [[project_the_oracle_authority_is_asymmetric]].
+
 ## Architecture — Hexagonal (Ports & Adapters)
 
 ### Layer Map
