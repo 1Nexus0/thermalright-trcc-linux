@@ -49,7 +49,7 @@ class DashboardBox(SystemBox):
         self._tree.itemSelectionChanged.connect(self._on_row_picked)
         layout.addWidget(self._tree, 1)
 
-        self._picker = SensorPickerWidget(self._app, self)
+        self._picker = SensorPickerWidget(self._app, self._bus, self)
         layout.addWidget(self._picker, 1)
 
         row = QHBoxLayout()

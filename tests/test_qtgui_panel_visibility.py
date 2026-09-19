@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QStackedWidget
 
 from tests.mock_platform import MockPlatform
@@ -125,15 +126,15 @@ def test_a_panel_shown_again_resumes(qtbot, tmp_path: Path) -> None:
         app.close()
 
 
-def test_the_sensor_picker_stops_polling_when_hidden(qtbot, tmp_path: Path) -> None:
+def test_the_sensor_picker_stops_working_when_hidden(qtbot, tmp_path: Path) -> None:
     """``SensorPickerWidget`` is the same defect outside ``BasePanel``.
 
-    It is a plain ``QWidget`` with a RAW ``QTimer``, embedded in a panel
-    (``dashboard_box.py:52``) and a dialog (``overlay_editor.py:489``), so the
-    ``BasePanel`` hooks cannot reach it.  Measured after those hooks landed,
-    ``ReadSensors`` still ran at **0.48/s** with every host hidden — this
-    widget is the whole remainder, and the number halved rather than going to
-    zero because it is the second of two 2 s pollers.
+    It is a plain ``QWidget`` embedded in a panel (``dashboard_box.py:52``) and
+    a dialog (``overlay_editor.py:489``), so the ``BasePanel`` hooks cannot
+    reach it.  Measured after those hooks landed, ``ReadSensors`` still ran at
+    **0.48/s** with every host hidden — this widget was the whole remainder,
+    and the number halved rather than going to zero because it was the second
+    of two 2 s pollers.
 
     **It is hidden by an ANCESTOR, and that is the whole difficulty.**  Qt
     delivers ``hideEvent`` to the widget the stack hides -- the panel -- and
@@ -142,49 +143,62 @@ def test_the_sensor_picker_stops_polling_when_hidden(qtbot, tmp_path: Path) -> N
     0.52/s with every host off screen: the test exercised a path the app never
     takes.  So it hides the PARENT, which is what a stack switch does.
 
-    MUTATION CHECK: remove the ``isVisible()`` guard from ``_tick`` and this
-    fails with the dispatch count still climbing.
+    **The TRIGGER changed on 2026-09-19 and the property did not.**  The raw
+    ``QTimer`` is gone — the picker now renders ``SensorsUpdated`` at the
+    cadence the user configured — so this drives a broadcast where it used to
+    drive a tick.  A signal fires whether or not anyone is looking, which is
+    exactly why the guard still has to be here.
+
+    Count the WORK, never a wrapper: what is asserted is the RENDERED row.  A
+    first version of the old gate wrapped ``_refresh`` and counted calls to the
+    wrapper, so it went on counting after the guard started skipping the work.
+    Same lesson as `9431f517`.
+
+    MUTATION CHECK: remove the ``isVisible()`` guard from
+    ``_on_sensors_updated`` and this fails with the hidden picker's row
+    following the broadcast.
     """
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+    from trcc.core.events import SensorsUpdated
     from trcc.ui.qtgui.sensor_picker import SensorPickerWidget
 
     app = App(MockPlatform(_SPECS, tmp_path))
     try:
-        from PySide6.QtWidgets import QVBoxLayout, QWidget
-
+        bus = BusBridge(app.events)
         host = QWidget()
         QVBoxLayout(host)
-        picker = SensorPickerWidget(app, host)
+        picker = SensorPickerWidget(app, bus, host)
         host.layout().addWidget(picker)
         qtbot.addWidget(host)
         host.show()
         qtbot.waitExposed(host)
 
-        # Count the WORK — ReadSensors dispatches — not the timer ticks.  A
-        # first version wrapped ``_refresh`` and counted calls to the wrapper,
-        # so it went on counting after the guard inside ``_refresh`` started
-        # skipping the dispatch: the gate failed while the skin was measured
-        # clean at 0.00/s.  Same lesson as `9431f517`.
-        calls: list[int] = []
-        real_dispatch = app.dispatch
+        def row() -> str:
+            for i in range(picker._sensor_list.count()):
+                item = picker._sensor_list.item(i)
+                if item.data(Qt.ItemDataRole.UserRole) == "cpu:temp":
+                    return item.text()
+            return ""
 
-        def counting_dispatch(cmd):
-            if type(cmd).__name__ == "ReadSensors":
-                calls.append(1)
-            return real_dispatch(cmd)
+        def broadcast(value: float) -> None:
+            app.events.publish(SensorsUpdated(
+                reading_count=1, readings={"cpu:temp": value}, temp_unit="C"))
+            qtbot.wait(50)
 
-        app.dispatch = counting_dispatch   # type: ignore[method-assign]
-        picker._updates.start(10, picker._tick)
+        broadcast(51.0)
+        assert "51.0" in row(), (
+            f"the picker never rendered the broadcast while shown: {row()!r}"
+        )
 
-        qtbot.waitUntil(lambda: bool(calls), timeout=2000)
         host.hide()                      # the ANCESTOR, as a stack switch does
         qtbot.wait(60)
-        before = len(calls)
-        qtbot.wait(150)
+        before = row()
+        broadcast(97.0)
 
-        assert len(calls) == before, (
-            f"the hidden sensor picker dispatched ReadSensors "
-            f"{len(calls) - before} more time(s) — it polls on a 2 s timer "
-            "inside hosts the user cannot see"
+        assert row() == before, (
+            "the hidden sensor picker rebuilt its list for a broadcast — it "
+            "works on inside hosts the user cannot see"
         )
     finally:
         app.close()

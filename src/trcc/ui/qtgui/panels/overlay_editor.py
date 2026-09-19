@@ -309,9 +309,15 @@ class OverlayEditorPanel(BasePanel):
 class _ElementDialog(QDialog):
     """Modal form for adding or editing one overlay element."""
 
-    def __init__(self, parent, *, prefill=None) -> None:
+    def __init__(self, parent: BasePanel, *, prefill=None) -> None:
         log.debug("__init__: parent=%s", parent)
         super().__init__(parent)
+        # The owning panel, held rather than rediscovered through
+        # ``self.parent()``: the metric picker needs the App to dispatch
+        # through AND the bus it observes, and a Qt parent is typed
+        # ``QObject | None``, so reaching back for them cost a getattr dance
+        # and a None branch that could never fire.
+        self._panel = parent
         self.setWindowTitle(
             "Edit overlay element" if prefill is not None else "Add overlay element",
         )
@@ -474,19 +480,11 @@ class _ElementDialog(QDialog):
         log.debug("_pick_metric")
         from ..sensor_picker import SensorPickerWidget
 
-        # Reach back to the parent's app reference — the dialog is a
-        # child of OverlayEditorPanel which is a BasePanel.
-        parent_panel = self.parent()
-        app = getattr(parent_panel, "app", None) or getattr(
-            parent_panel, "_app", None,
-        )
-        if app is None:
-            return
         dialog = QDialog(self)
         dialog.setWindowTitle("Pick a sensor")
         dialog.setModal(True)
         dialog.resize(560, 420)
-        picker = SensorPickerWidget(app, dialog)
+        picker = SensorPickerWidget(self._panel.app, self._panel.bus, dialog)
         if self._metric.text().strip():
             picker.select_sensor_id(self._metric.text().strip())
         buttons = QDialogButtonBox(

@@ -21,6 +21,13 @@ A bare connection blanks two of the four columns.  So identity comes from the
 Query — on build and on every view-switch — and values come from the bus,
 merged by ``sensor_display.apply_live_values``.
 
+**Two pollers, not one.**  The System panel holds the sensors box AND a
+``SensorPickerWidget`` embedded in ``DashboardBox``, each on its own 2 s timer
+— which is why the measured rate above is 1.00/s and not 0.50/s.  Both are
+gated here, and the picker's half is driven through the REAL panel: it is a
+GRANDCHILD (picker < DashboardBox < SystemPanel), and whether a grandchild
+sees a view-switch is a question for the toolkit, not for a plan.
+
 Not a CPU story, and this file will not pretend otherwise: one ``ReadSensors``
 costs 0.165 ms.  It is a cadence-correctness story.
 """
@@ -30,6 +37,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QStackedWidget
 
 from tests.mock_platform import MockPlatform
@@ -91,6 +99,20 @@ class _Harness:
             text = listing.item(i).text()
             if text.split()[0] == sensor_id:
                 return text
+        return ""
+
+    @property
+    def picker(self) -> Any:
+        """The picker embedded in the dashboard box — a GRANDCHILD."""
+        return self.panel._dash._picker
+
+    def picked_row(self, sensor_id: str) -> str:
+        """The picker's rendered line for *sensor_id*, or ""."""
+        listing = self.picker._sensor_list
+        for i in range(listing.count()):
+            item = listing.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == sensor_id:
+                return item.text()
         return ""
 
     def show_panel(self) -> None:
@@ -214,5 +236,109 @@ def test_the_broadcasts_unit_reaches_the_row(qtbot, tmp_path) -> None:
         row = h.row(_CPU_TEMP)
 
         assert "°F" in row, f"row kept the catalog's unit: {row!r}"
+    finally:
+        h.app.close()
+
+
+# ── the second poller: the picker embedded in the dashboard box ──────────
+
+
+def test_the_picker_renders_a_broadcast_without_polling(qtbot, tmp_path) -> None:
+    """The picker's live preview is the same datum on the same bus.
+
+    It is a GRANDCHILD of the panel, which is why it is driven here through the
+    real ``SystemPanel`` rather than standalone: the whole question is whether
+    the widget sees what the stack does.
+
+    MUTATION CHECK: drop the connection in ``SensorPickerWidget.__init__`` and
+    this fails with the row still showing the build-time value.
+    """
+    h = _Harness(qtbot, tmp_path)
+    try:
+        h.counts.clear()
+        h.broadcast(63.5)
+
+        assert "63.5" in h.picked_row(_CPU_TEMP), (
+            f"the broadcast never reached the picker — row is "
+            f"{h.picked_row(_CPU_TEMP)!r}"
+        )
+        assert h.counts["ReadSensors"] == 0, (
+            "the picker re-polled to render values it was handed"
+        )
+    finally:
+        h.app.close()
+
+
+def test_the_picker_schedules_nothing_periodic(qtbot, tmp_path) -> None:
+    """The last ``ReadSensors`` timer in qtgui.
+
+    Phase 1 gated this widget on ``isVisible()`` so a hidden host stopped it;
+    what remained was that a VISIBLE one polled every 2 s whatever the user set
+    ``refresh_interval_s`` to — a third independent cadence for one datum.
+
+    MUTATION CHECK: give it a ``PeriodicUpdater`` again and this fails.
+    """
+    h = _Harness(qtbot, tmp_path)
+    try:
+        assert not hasattr(h.picker, "_updates"), (
+            "the sensor picker is back on a private clock — sensors arrive on "
+            "SensorsUpdated at the cadence the user configured"
+        )
+    finally:
+        h.app.close()
+
+
+def test_a_hidden_picker_ignores_the_broadcast(qtbot, tmp_path) -> None:
+    """Phase 1's measurement, kept: 0.52/s with every host off screen.
+
+    MUTATION CHECK: remove the ``isVisible()`` guard from
+    ``SensorPickerWidget._on_sensors_updated`` and this fails.
+    """
+    h = _Harness(qtbot, tmp_path)
+    try:
+        h.hide_panel()
+        before = h.picked_row(_CPU_TEMP)
+        h.broadcast(99.0)
+
+        assert h.picked_row(_CPU_TEMP) == before, (
+            "a picker nobody can see rebuilt its whole list for a broadcast"
+        )
+    finally:
+        h.app.close()
+
+
+def test_a_grandchild_picker_repopulates_on_a_view_switch(qtbot, tmp_path) -> None:
+    """Driven, not assumed: does a grandchild see the stack's switch?
+
+    ``SensorsBox`` is a direct child of the panel; this widget is a level
+    deeper, and Phase 1 already found one hook that a grandchild never
+    receives (which is why its visibility gate is a runtime check and not a
+    hide event).  If the toolkit does not deliver this one either, the picker
+    would open showing values from whenever it was last on screen.
+
+    Counted on the PICKER, not on the App: the sensors box refreshes on the
+    same switch, so an app-wide ``ReadSensors`` count passes this test whether
+    or not the picker ever wakes up.  It did, on the first run of this gate.
+
+    MUTATION CHECK: delete ``SensorPickerWidget.showEvent`` and this fails.
+    """
+    h = _Harness(qtbot, tmp_path)
+    try:
+        h.hide_panel()
+        refreshes: list[int] = []
+        real = h.picker._refresh
+
+        def spy() -> None:
+            refreshes.append(1)
+            real()
+
+        h.picker._refresh = spy           # type: ignore[method-assign]
+        h.show_panel()
+
+        assert refreshes, (
+            "the picker came back on screen still showing what it had when it "
+            "left — identity and values both come from the Query on a switch"
+        )
+        assert h.picked_row(_CPU_TEMP), "the picker is empty after a switch"
     finally:
         h.app.close()

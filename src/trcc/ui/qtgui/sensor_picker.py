@@ -12,6 +12,13 @@ Shape (built so non-technical users can find what they want fast):
 * Bottom: a live preview line showing the currently-selected sensor's
   current value, so users see real data before they commit.
 
+"Live" means the BUS.  This widget polled ``ReadSensors`` on a private 2 s
+``QTimer``, which made it the second independent cadence for one datum inside
+a single panel (the sensors box was the first) and the third in the skin.
+``MetricsLoop`` publishes ``SensorsUpdated`` at the interval the user actually
+configured, so identity is read on build and on every view-switch, and values
+ride the broadcast.
+
 Emits ``selected(sensor_id, label)`` so callers can grab both the ID
 (stable, used by the metric element) and the label (display only).
 """
@@ -21,6 +28,7 @@ import logging
 from collections import defaultdict
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -33,38 +41,46 @@ from PySide6.QtWidgets import (
 
 from ...app import App
 from ...core.commands import ReadSensors
-from ..qt_periodic import PeriodicUpdater
+from ...core.events import SensorsUpdated
+from ...core.models import SensorReading
+from ..bus_bridge import BusBridge
+from ..presentation.sensor_display import apply_live_values
 
 log = logging.getLogger(__name__)
-
-_REFRESH_MS = 2000
 
 
 class SensorPickerWidget(QWidget):
     """A live, searchable sensor browser.
 
     Designed for embedding in dialogs (overlay editor) and panels
-    (status, configuration).  Reads via ``ReadSensors`` on a 2-second
-    refresh so the preview value reflects what the overlay will show.
+    (status, configuration).  Identity comes from ``ReadSensors``; the values
+    beside it come from ``SensorsUpdated``, so the preview shows what the
+    overlay will show, refreshed when the rest of the app refreshes.
     """
 
     selected = Signal(str, str)  # (sensor_id, label)
 
-    def __init__(self, app: App, parent: QWidget | None = None) -> None:
-        log.debug("__init__: app=%s parent=%s", app, parent)
+    def __init__(
+        self,
+        app: App,
+        bus: BusBridge,
+        parent: QWidget | None = None,
+    ) -> None:
+        log.debug("__init__: app=%s bus=%s parent=%s", app, bus, parent)
         super().__init__(parent)
         self._app = app
+        self._bus = bus
+        # Identity, kept apart from what is displayed: a broadcast that omits
+        # a sensor (the user disabling HDD drops every ``disk:*`` key) must not
+        # erase it from the catalog, or no later broadcast could bring it back.
+        self._catalog: list[SensorReading] = []
         self._all_readings: list = []
         self._build()
         self._refresh()
-        # A ``PeriodicUpdater`` rather than a bare ``QTimer``, for the suspend
-        # /resume pair below: this widget is embedded in a panel
-        # (``dashboard_box``) and a dialog (``overlay_editor``), so it goes off
-        # screen with its host while its timer kept dispatching ``ReadSensors``
-        # -- measured 0.48/s with every host hidden, after the BasePanel hooks
-        # had already silenced the other poller.
-        self._updates = PeriodicUpdater(self)
-        self._updates.start(_REFRESH_MS, self._tick)
+        self._bus.sensors_updated.connect(
+            self._on_sensors_updated,
+            type=Qt.ConnectionType.QueuedConnection,
+        )
 
     def _build(self) -> None:
         log.debug("_build")
@@ -120,35 +136,53 @@ class SensorPickerWidget(QWidget):
 
     # ── Internals ─────────────────────────────────────────────────────
 
-    def _tick(self) -> None:
-        """The TIMER's callback — skips while nothing can see the result.
+    def _on_sensors_updated(self, event: SensorsUpdated) -> None:
+        """Render one broadcast — values onto the catalog already held.
 
-        **The gate is on the SCHEDULE, never on ``_refresh`` itself.**  An
+        **The gate is on the DELIVERY, never on ``_refresh`` itself.**  An
         earlier version put ``isVisible()`` inside ``_refresh`` and broke three
         existing tests, correctly: ``_refresh`` is also the EXPLICIT refresh
         path, called from ``__init__`` to populate the list and directly by
         callers who want it now.  Gating the operation made a manual refresh
         silently do nothing.
 
-        **And it is ``isVisible()`` rather than a hide/show hook, which is a
+        **And it is ``isVisible()`` rather than a hide hook, which is a
         measurement, not a preference.**  This widget is a GRANDCHILD
-        (``SensorPickerWidget < DashboardBox < SystemPanel < QStackedWidget``)
-        and its timer starts in ``__init__``.  A panel that has never been the
-        stack's current widget was never shown, so there is no hide event to
-        react to.  Driven in the real skin with ``AboutPanel`` showing, the
-        instrumented widget reported ``isVisible=False timer_active=True``
-        and was still dispatching ``ReadSensors`` at 0.52/s; with this gate it
-        reports 0.00/s.  ``BasePanel`` CAN use hooks, because a panel is the
-        stack's DIRECT child and the stack hides it explicitly.
+        (``SensorPickerWidget < DashboardBox < SystemPanel < QStackedWidget``).
+        A panel that has never been the stack's current widget was never shown,
+        so there is no hide event to react to.  Driven in the real skin with
+        ``AboutPanel`` showing, the instrumented widget reported
+        ``isVisible=False`` while still working at 0.52/s; with this gate it
+        reports 0.00/s.
+
+        Per-broadcast, so DEBUG.
         """
         if not self.isVisible():
-            log.debug("_tick: skipped — no ancestor on screen")
+            log.debug("_on_sensors_updated: skipped — no ancestor on screen")
             return
+        log.debug("_on_sensors_updated: %d value(s), temp_unit=%s",
+                  event.reading_count, event.temp_unit)
+        self._all_readings = apply_live_values(
+            self._catalog, event.readings, temp_unit=event.temp_unit)
+        self._rebuild_categories()
+        self._update_preview()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Re-read the catalog when an ancestor puts this back on screen.
+
+        A grandchild gets no hide event it can trust, but it DOES get this one
+        — driven and gated, because the whole view-switch populate depends on
+        it and a plan cannot answer a toolkit question.
+        """
+        log.debug("showEvent: back on screen — re-reading the catalog")
+        super().showEvent(event)
         self._refresh()
 
     def _refresh(self) -> None:
+        """Read identity AND values in one dispatch.  The explicit path."""
         log.debug("_refresh")
         result = self._app.dispatch(ReadSensors())
+        self._catalog = list(result.readings)
         self._all_readings = list(result.readings)
         self._rebuild_categories()
         self._update_preview()

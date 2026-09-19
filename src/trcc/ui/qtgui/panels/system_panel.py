@@ -45,12 +45,12 @@ class SystemPanel(BasePanel):
 
     def _setup_ui(self) -> None:
         log.debug("_setup_ui")
-        self._platform = PlatformBox(self.app, self)
-        self._gpu = GpuBox(self.app, self)
-        self._maintenance = MaintenanceBox(self.app, self)
-        self._health = HealthBox(self.app, self)
-        self._sensors = SensorsBox(self.app, self)
-        self._dash = DashboardBox(self.app, self)
+        self._platform = PlatformBox(self.app, self.bus, self)
+        self._gpu = GpuBox(self.app, self.bus, self)
+        self._maintenance = MaintenanceBox(self.app, self.bus, self)
+        self._health = HealthBox(self.app, self.bus, self)
+        self._sensors = SensorsBox(self.app, self.bus, self)
+        self._dash = DashboardBox(self.app, self.bus, self)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(16, 16, 16, 16)

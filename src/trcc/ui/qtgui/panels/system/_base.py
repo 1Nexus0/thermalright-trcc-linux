@@ -6,18 +6,21 @@ dashboard layout — at 28 methods, a 65% outlier in its own skin.  This is
 the same split ``panels/led/`` already applies to ``uc_led_control``: a
 thin host plus one focused class per concern.
 
-A box owns the App reference so it can :meth:`dispatch`, states its own
-``TITLE`` and ``STRETCH`` so the host never spells them, and builds itself
+A box owns the App reference so it can :meth:`dispatch` and the ``BusBridge``
+so it can OBSERVE — the two doors every other qtgui surface already has, and
+the pair ``BasePanel`` hands its own subclasses.  It states its own ``TITLE``
+and ``STRETCH`` so the host never spells them, and builds itself
 in :meth:`_build_ui` — which also loads whatever it shows.  Build and load
 are one step on purpose: a box that painted before it read would show "…"
 to anyone who never called a second method.
 
-**There is deliberately no ``refresh`` hook here.**  One box is live, and
-the host wires that one method to the timer by name.  A base-level hook
-looped over every box would put ``ListMemorySlots`` — which shells out to
-``dmidecode`` — on a two-second tick, and would add six DEBUG records per
-tick to the log a reporter pastes.  Keeping the tick off the base makes
-both mistakes unrepresentable rather than merely discouraged.
+**There is deliberately no ``refresh`` hook here**, and holding the bus does
+not add one.  One box is live, and the host wires that one method to the
+broadcast by name.  A base-level hook looped over every box would put
+``ListMemorySlots`` — which shells out to ``dmidecode`` — on the live path,
+and would add six DEBUG records per broadcast to the log a reporter pastes.
+Keeping the subscription off the base makes both mistakes unrepresentable
+rather than merely discouraged.
 """
 from __future__ import annotations
 
@@ -31,6 +34,7 @@ from .....core.results import Result
 if TYPE_CHECKING:
     from .....app import App
     from .....core.commands import Command
+    from ....bus_bridge import BusBridge
 
 log = logging.getLogger(__name__)
 
@@ -46,10 +50,16 @@ class SystemBox(QGroupBox):
     #: Layout stretch the host gives this box.  0 = size to content.
     STRETCH: ClassVar[int] = 0
 
-    def __init__(self, app: App, parent: QWidget | None = None) -> None:
-        log.debug("__init__: app=%s parent=%s", app, parent)
+    def __init__(
+        self,
+        app: App,
+        bus: BusBridge,
+        parent: QWidget | None = None,
+    ) -> None:
+        log.debug("__init__: app=%s bus=%s parent=%s", app, bus, parent)
         super().__init__(self.TITLE, parent)
         self._app = app
+        self._bus = bus
         self._build_ui()
 
     def _build_ui(self) -> None:

@@ -355,7 +355,7 @@ def test_system_panel_constructs(gui_app: App, qtbot) -> None:
 def _maintenance_box(gui_app: App, qtbot):
     from trcc.ui.qtgui.panels.system import MaintenanceBox
 
-    box = MaintenanceBox(gui_app)
+    box = MaintenanceBox(gui_app, _bus(gui_app))
     qtbot.addWidget(box)
     return box
 
@@ -691,7 +691,7 @@ def test_sensor_picker_filters_by_search(gui_app: App) -> None:
     """Search text narrows the visible sensor list."""
     from trcc.ui.qtgui.sensor_picker import SensorPickerWidget
 
-    picker = SensorPickerWidget(gui_app)
+    picker = SensorPickerWidget(gui_app, _bus(gui_app))
     # FakePlatform exposes "Fake CPU" — search for it
     picker._search.setText("cpu")
     picker._rebuild_sensor_list()
@@ -2080,7 +2080,7 @@ def test_disabling_the_slideshow_stops_the_driver(gui_app: App, qtbot) -> None:
 def _sensors_box(gui_app: App, qtbot):
     from trcc.ui.qtgui.panels.system import SensorsBox
 
-    box = SensorsBox(gui_app)
+    box = SensorsBox(gui_app, _bus(gui_app))
     qtbot.addWidget(box)
     return box
 
@@ -2475,7 +2475,7 @@ def test_the_background_dialog_offers_the_catalog_image_formats(
 def _dashboard_box(gui_app: App, qtbot):
     from trcc.ui.qtgui.panels.system import DashboardBox
 
-    box = DashboardBox(gui_app)
+    box = DashboardBox(gui_app, _bus(gui_app))
     qtbot.addWidget(box)
     return box
 
@@ -2801,7 +2801,7 @@ def test_the_sensor_search_actually_narrows_the_list(gui_app: App, qtbot) -> Non
     nothing would look identical to a host with no sensors."""
     from trcc.ui.qtgui.sensor_picker import SensorPickerWidget
 
-    picker = SensorPickerWidget(gui_app)
+    picker = SensorPickerWidget(gui_app, _bus(gui_app))
     qtbot.addWidget(picker)
     picker._refresh()
     everything = picker._sensor_list.count()
@@ -2821,7 +2821,7 @@ def test_selecting_a_sensor_by_id_reports_it_back(gui_app: App, qtbot) -> None:
     dashboard editor relies on to show a row's current binding."""
     from trcc.ui.qtgui.sensor_picker import SensorPickerWidget
 
-    picker = SensorPickerWidget(gui_app)
+    picker = SensorPickerWidget(gui_app, _bus(gui_app))
     qtbot.addWidget(picker)
     picker._refresh()
     assert picker.selected_sensor() is None, "something was pre-selected"
