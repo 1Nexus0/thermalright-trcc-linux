@@ -804,25 +804,6 @@ def _or_zero(value: float | None) -> float:
     return 0.0 if value is None else float(value)
 
 
-def _safe(fn: Callable[[], float | None]) -> float:
-    """Read one sensor for the snapshot, degrading a RAISING source to 0.0.
-
-    Mirrors :meth:`BaselineSensors._read`: a flaky or permission-locked
-    sensor (root-only RAPL ``energy_uj``, a wedged hwmon node, an NVML
-    driver/userspace mismatch) must never take down ``snapshot()`` — which
-    would take down the per-tick ``SensorsUpdated`` publish and blank every
-    metric in the UI.  ``_or_zero`` alone only handles ``None``; a raise
-    needs catching too.  The same sources are read via the guarded
-    ``read_all`` path on the same tick (which warn-once-logs the failure),
-    so this stays at DEBUG to avoid a duplicate warning.
-    """
-    try:
-        return _or_zero(fn())
-    except Exception as e:
-        log.debug("snapshot: sensor read failed (%s) — degrading to 0.0", e)
-        return 0.0
-
-
 _Preferred = TypeVar("_Preferred", bound=IdentifiedSource)
 
 
@@ -977,11 +958,10 @@ class SensorEnumerator(ABC):
     def snapshot(self) -> HardwareMetrics:
         """Typed metrics snapshot — one fresh object per tick, raw °C.
 
-        Concrete template method: reads the TYPED sources directly
-        (``cpu()`` / ``primary_gpu()`` / ``memory()``) so the metrics a
-        cooler displays never go through a fragile ``sensor_id``→attr
-        string table, and folds disk/net (computed-IO, no typed source)
-        in from ``read_all()``.  Every OS inherits this unchanged.
+        Concrete template method: a TYPED view of the one sample
+        ``read_all()`` returns, so the DTO a cooler displays and the flat
+        readings an overlay renders can never disagree — they are the same
+        numbers.  Every OS inherits this unchanged.
 
         Returns RAW canonical units (°C); callers apply user prefs via
         :func:`trcc.services.metrics_personalize.personalize_metrics`.
@@ -992,22 +972,42 @@ class SensorEnumerator(ABC):
         """
         from .models import CpuMetrics, GpuMetrics, HardwareMetrics
 
+        # ONE sample, two views.  Every scalar below comes from ``readings``,
+        # which ``read_all`` has just made current -- this method used to
+        # re-read each source from hardware instead, so a metrics tick read the
+        # sensors TWICE.  Measured on a 320x320 SCSI panel at a 2 s interval:
+        # **25.01 ms per tick, 43% of the whole tick** (the sweep is 47 ms; the
+        # bus fan-out, for scale, is 0.87 ms), and 15 redundant reads -- the GPU
+        # alone was read nine times, once for the plural list and again for the
+        # primary.
+        #
+        # The second read was also the WRONG one, and it is the one the GUI
+        # showed.  ``cpu:usage`` and ``cpu:power`` are DELTAS -- a percentage
+        # since the previous call, and RAPL energy over elapsed time -- so
+        # re-reading microseconds after the poll measures a window of nothing.
+        # Over 8 steady ticks the LCD overlay (fed from these readings) showed
+        # 11.7% +/- 0.53 while the panel (fed from this DTO) showed
+        # 12.5% +/- 3.34, and CPU power spiked to 27.8 W against a true 13.0 W.
+        # ``RenderLed`` fixed this one layer up -- its docstring records the
+        # same "resampled instantaneous readings ... flicker" -- and reads
+        # ``app.last_raw_snapshot`` now.  The resampling simply moved in here.
+        #
+        # ``.get(key, 0.0)`` preserves the old degrade-to-zero contract:
+        # ``_store`` omits a source that returned None, exactly where the
+        # removed ``_safe`` returned 0.0.
         readings = self.read_all()
+        value = readings.get          # bound lookup, not a new frame per field
         cpu = self.cpu()
-        # _safe (not _or_zero(fn())): a raising source degrades to 0.0 instead of
-        # taking down snapshot() → the SensorsUpdated publish → every UI metric.
         cpus = [CpuMetrics(
             name=cpu.name,
-            temp=_safe(cpu.temp), usage=_safe(cpu.usage),
-            freq=_safe(cpu.freq), power=_safe(cpu.power),
+            temp=value("cpu:temp", 0.0), usage=value("cpu:usage", 0.0),
+            freq=value("cpu:freq", 0.0), power=value("cpu:power", 0.0),
         )]
         gpus = [GpuMetrics(
             name=g.name,
-            temp=_safe(g.temp), usage=_safe(g.usage),
-            clock=_safe(g.clock), power=_safe(g.power),
-        ) for g in self.gpus()]
-        primary = self.primary_gpu()
-        mem = self.memory()
+            temp=value(f"gpu:{i}:temp", 0.0), usage=value(f"gpu:{i}:usage", 0.0),
+            clock=value(f"gpu:{i}:clock", 0.0), power=value(f"gpu:{i}:power", 0.0),
+        ) for i, g in enumerate(self.gpus())]
         # Fan slots the DC can show (CPUFAN / GPUFAN / SSDFAN / FAN2).
         # snapshot() populated every other field but never called self.fans(),
         # so all four defaulted to 0.0 — every theme showed 0 RPM on every
@@ -1021,10 +1021,15 @@ class SensorEnumerator(ABC):
         # order (a 0-RPM header is an empty header, skipped).  The GPU's own
         # hwmon fan (e.g. ``amdgpu``) is excluded from that pool so it is never
         # double-counted as a case fan.
-        fan_gpu = _safe(primary.fan) if primary else 0.0
+        fan_gpu = value("gpu:primary:fan", 0.0)
+        # Same pool, same order, same "an empty header is 0 RPM" skip -- but
+        # read from the sample.  ``_store`` keeps a 0.0 (it omits only None),
+        # so the truthiness test still has to be applied here or a stopped
+        # header would take a fan slot.
         pool = iter(
             rpm for f in self.fans()
-            if "gpu" not in f.key.lower() and (rpm := f.rpm())
+            if "gpu" not in f.key.lower()
+            and (rpm := readings.get(f"fan:{f.key}:rpm"))
         )
         fan_cpu = next(pool, 0)
         fan_ssd = next(pool, 0)
@@ -1034,12 +1039,12 @@ class SensorEnumerator(ABC):
             cpu_percent=(sum(c.usage for c in cpus) / len(cpus)) if cpus else 0.0,
             cpu_freq=max((c.freq for c in cpus), default=0.0),
             cpu_power=sum(c.power for c in cpus),
-            gpu_temp=_safe(primary.temp) if primary else 0.0,
-            gpu_usage=_safe(primary.usage) if primary else 0.0,
-            gpu_clock=_safe(primary.clock) if primary else 0.0,
-            gpu_power=_safe(primary.power) if primary else 0.0,
-            mem_percent=_safe(mem.percent),
-            mem_available=_safe(mem.available),
+            gpu_temp=value("gpu:primary:temp", 0.0),
+            gpu_usage=value("gpu:primary:usage", 0.0),
+            gpu_clock=value("gpu:primary:clock", 0.0),
+            gpu_power=value("gpu:primary:power", 0.0),
+            mem_percent=value("memory:percent", 0.0),
+            mem_available=value("memory:available", 0.0),
             mem_used=readings.get("memory:used", 0.0),
             mem_temp=readings.get("memory:temp", 0.0),
             mem_clock=readings.get("memory:clock", 0.0),
