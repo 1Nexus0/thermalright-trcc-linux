@@ -17,6 +17,7 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from tests.mock_platform import MockPlatform
 from trcc.adapters.infra.data_install_runner import (
@@ -190,19 +191,34 @@ def test_a_raising_install_still_publishes_and_keeps_the_worker_alive() -> None:
         runner.shutdown()
 
 
+def _worker_alive() -> bool:
+    return any(t.name == "trcc-data-install" and t.is_alive()
+               for t in threading.enumerate())
+
+
 def test_shutdown_stops_the_worker() -> None:
+    """The named worker exists while running, and is gone after shutdown.
+
+    The "is gone" half alone was VACUOUS: it asserted that no live thread is
+    called ``trcc-data-install``, which is equally true when the worker was
+    never given that name.  Renaming the thread left it green.  The thread
+    name is identity -- ``QueueWorker`` takes it as a constructor argument and
+    this is what holds it -- so the existence half has to be asserted too.
+    """
     bus = EventBus()
     runner = ThreadDataInstallRunner(_Service(), bus)  # type: ignore[arg-type]
     _, arrived = _listen(bus)
     runner.submit((320, 240))
     assert arrived.wait(timeout=10.0)
 
+    assert _worker_alive(), (
+        "no live thread named 'trcc-data-install' while an install is in "
+        "flight — the worker is unnamed or was never spawned"
+    )
+
     runner.shutdown()
 
-    assert not any(
-        t.name == "trcc-data-install" and t.is_alive()
-        for t in threading.enumerate()
-    )
+    assert not _worker_alive()
 
 
 def test_submitting_after_shutdown_is_ignored() -> None:
@@ -214,3 +230,61 @@ def test_submitting_after_shutdown_is_ignored() -> None:
     runner.submit((320, 240))
 
     assert service.calls == []
+
+
+# ── the invariant the spawn guard actually protects ──────────────────────
+
+
+class _OverlapProbe:
+    """Records the highest number of installs running at the same moment."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.live = 0
+        self.peak = 0
+
+    def ensure_all(self, resolution, variant="", mask_variant=""):
+        del resolution, variant, mask_variant
+        with self._lock:
+            self.live += 1
+            self.peak = max(self.peak, self.live)
+        time.sleep(0.15)
+        with self._lock:
+            self.live -= 1
+        return SimpleNamespace(ok=True)
+
+
+def test_two_submissions_are_served_one_at_a_time() -> None:
+    """One worker drains the queue — submissions never overlap.
+
+    ``_start`` spawns the worker on FIRST use and returns early on every call
+    after that.  Nothing tested the early return, so deleting it left the
+    whole suite green: every existing test submits once, or submits twice and
+    only checks that the events arrive.
+
+    What the guard protects is not a thread count, it is SERIALIZATION.  With
+    it removed, a second worker spawns and two installs run concurrently —
+    measured peak 1 -> 2 — and ``shutdown`` then joins only the last thread it
+    stored, logging "did not stop within 2.0s".  ``VideoExportRunner`` states
+    the same contract outright: "Serialized on purpose.  Two concurrent ffmpeg
+    runs over the same machine finish no sooner together than in turn."
+
+    So this asserts the overlap, not the thread count: a future runner that
+    serialises some other way still passes, and one that does not still fails.
+    """
+    bus = EventBus()
+    probe = _OverlapProbe()
+    runner = ThreadDataInstallRunner(probe, bus)   # type: ignore[arg-type]
+    try:
+        runner.submit((320, 240))
+        runner.submit((480, 854))          # distinct key — dedupe won't block it
+        deadline = time.monotonic() + 10.0
+        while probe.peak == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        time.sleep(0.4)                    # let both run to completion
+        assert probe.peak == 1, (
+            f"{probe.peak} installs ran at once — the worker is no longer "
+            "serialising, so a second spawn is draining the same queue"
+        )
+    finally:
+        runner.shutdown()

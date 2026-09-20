@@ -11,17 +11,16 @@ never names a thread.  Mirrors ``data_install_runner.py`` and
 from __future__ import annotations
 
 import logging
-import queue
-import threading
 
 from ...core.events import EventBus, VideoExportFinished, VideoExportProgress
 from ...core.models import VideoExportRequest
 from ...core.ports import VideoExportRunner
+from ._worker import QueueWorker
 
 log = logging.getLogger(__name__)
 
-# Wakes the worker out of a blocking ``get()`` at shutdown.
-_STOP = object()
+#: (token, request) — one queued encode.
+_Job = tuple[str, VideoExportRequest]
 
 
 class _ProgressPublisher:
@@ -107,59 +106,23 @@ class ThreadVideoExportRunner(VideoExportRunner):
         log.info("ThreadVideoExportRunner.__init__: join_timeout=%.1fs",
                  join_timeout)
         self._events = events
-        self._join_timeout = join_timeout
-        self._queue: queue.Queue = queue.Queue()
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._lock = threading.Lock()
+        self._worker: QueueWorker[_Job] = QueueWorker(
+            "trcc-video-export", self._export,
+            stall_hint="mid-encode", join_timeout=join_timeout,
+        )
 
     def submit(self, token: str, request: VideoExportRequest) -> None:
         log.info("submit: token=%s source=%s", token, request.source)
-        if self._stop.is_set():
-            log.warning("submit: token=%s after shutdown — ignored", token)
-            return
-        self._start()
-        self._queue.put((token, request))
+        self._worker.submit((token, request))
 
-    def _start(self) -> None:
-        """Spawn the worker on first use — most runs never export."""
-        with self._lock:
-            if self._thread is not None:
-                return
-            log.info("_start: spawning video-export worker")
-            self._thread = threading.Thread(
-                target=self._run, name="trcc-video-export", daemon=True,
-            )
-            self._thread.start()
-
-    def _run(self) -> None:
-        log.info("_run: video-export worker started")
-        while not self._stop.is_set():
-            item = self._queue.get()
-            if item is _STOP or self._stop.is_set():
-                break
-            token, request = item
-            _export_and_publish(self._events, token, request)
-        log.info("_run: video-export worker stopped")
+    def _export(self, job: _Job) -> None:
+        """Unpack one queued job for the worker — the seam it calls back on."""
+        log.debug("_export: token=%s source=%s", job[0], job[1].source)
+        _export_and_publish(self._events, *job)
 
     def shutdown(self) -> None:
         log.info("shutdown: stopping video-export worker")
-        self._stop.set()
-        thread = self._thread
-        if thread is None:
-            log.debug("shutdown: worker was never started")
-            return
-        self._queue.put(_STOP)   # break a blocking get() so the join is prompt
-        thread.join(timeout=self._join_timeout)
-        if thread.is_alive():
-            # Mid-encode: ``subprocess.run`` owns the thread until ffmpeg's
-            # own timeout.  It is a daemon, so it cannot hold the process open.
-            log.warning(
-                "shutdown: video-export worker did not stop within %.1fs "
-                "(likely mid-encode) — abandoning it as a daemon",
-                self._join_timeout,
-            )
-        self._thread = None
+        self._worker.shutdown()
 
 
 class SyncVideoExportRunner(VideoExportRunner):
