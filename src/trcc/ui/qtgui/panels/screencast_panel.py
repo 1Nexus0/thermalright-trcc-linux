@@ -83,7 +83,8 @@ class ScreencastPanel(BasePanel):
 
         # ── Device picker ─────────────────────────────────────────────
         self._picker = DevicePickerWidget(
-            self.app, self._bus, kind_filter="lcd", parent=self,
+            self.app, self._bus, kind_filter="lcd",
+            parent=self, selection=self._selection,
         )
         self._picker.key_changed.connect(self._on_key_changed)
 

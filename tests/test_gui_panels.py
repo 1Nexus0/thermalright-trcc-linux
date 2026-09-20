@@ -677,14 +677,23 @@ def test_preview_panel_handles_missing_key(gui_app: App) -> None:
     panel._refresh()  # should be a no-op when key is empty
 
 
-def test_preview_panel_unknown_key_shows_placeholder(gui_app: App) -> None:
-    from trcc.ui.qtgui.panels.preview_panel import PreviewPanel
+def test_preview_surface_unknown_key_shows_placeholder(gui_app: App) -> None:
+    """An unselectable device explains itself instead of going blank.
 
-    panel = PreviewPanel(gui_app, _bus(gui_app))
-    panel._picker.set_key("dead:beef")
-    panel._refresh()
-    text = panel._preview.text()
-    assert "load a theme" in text.lower() or "no data" in text.lower()
+    Moved from ``PreviewPanel`` with the image: the rendered surface is now
+    window chrome (``PreviewSurface``), and the panel beside it carries only
+    the state read-out.  The behaviour is unchanged and still worth holding —
+    a silent black rectangle is the one outcome that tells the user nothing.
+    """
+    from trcc.ui.qtgui.device_selection import DeviceSelection
+    from trcc.ui.qtgui.preview_surface import PreviewSurface
+
+    selection = DeviceSelection()
+    surface = PreviewSurface(gui_app, _bus(gui_app), selection)
+    selection.set_key("dead:beef")
+    surface.refresh()
+    text = surface._label.text()
+    assert "load a theme" in text.lower() or "no data" in text.lower(), text
 
 
 def test_sensor_picker_filters_by_search(gui_app: App) -> None:
@@ -2888,3 +2897,363 @@ def test_the_shared_browser_guard_names_the_next_step(gui_app: App, qtbot) -> No
     said = panel._status.text().lower()
     assert "pick a device" in said
     assert "devices panel" in said, "no next step offered to a new user"
+
+
+# =========================================================================
+# qtgui — ONE device selection per window
+# =========================================================================
+
+#: Two LCDs.  The bug this gates is invisible with one device, because every
+#: panel independently defaults to index 0 and they agree by accident.
+_TWO_LCDS = [
+    {"type": "lcd", "vid": "87ad", "pid": "70db", "pm": 11, "sub": 5},
+    {"type": "lcd", "vid": "0402", "pid": "3922", "fbl": 100},
+]
+
+
+#: Two LCDs + an LED controller — the fleet needed to prove KIND routing.
+_MIXED_FLEET = [
+    {"type": "lcd", "vid": "87ad", "pid": "70db", "pm": 11, "sub": 5},
+    {"type": "lcd", "vid": "0402", "pid": "3922", "fbl": 100},
+    {"type": "led", "vid": "0416", "pid": "8001", "pm": 208},
+]
+
+
+def _fleet_app(tmp_path: Path, specs: list[dict]):
+    from trcc.adapters.render.qt import QtRenderer
+
+    from .mock_platform import MockPlatform
+    app = App(MockPlatform(specs, tmp_path), renderer=QtRenderer())
+    for info in app.platform.scan_devices():
+        app.attach(info.vid, info.pid)
+    return app
+
+
+def _two_device_app(tmp_path: Path):
+    from trcc.adapters.render.qt import QtRenderer
+
+    from .mock_platform import MockPlatform
+    app = App(MockPlatform(_TWO_LCDS, tmp_path), renderer=QtRenderer())
+    for info in app.platform.scan_devices():
+        app.attach(info.vid, info.pid)
+    return app
+
+
+def test_every_panel_agrees_on_the_selected_device(
+    qapp: object, tmp_path: Path, qtbot,
+) -> None:
+    """Picking a device in one panel must be what every other panel edits.
+
+    qtgui gave each panel its OWN ``DevicePickerWidget`` — ten of them — and
+    ``set_key`` (written so panels could sync) had zero production callers.
+    Driven on a two-device fleet: both panels default to the first device, the
+    user selects the second in Preview, and the overlay editor still edited the
+    FIRST one.  Every element added then landed on the wrong screen.  One
+    device hides it entirely, since each picker defaults to index 0 and they
+    agree by accident.
+
+    Built through the real ``MainWindow`` on purpose: sharing is a property of
+    the WINDOW (it owns one ``DeviceSelection`` per kind), exactly as
+    ``ui/gui`` owns a single ``TRCCApp._active_key``.  A panel constructed bare
+    still gets a private selection, so asserting on bare panels would test
+    nothing that ships.
+    """
+    del qapp
+    from trcc.core.commands import ListDevices
+    from trcc.ui.qtgui.app import MainWindow
+
+    app = _two_device_app(tmp_path)
+    try:
+        keys = [d.key for d in app.dispatch(ListDevices()).devices]
+        assert len(keys) == 2, f"fixture must offer two devices, got {keys}"
+
+        window = MainWindow(app)
+        qtbot.addWidget(window)
+        watched = ["preview", "overlay", "themes", "masks", "display"]
+
+        # The user picks the SECOND device.  Through the RAIL: it is the one
+        # place a device is chosen, and the preview panel no longer carries a
+        # picker of its own now that the preview is window chrome.
+        window._sidebar.choose(keys[1])
+
+        for name in watched:
+            panel = window._panels[name]
+            assert panel.device_key == keys[1], (
+                f"{name} still edits {panel.device_key!r} after the user "
+                f"selected {keys[1]!r} in the preview panel"
+            )
+            # The VISIBLE combo too, where the panel still has one — the
+            # preview panel's went with its image.
+            # Asserting ``device_key`` alone passed with the
+            # selection -> picker propagation deleted, because every panel
+            # reads the same selection object either way — while the panels
+            # themselves still act through ``self._picker.current_key()``.
+            # A gate that only proves the new accessor is a gate for the
+            # wrong thing.
+            picker = getattr(panel, "_picker", None)
+            assert picker is None or picker.current_key() == keys[1], (
+                f"{name}'s picker still shows {picker.current_key()!r} — "
+                f"the user would see, and act on, the wrong device"
+            )
+    finally:
+        app.close()
+
+
+def test_the_led_panel_keeps_its_own_device_selection(
+    qapp: object, tmp_path: Path, qtbot,
+) -> None:
+    """An LCD pick must not blank the LED panel.
+
+    One selection for the whole window would be simpler and wrong: LED and LCD
+    are different device kinds with different pickers (``kind_filter``), and
+    ``ui/gui`` models them as separate top-level views.  Selecting an LCD would
+    push a key the LED picker cannot show.
+    """
+    del qapp
+    from trcc.ui.qtgui.app import MainWindow
+
+    app = _two_device_app(tmp_path)
+    try:
+        window = MainWindow(app)
+        qtbot.addWidget(window)
+        assert (window._panels["led"].selection
+                is not window._panels["preview"].selection)
+    finally:
+        app.close()
+
+
+def test_the_sidebar_lists_every_attached_device(
+    qapp: object, tmp_path: Path, qtbot,
+) -> None:
+    """The devices found are listed on the side, like ``ui/gui``.
+
+    ``ui/gui``'s left rail IS the device list (``uc_device.py`` — "Shows
+    connected LCD devices as clickable buttons", 180x800).  qtgui's rail is
+    navigation, and its rail docstring claims to replace
+    ``gui/uc_activity_sidebar.py`` — which is not a nav rail at all but the
+    live-sensor list you click to add an overlay element.  The device list
+    ended up demoted to one destination among thirteen.
+    """
+    del qapp
+    from trcc.core.commands import ListDevices
+    from trcc.ui.qtgui.app import MainWindow
+
+    app = _two_device_app(tmp_path)
+    try:
+        keys = {d.key for d in app.dispatch(ListDevices()).devices}
+        window = MainWindow(app)
+        qtbot.addWidget(window)
+        assert window._sidebar.device_keys() == keys, (
+            f"rail lists {window._sidebar.device_keys()}, attached {keys}"
+        )
+    finally:
+        app.close()
+
+
+def test_choosing_a_device_in_the_rail_drives_every_panel(
+    qapp: object, tmp_path: Path, qtbot,
+) -> None:
+    """Clicking the rail is what selects the device — as in ``ui/gui``.
+
+    The rail is the ONE place a device is chosen; the per-panel pickers are
+    views of that choice.  Routed by ``DeviceEntry.kind`` so picking an LCD
+    cannot blank the LED panel.
+    """
+    del qapp
+    from trcc.core.commands import ListDevices
+    from trcc.ui.qtgui.app import MainWindow
+
+    app = _two_device_app(tmp_path)
+    try:
+        keys = [d.key for d in app.dispatch(ListDevices()).devices]
+        window = MainWindow(app)
+        qtbot.addWidget(window)
+
+        window._sidebar.choose(keys[1])
+
+        for name in ("preview", "overlay", "themes", "display"):
+            panel = window._panels[name]
+            assert panel.device_key == keys[1], (
+                f"{name} edits {panel.device_key!r} after the rail chose "
+                f"{keys[1]!r}"
+            )
+            picker = getattr(panel, "_picker", None)
+            assert picker is None or picker.current_key() == keys[1]
+    finally:
+        app.close()
+
+
+def test_choosing_an_lcd_on_the_rail_leaves_the_led_panel_alone(
+    qapp: object, tmp_path: Path, qtbot,
+) -> None:
+    """Rail choices route by ``DeviceEntry.kind``, in BOTH directions.
+
+    One selection for the window would be simpler and wrong: pushing an LCD
+    key at the LED panel leaves it showing "no data" for a controller that is
+    working fine, and vice versa.
+
+    Asserting only that the two selections are distinct OBJECTS does not catch
+    this — that assertion stayed green with the kind check deleted, because
+    the objects are still two.  What has to be asserted is that a pick of one
+    kind does not move the other.
+    """
+    del qapp
+    from trcc.core.commands import ListDevices
+    from trcc.ui.qtgui.app import MainWindow
+
+    app = _fleet_app(tmp_path, _MIXED_FLEET)
+    try:
+        devices = app.dispatch(ListDevices()).devices
+        lcds = [d.key for d in devices if d.kind != "led"]
+        leds = [d.key for d in devices if d.kind == "led"]
+        assert len(lcds) >= 2 and len(leds) == 1, (
+            f"fleet must mix kinds: lcd={lcds} led={leds}"
+        )
+
+        window = MainWindow(app)
+        qtbot.addWidget(window)
+        led_panel = window._panels["led"]
+        preview = window._panels["preview"]
+
+        window._sidebar.choose(leds[0])
+        assert led_panel.device_key == leds[0]
+        lcd_before = preview.device_key
+
+        window._sidebar.choose(lcds[1])
+        assert preview.device_key == lcds[1], "the LCD pick did not land"
+        assert led_panel.device_key == leds[0], (
+            f"the LED panel followed an LCD pick — now {led_panel.device_key!r}"
+        )
+
+        window._sidebar.choose(leds[0])
+        assert preview.device_key == lcds[1], (
+            f"the LCD panels followed an LED pick — now {preview.device_key!r}"
+        )
+        del lcd_before
+    finally:
+        app.close()
+
+
+def test_the_device_preview_is_always_on_screen(
+    qapp: object, tmp_path: Path, qtbot,
+) -> None:
+    """The preview is chrome, not a destination.
+
+    ``ui/gui`` keeps it at x 196-696 of a fixed window while the tool stack
+    occupies x 712-1444, so changing a colour and seeing the result is ONE
+    screen.  qtgui made it one page of a thirteen-page ``QStackedWidget``, so
+    the edit->see loop required navigating away from the thing being edited —
+    and drag-to-position an element had nowhere to live, because there was no
+    preview on the editing screen to drag on.
+
+    Asserted for EVERY destination, because "always" is the whole property.
+    """
+    del qapp
+    from trcc.ui.qtgui.app import MainWindow
+
+    app = _two_device_app(tmp_path)
+    try:
+        window = MainWindow(app)
+        qtbot.addWidget(window)
+        surface = window._preview_surface
+        for name in window._panels:
+            window._sidebar.selected.emit(name)
+            assert not surface.isHidden(), (
+                f"the preview is hidden while the {name!r} panel is shown"
+            )
+    finally:
+        app.close()
+
+
+def test_the_preview_is_not_rendered_twice(
+    qapp: object, tmp_path: Path, qtbot,
+) -> None:
+    """One surface, not one per place that wants to show it.
+
+    Extracting the surface into persistent chrome while leaving the old copy
+    inside ``PreviewPanel`` would render every frame twice and put two
+    ``BuildPreview`` dispatches on the tick — the duplication the vision
+    explicitly rules out.
+    """
+    del qapp
+    from trcc.ui.qtgui.app import MainWindow
+    from trcc.ui.qtgui.preview_surface import PreviewSurface
+
+    app = _two_device_app(tmp_path)
+    try:
+        window = MainWindow(app)
+        qtbot.addWidget(window)
+        surfaces = window.findChildren(PreviewSurface)
+        assert len(surfaces) == 1, (
+            f"{len(surfaces)} preview surfaces in one window — each one "
+            "dispatches BuildPreview on its own tick"
+        )
+
+        # Counting the WIDGET is not enough: the old panel rendered with its
+        # own inline QLabel, so a second copy would not be a PreviewSurface at
+        # all and this gate would stay green while every frame rendered twice.
+        # Count the actual work instead.
+        from trcc.core.commands import BuildPreview
+        seen: list = []
+        real = App.dispatch
+
+        def counting(self, cmd):
+            if isinstance(cmd, BuildPreview):
+                seen.append(cmd.key)
+            return real(self, cmd)
+
+        App.dispatch = counting           # type: ignore[method-assign]
+        try:
+            for widget in (surfaces[0], window._panels["preview"]):
+                refresh = getattr(widget, "refresh", None) or widget._refresh
+                refresh()
+        finally:
+            App.dispatch = real           # type: ignore[method-assign]
+        assert len(seen) == 1, (
+            f"{len(seen)} BuildPreview dispatches for one refresh round — "
+            "the preview is being rendered more than once per tick"
+        )
+    finally:
+        app.close()
+
+
+def test_the_preview_wears_the_panel_s_bezel(qapp: object, tmp_path: Path) -> None:
+    """The render sits inside its device's frame, at the frame's offset.
+
+    ``ui/gui`` never showed a bare rectangle: it paints a 500x500 container
+    with the frame image for that panel and insets the live render at an exact
+    offset, so a 360x360 round cooler gets a ROUND bezel and an 854x480
+    widescreen is scaled to fit.  The table is ``_PREVIEW_OFFSETS``
+    (``ui/presentation/lcd_panel.py``) — toolkit-free, already tested, and
+    imported by exactly ONE module in ``src/``: ``ui/gui/uc_preview``.
+
+    qtgui painted the raw pixmap on a black QLabel.  Nothing was missing but
+    the composition — the model is shared, and qtgui already reads gui's asset
+    tree (``assets._default_assets_dir``), so all 57 ``preview_*.png`` were
+    reachable the whole time.
+    """
+    del qapp
+    from trcc.ui.presentation.lcd_panel import lcd_panel_for
+    from trcc.ui.qtgui.device_selection import DeviceSelection
+    from trcc.ui.qtgui.preview_surface import FRAME_EDGE, PreviewSurface
+
+    app = _two_device_app(tmp_path)
+    try:
+        surface = PreviewSurface(app, _bus(app), DeviceSelection())
+        assert surface._frame.size().toTuple() == (FRAME_EDGE, FRAME_EDGE)
+
+        for resolution in ((320, 320), (360, 360), (854, 480)):
+            surface._apply_panel(resolution)
+            left, top, width, height, asset = (
+                lcd_panel_for(resolution).offset_info
+            )
+            assert surface._label.pos().toTuple() == (left, top), (
+                f"{resolution} render is at {surface._label.pos().toTuple()}, "
+                f"not the bezel's cutout at {(left, top)}"
+            )
+            assert surface._label.size().toTuple() == (width, height)
+            assert not surface._frame.pixmap().isNull(), (
+                f"no bezel drawn for {resolution} (expected {asset})"
+            )
+    finally:
+        app.close()

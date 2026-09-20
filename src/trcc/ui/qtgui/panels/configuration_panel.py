@@ -64,7 +64,8 @@ class ConfigurationPanel(BasePanel):
     def _setup_ui(self) -> None:
         log.debug("_setup_ui")
         self._picker = DevicePickerWidget(
-            self.app, self._bus, kind_filter="lcd", parent=self,
+            self.app, self._bus, kind_filter="lcd",
+            parent=self, selection=self._selection,
         )
 
         load_btn = QPushButton("Load current settings", self)

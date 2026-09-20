@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QLabel, QListWidget
 from ....core.commands import DeviceState
 from ..base import BasePanel
 from ..device_picker import DevicePickerWidget
+from ..device_selection import DeviceSelection
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
@@ -75,8 +76,10 @@ class AssetBrowserPanel(BasePanel):
         app: App,
         bus: BusBridge,
         parent: QWidget | None = None,
+        *,
+        selection: DeviceSelection | None = None,
     ) -> None:
-        super().__init__(app, bus, parent)
+        super().__init__(app, bus, parent, selection=selection)
         # The first-run archives download in the background now, so this grid
         # is built BEFORE its assets exist and would otherwise stay empty for
         # the whole session.  The gui skin re-lists via ``notify_data_ready``;

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import QFrame, QWidget
 
 from ...core.results import Result
 from ..qt_periodic import PeriodicUpdater
+from .device_selection import DeviceSelection
 
 if TYPE_CHECKING:
     from ...app import App
@@ -62,11 +63,18 @@ class BasePanel(QFrame):
         app: App,
         bus: BusBridge,
         parent: QWidget | None = None,
+        *,
+        selection: DeviceSelection | None = None,
     ) -> None:
-        log.debug("__init__: app=%s bus=%s", app, bus)
+        log.debug("__init__: app=%s bus=%s selection=%s", app, bus, selection)
         super().__init__(parent)
         self._app = app
         self._bus = bus
+        # Assigned BEFORE _setup_ui(): panels build their picker in there and
+        # hand it this selection.  A panel built without one (every test that
+        # constructs a panel bare) gets a private selection and behaves as it
+        # always did -- MainWindow is what makes them share.
+        self._selection = selection or DeviceSelection(self)
         self._updates = PeriodicUpdater(self)
         self._setup_ui()
 
@@ -143,6 +151,23 @@ class BasePanel(QFrame):
         """Run *command* on the App.  Convenience over ``self._app.dispatch``."""
         log.debug("dispatch: command=%s", command)
         return self._app.dispatch(command)
+
+    @property
+    def device_key(self) -> str:
+        """The device this panel edits — one per window, not per widget.
+
+        Read this rather than a panel's own picker: the picker is a VIEW of
+        the selection, and step 2 of the workspace rebuild deletes most of
+        them in favour of the device rail.
+        """
+        log.debug("device_key -> %r", self._selection.key)
+        return self._selection.key
+
+    @property
+    def selection(self) -> DeviceSelection:
+        """The shared selection, for panels that build their own picker."""
+        log.debug("selection")
+        return self._selection
 
     @property
     def app(self) -> App:

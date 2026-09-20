@@ -47,7 +47,8 @@ class LedPanel(BasePanel):
         # ── Header: device key + status ───────────────────────────────
         log.debug("_setup_ui")
         self._picker = DevicePickerWidget(
-            self.app, self._bus, kind_filter="led", parent=self,
+            self.app, self._bus, kind_filter="led",
+            parent=self, selection=self._selection,
         )
         self._picker.key_changed.connect(self._on_key_changed)
 

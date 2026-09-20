@@ -54,6 +54,7 @@ from ...core.models import Wire
 from ..bus_bridge import BusBridge
 from ..qt_periodic import PeriodicUpdater
 from ..qt_tray import TrayController
+from .device_selection import DeviceSelection
 from .panels import (
     AboutPanel,
     ActivitySidebar,
@@ -70,6 +71,7 @@ from .panels import (
     StatusPanel,
     SystemPanel,
 )
+from .preview_surface import FRAME_EDGE, PreviewSurface
 
 log = logging.getLogger(__name__)
 
@@ -95,26 +97,45 @@ class MainWindow(QMainWindow):
                  autostart.enabled, autostart.target)
 
         self.setWindowTitle("TRCC — Thermalright LCD/LED Cooler Control (next)")
-        self.resize(960, 640)
+        # Rail + a 480px preview + a usable tool column.  ``ui/gui`` is a
+        # fixed 1454x800 for the same three regions.
+        self.resize(1440, 760)
 
         # ── Layout: sidebar | stacked content ──
-        sidebar = ActivitySidebar(app, self._bus, self)
+        sidebar = self._sidebar = ActivitySidebar(app, self._bus, self)
         content = QStackedWidget(self)
         content.setObjectName("trcc-content")
+
+        self._lcd_selection = DeviceSelection(self)
+        self._led_selection = DeviceSelection(self)
+        # Held with its concrete type: the panel dict is ``dict[str, QWidget]``
+        # and the surface feeds this one a render size.
+        self._state_panel = PreviewPanel(
+            app, self._bus, self, selection=self._lcd_selection,
+        )
 
         # Register panels.  Key matches the sidebar entry's key.
         self._panels: dict[str, QWidget] = {
             "devices": DevicePanel(app, self._bus, self),
-            "display": DisplayPanel(app, self._bus, self),
-            "preview": PreviewPanel(app, self._bus, self),
-            "themes":  LocalThemeBrowser(app, self._bus, self),
-            "cloud":   CloudThemeBrowser(app, self._bus, self),
-            "masks":   MaskBrowser(app, self._bus, self),
-            "overlay": OverlayEditorPanel(app, self._bus, self),
-            "screencast": ScreencastPanel(app, self._bus, self),
-            "config":  ConfigurationPanel(app, self._bus, self),
-            "led":     LedPanel(app, self._bus, self),
-            "status":  StatusPanel(app, self._bus, self),
+            "display": DisplayPanel(app, self._bus, self,
+                                    selection=self._lcd_selection),
+            "preview": self._state_panel,
+            "themes":  LocalThemeBrowser(app, self._bus, self,
+                                    selection=self._lcd_selection),
+            "cloud":   CloudThemeBrowser(app, self._bus, self,
+                                    selection=self._lcd_selection),
+            "masks":   MaskBrowser(app, self._bus, self,
+                                    selection=self._lcd_selection),
+            "overlay": OverlayEditorPanel(app, self._bus, self,
+                                    selection=self._lcd_selection),
+            "screencast": ScreencastPanel(app, self._bus, self,
+                                    selection=self._lcd_selection),
+            "config":  ConfigurationPanel(app, self._bus, self,
+                                    selection=self._lcd_selection),
+            "led":     LedPanel(app, self._bus, self,
+                                    selection=self._led_selection),
+            "status":  StatusPanel(app, self._bus, self,
+                                    selection=self._lcd_selection),
             "system":  SystemPanel(app, self._bus, self),
             "about":   AboutPanel(app, self._bus, self),
         }
@@ -126,19 +147,15 @@ class MainWindow(QMainWindow):
                    else "devices")
         content.setCurrentWidget(self._panels[initial])
         sidebar.select(initial)
+        self._wire_device_selection(sidebar)
+
         sidebar.selected.connect(
             lambda key: content.setCurrentWidget(
                 self._panels.get(key, self._panels["devices"]),
             ),
         )
 
-        container = QWidget(self)
-        row = QHBoxLayout(container)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(0)
-        row.addWidget(sidebar)
-        row.addWidget(content, 1)
-        self.setCentralWidget(container)
+        self.setCentralWidget(self._build_chrome(app, sidebar, content))
 
         status = QStatusBar(self)
         self.setStatusBar(status)
@@ -340,6 +357,75 @@ class MainWindow(QMainWindow):
             self._app.dispatch(TickDisplay(key=key))
         except Exception as e:
             log.exception("Video tick failed for %s: %s", key, e)
+
+    def _build_chrome(
+        self, app: App, sidebar: ActivitySidebar, content: QStackedWidget,
+    ) -> QWidget:
+        """Assemble rail | preview | content, with the preview permanent.
+
+        The preview sits BETWEEN the other two and never leaves, which is the
+        whole point: ``ui/gui`` keeps it beside the tool stack (preview at
+        x 196-696, tools at x 712-1444 of a fixed 1454x800) so changing a
+        colour and seeing the result is ONE screen with no navigation.
+
+        Unconditional rather than shown only for "device" panels: one widget,
+        always there, no classification of thirteen panels into workspace and
+        full-window and no branch to get wrong.
+        """
+        log.info("_build_chrome: rail | preview | content")
+        self._preview_surface = PreviewSurface(
+            app, self._bus, self._lcd_selection, self,
+        )
+        self._preview_surface.setFixedWidth(FRAME_EDGE + 16)
+        # The state read-out reports the size of the render the surface just
+        # produced rather than dispatching a second BuildPreview of its own.
+        self._preview_surface.rendered.connect(self._state_panel.set_render_size)
+
+        container = QWidget(self)
+        row = QHBoxLayout(container)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addWidget(sidebar)
+        row.addWidget(self._preview_surface)
+        row.addWidget(content, 1)
+        return container
+
+    def _wire_device_selection(self, sidebar: ActivitySidebar) -> None:
+        """Make the rail the one place a device is chosen.
+
+        ONE :class:`DeviceSelection` per window, per KIND: every panel that
+        edits an LCD shares the first, the LED panel has its own.  An LCD
+        workspace and an LED workspace are different contexts -- ``ui/gui``
+        makes them different top-level views -- so an LCD pick must not blank
+        the LED panel.  Before this, each panel owned a private picker and
+        they diverged silently on a two-device fleet.
+
+        Three connections, and the seeding:
+
+        * the rail announces, MainWindow routes by kind, every panel observes;
+        * a pick made in a panel's own picker echoes back onto the rail, so
+          the highlighted row is always the device the window is editing;
+        * the rail is built BEFORE the panels, so its first auto-selection
+          fires before any of this exists and it is the pickers that seed the
+          window.  Reflecting the result back removes the dependence on the
+          registry happening to list an LCD first.
+        """
+        log.info("_wire_device_selection: one LCD + one LED selection")
+        sidebar.device_chosen.connect(self._on_device_chosen)
+        self._lcd_selection.changed.connect(sidebar.show_device)
+        self._led_selection.changed.connect(sidebar.show_device)
+        sidebar.show_device(self._lcd_selection.key)
+
+    def _on_device_chosen(self, key: str, kind: str) -> None:
+        """Route a rail choice to the DeviceSelection for that device kind.
+
+        ``DeviceEntry.kind`` is the router: an LED controller has no
+        renderable screen, so pushing its key at the LCD panels would leave
+        every one of them showing "no data" for a device that is working fine.
+        """
+        log.info("MainWindow._on_device_chosen: key=%s kind=%s", key, kind)
+        target = self._led_selection if kind == "led" else self._lcd_selection
+        target.set_key(key)
 
     def _on_tick(self) -> None:
         """Fire one render+send for every device with an active theme.

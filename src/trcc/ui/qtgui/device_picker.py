@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...core.commands import DiscoverDevices, ListDevices
+from .device_selection import DeviceSelection
 
 if TYPE_CHECKING:
     from ...app import App
@@ -59,14 +60,18 @@ class DevicePickerWidget(QWidget):
         *,
         kind_filter: str | None = None,
         parent: QWidget | None = None,
+        selection: DeviceSelection | None = None,
     ) -> None:
-        log.debug("__init__: app=%s bus=%s", app, bus)
+        log.debug("__init__: app=%s bus=%s selection=%s", app, bus, selection)
         super().__init__(parent)
         self._app = app
         self._bus = bus
         self._kind_filter = kind_filter  # "lcd" / "led" / None
+        self._selection = selection
         self._build()
         self._populate_from_app()
+        if selection is not None:
+            self._bind(selection)
         if bus is not None:
             # Refresh dropdown when devices are attached/detached from
             # any UI — events arrive on the Qt thread thanks to the
@@ -79,6 +84,29 @@ class DevicePickerWidget(QWidget):
                 lambda _evt: self._populate_from_app(),
                 type=Qt.ConnectionType.QueuedConnection,
             )
+
+    def _bind(self, selection: DeviceSelection) -> None:
+        """Make this combo a VIEW of the window's shared selection.
+
+        Both directions, which is what was missing: a user pick updates the
+        selection, and a pick made in any other panel updates this combo.
+        ``set_key`` blocks signals, so the round trip cannot loop, and
+        ``DeviceSelection.set_key`` no-ops on an unchanged key.
+
+        Seeding runs whichever way has information.  The FIRST picker built
+        finds an empty selection and seeds it with its own sensible default
+        (the first attached device); every later picker finds that key and
+        adopts it instead of defaulting to index 0 -- which is precisely the
+        divergence this replaces.
+        """
+        log.info("_bind: selection.key=%r combo=%r",
+                 selection.key, self.current_key())
+        if selection.key:
+            self.set_key(selection.key)
+        else:
+            selection.set_key(self.current_key())
+        self.key_changed.connect(selection.set_key)
+        selection.changed.connect(self.set_key)
 
     # ── Public API ───────────────────────────────────────────────────
 
