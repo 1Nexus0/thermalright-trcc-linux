@@ -161,3 +161,53 @@ def test_an_undeclared_row_never_yields_a_zero_sized_profile() -> None:
             f"{profile.width}x{profile.height} with no handshake — a zero "
             f"surface, not a geometry"
         )
+
+
+# ── Every resolution a panel can resolve to must have shipped artwork ──────
+
+
+def test_every_reachable_resolution_has_both_shipped_catalogs() -> None:
+    """A profile resolution IS an archive name, so the two cannot drift.
+
+    ``DataInstallService`` builds the archive name straight from the panel's
+    size (``theme{width}{height}.7z``), and a non-square panel needs BOTH
+    orientations because the SUB byte or the user's angle can select either.
+    So changing a resolution in ``protocol.py`` silently changes which file
+    the app asks for -- and if nobody drew that artwork, the panel has no
+    themes at all and the failure is a download 404, far from the edit.
+
+    This is the gate on that coupling, and it is the concrete answer to the
+    standing request in #248 to move 1920x462 to 1920x480 on the strength of a
+    moire measurement: the C# knows only 1920x462 and 1920x440 (its own aspect
+    constant is the exact rational 77/320 == 462/1920), and no
+    ``theme1920480.7z`` exists or ever has.  Re-sizing that panel is not a
+    one-line table edit; it is a request for a new artwork set.
+
+    MUTATION CHECK: change any row in ``FBL_PROFILES`` or the by-PM tables to
+    a size nothing was drawn for, and this names the missing file.
+    """
+    from trcc.core.geometry import catalog_spellings
+    from trcc.core.protocol import (
+        _FBL_192_BY_PM,
+        _FBL_224_BY_PM,
+        FBL_PROFILES,
+    )
+
+    data_dir = Path(__file__).resolve().parent.parent / "src" / "trcc" / "data"
+    assert data_dir.is_dir(), f"shipped data directory is missing: {data_dir}"
+
+    reachable = ({(p.width, p.height) for p in FBL_PROFILES.values()}
+                 | set(_FBL_192_BY_PM.values())
+                 | set(_FBL_224_BY_PM.values()))
+    assert len(reachable) > 10, "the resolution set collapsed — gate is vacuous"
+
+    missing: list[str] = []
+    for resolution in sorted(reachable):
+        for spelling in catalog_spellings(resolution):
+            archive = f"theme{spelling[0]}{spelling[1]}.7z"
+            if not (data_dir / archive).is_file():
+                missing.append(f"{resolution} needs {archive}")
+    assert not missing, (
+        "a panel can resolve to a size with no shipped theme catalog, so it "
+        f"would have no themes at all: {missing}"
+    )
