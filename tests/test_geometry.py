@@ -15,6 +15,7 @@ import pytest
 from trcc.core.geometry import (
     FitRect,
     OrientationPlan,
+    catalog_spellings,
     content_is_portrait,
     fit_rect_for_mode,
     fit_source_to_panel,
@@ -104,6 +105,10 @@ def test_plan_invariants_over_every_profile(
 
     # Canvas is always a permutation of the native resolution (area preserved).
     w, h = profile.resolution
+    # The two canvases by the CATALOG rule -- (long, short) and (short, long).
+    # Spelling them (w, h) / (h, w) reads the same for every panel stored
+    # (long, short) and inverts for 176x320, the one stored the other way.
+    landscape_canvas, portrait_canvas = catalog_spellings((w, h))
     assert plan.canvas in {(w, h), (h, w)}
     assert plan.canvas[0] * plan.canvas[1] == w * h
 
@@ -122,7 +127,7 @@ def test_plan_invariants_over_every_profile(
             # never reaches here — it composes portrait with post_rotate=0).
             assert orientation == 270
             assert not profile.widescreen
-            assert plan.canvas == (h, w)
+            assert plan.canvas == portrait_canvas
             assert plan.is_portrait_content is True
         else:
             # Landscape-only fallback: composed on the landscape canvas, spun
@@ -130,7 +135,7 @@ def test_plan_invariants_over_every_profile(
             assert plan.post_rotate == orientation
             assert not content_portrait
             assert not profile.widescreen
-            assert plan.canvas == (w, h)
+            assert plan.canvas == landscape_canvas
             assert plan.is_portrait_content is False
 
 
@@ -474,3 +479,56 @@ def test_the_render_path_delegates_without_changing_a_pixel(
     rect = fit_rect_for_mode(source, panel, mode)
     assert _fit(mode, *source, *panel) == (rect.width, rect.height,
                                            rect.x, rect.y)
+
+
+# ── The catalog spelling rule (long, short) ────────────────────────────────
+
+
+def test_catalog_spellings_matches_every_csharp_token_pair() -> None:
+    """``(long, short)`` / ``(short, long)`` IS the C#'s catalog rule.
+
+    Read off ``SetThemeInfo_ThemeML``'s own token table rather than retyped
+    here, so the pairs cannot drift from the transcription they came from.
+
+    This is the rule ``save_folder_resolution`` and ``plan_orientation`` used
+    to express as ``(w, h)`` / ``(h, w)``.  Those coincide only while every
+    catalogued resolution is stored (long, short) — true of all 15 live ones,
+    and NOT true of 176x320, the single family the C# stores (short, long).
+    Written the old way that panel picks its LANDSCAPE catalog when it wants
+    portrait.
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "dev"
+                           / "decompiler"))
+    from formcztv_init import (  # pyright: ignore[reportMissingImports]
+        _THEME_TOKENS,
+    )
+
+    from trcc.core.geometry import catalog_spellings
+
+    assert _THEME_TOKENS, "the transcription's token table is empty"
+    for flag, land, port, _portrait_from, _line in _THEME_TOKENS:
+        width, height = (int(n) for n in flag[2:].split("x"))
+        landscape, portrait = catalog_spellings((width, height))
+        assert f"{landscape[0]}{landscape[1]}" == land, (
+            f"{flag}: landscape catalog is {land!r}, we spell "
+            f"{landscape[0]}{landscape[1]}"
+        )
+        assert f"{portrait[0]}{portrait[1]}" == port, (
+            f"{flag}: portrait catalog is {port!r}, we spell "
+            f"{portrait[0]}{portrait[1]}"
+        )
+
+
+def test_the_spelling_rule_is_order_independent() -> None:
+    """A panel stored (short, long) gets the same pair as one stored (long, short).
+
+    The whole point of the reformulation: 176x320 and 320x176 are the same
+    physical screen and must name the same two catalogs.
+    """
+    from trcc.core.geometry import catalog_spellings
+
+    assert catalog_spellings((176, 320)) == catalog_spellings((320, 176))
+    assert catalog_spellings((176, 320)) == ((320, 176), (176, 320))

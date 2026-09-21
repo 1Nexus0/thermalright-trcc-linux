@@ -96,6 +96,31 @@ class OrientationPlan:
     post_rotate: int
 
 
+def catalog_spellings(
+    resolution: tuple[int, int],
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    """The (landscape, portrait) spellings of *resolution*.
+
+    Landscape is ``(long, short)`` and portrait ``(short, long)`` — the rule
+    the C# theme catalogs follow without exception, verified across all ten
+    ``SetThemeInfo_ThemeML`` token pairs (``854480``/``480854`` … and
+    ``320176``/``176320``).
+
+    Expressed as long/short rather than as ``(w, h)``/``(h, w)`` because those
+    two coincide only while every catalogued resolution is stored (long,
+    short), which is true of all 15 live ones today and NOT true of 176x320 —
+    the single family the C# stores (short, long).  Written the old way, that
+    panel selects its landscape catalog when it wants portrait and composes on
+    a transposed canvas.  Measured: 0 differences over 480 combinations of the
+    live resolutions, 8 over the same sweep once 176x320 is included.
+    """
+    w, h = resolution
+    short, long_ = min(w, h), max(w, h)
+    frame_log.debug("catalog_spellings: %dx%d -> landscape=%s portrait=%s",
+                    w, h, (long_, short), (short, long_))
+    return (long_, short), (short, long_)
+
+
 def plan_orientation(
     profile: DeviceProfile, orientation: int, content_is_portrait: bool,
 ) -> OrientationPlan:
@@ -125,18 +150,20 @@ def plan_orientation(
     reporter photo confirms it (#234 Chiefbot, #169/#203 widescreen).
     """
     w, h = profile.resolution
+    landscape, portrait = catalog_spellings((w, h))
     rotate_panel = profile.rotate and w != h and orientation in (90, 270)
     if rotate_panel and not content_is_portrait and not profile.widescreen:
         frame_log.debug("plan_orientation: landscape-only content on rotate "
-                        "panel %dx%d @ %d° -> compose landscape, post_rotate=%d",
-                        w, h, orientation, orientation)
-        return OrientationPlan((w, h), False, orientation)
+                        "panel %dx%d @ %d° -> compose landscape %dx%d, "
+                        "post_rotate=%d", w, h, orientation, *landscape,
+                        orientation)
+        return OrientationPlan(landscape, False, orientation)
     if rotate_panel:
         frame_log.debug("plan_orientation: rotate panel %dx%d @ %d° "
                         "(widescreen=%s) -> compose upright %dx%d, "
                         "post_rotate=0, the wire owns rotation",
-                        w, h, orientation, profile.widescreen, h, w)
-        return OrientationPlan((h, w), True, 0)
+                        w, h, orientation, profile.widescreen, *portrait)
+        return OrientationPlan(portrait, True, 0)
     plan = OrientationPlan(oriented_resolution((w, h), orientation), False, 0)
     frame_log.debug("plan_orientation: %dx%d @ %d° rotate=%s -> canvas %dx%d, "
                     "post_rotate=0", w, h, orientation, profile.rotate,
@@ -159,11 +186,12 @@ def save_folder_resolution(
     """
     log.debug("save_folder_resolution: profile=%s orientation=%s", profile, orientation)
     w, h = profile.resolution
+    landscape, portrait = catalog_spellings((w, h))
     rotate_panel = profile.rotate and w != h and orientation in (90, 270)
     if rotate_panel and (content_is_portrait or profile.widescreen):
-        return (h, w)                       # portrait folder
+        return portrait
     if rotate_panel:
-        return (w, h)                       # landscape content at a portrait angle
+        return landscape                    # landscape content at a portrait angle
     return oriented_resolution((w, h), orientation)
 
 
