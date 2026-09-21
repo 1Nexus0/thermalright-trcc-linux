@@ -45,7 +45,13 @@ dependencies = [
     "fastapi>=0.100",
     "tzdata>=2024.1; sys_platform == 'win32'",
     "uvicorn[standard]>=0.20",
-    "python-multipart>=0.0.6",
+    # >=0.0.18, not >=0.0.6, for two reasons measured together: 0.0.13
+    # renamed the import to ``python_multipart`` and FastAPI >=0.113 probes
+    # THAT name first, falling back to ``multipart.multipart`` — an import
+    # name an unrelated PyPI project also claims, so the old floor let a
+    # resolver produce a tree where FastAPI refuses every form route at
+    # import.  0.0.18 is the floor FastAPI's own "standard" extra pins.
+    "python-multipart>=0.0.18",
     "prompt_toolkit>=3.0.0",
     "sounddevice>=0.4.6",
     "wmi>=1.5.1; sys_platform == 'win32'",

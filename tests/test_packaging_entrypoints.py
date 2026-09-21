@@ -275,3 +275,46 @@ def test_nvidia_reader_advice_names_a_package_that_exists() -> None:
     # A family with no CONFIRMED name must not borrow Debian's — that is #207
     # in the other direction.  Alpine gets the pip fallback instead.
     assert "python3-pynvml" not in LinuxOS(_fam("apk")).software_install_hint("pynvml")
+
+
+def test_python_multipart_floor_is_at_or_above_the_import_rename() -> None:
+    """FastAPI probes the POST-rename import name first, so the floor must clear it.
+
+    ``python-multipart`` renamed its module ``multipart`` -> ``python_multipart``
+    in 0.0.13.  FastAPI >= 0.113 tries ``import python_multipart`` and only then
+    falls back to ``multipart.multipart`` — an import name an unrelated PyPI
+    project also claims.  Our floor was ``>=0.0.6``, which let a resolver
+    produce a tree where that fallback is the only path, and FastAPI then
+    refuses EVERY form route at import: the whole API surface, at startup, with
+    a message about installing a package that is already installed.
+
+    Reported from the field on 2026-09-21 by a contributor whose distro package
+    shipped the pre-rename module; their entire API test suite could not be
+    collected and they could only describe it as an environment difference.
+
+    The gate is the RENAME (0.0.13), not the pin.  We pin 0.0.18 to match
+    FastAPI's own ``standard`` extra, and that may move; what must never move
+    back is the guarantee that the name FastAPI looks for exists.
+    """
+    rename = (0, 0, 13)
+
+    data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
+    spec = next(
+        (d for d in data["project"]["dependencies"]
+         if d.split("[")[0].split(">")[0].split("=")[0].strip()
+         == "python-multipart"),
+        None,
+    )
+    assert spec is not None, "python-multipart is no longer a declared dependency"
+
+    match = re.search(r">=\s*(\d+)\.(\d+)\.(\d+)", spec)
+    assert match is not None, (
+        f"python-multipart must declare a >= floor, got {spec!r}"
+    )
+    floor = tuple(int(g) for g in match.groups())
+    assert floor >= rename, (
+        f"python-multipart floor {'.'.join(map(str, floor))} predates the "
+        f"{'.'.join(map(str, rename))} import rename, so pip may install a "
+        f"version whose module is named 'multipart' — FastAPI then refuses "
+        f"every form route at import"
+    )
