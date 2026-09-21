@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v9.10.1
 
 **The log stops erasing itself.** Four lines were writing ninety percent of
 everything TRCC logs, each of them recording an entire collection rather than
@@ -85,6 +85,12 @@ arrived, so a half-written image looked exactly like a healthy one.
 **`trcc report` now includes your device's firmware revision.** It decides which
 code path a panel takes, and it was only visible deep in the log where it could
 scroll away.
+
+**An app attached to the background service could miss the events it had just
+asked for.** When the command line, the web interface or a second window asked
+to receive live updates, it was told it was connected a fraction of a second
+before it really was. Anything that happened in that gap reached nobody, while
+the app believed it was listening. It is now connected before it is told so.
 
 **Packaging:** the project advertised Python 3.9 support on PyPI while refusing
 to install on it. It now says 3.10, which is what it has required for some time.
