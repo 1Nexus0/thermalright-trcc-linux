@@ -555,7 +555,18 @@ def get_profile(fbl: int, pm: int = 0, sub: int = 0) -> DeviceProfile:
         profile = dataclasses.replace(profile, width=w, height=h)
     rotation = resolve_encode_rotation(profile.resolution, profile.jpeg, sub)
     return dataclasses.replace(
-        profile, encode_base=rotation.base, encode_invert=rotation.invert)
+        profile, encode_base=rotation.base, encode_invert=rotation.invert,
+        # The SUB byte says TWO things, and this function used to spend it on
+        # only one.  Besides the encode rotation above it says how the panel is
+        # MOUNTED, and ``portrait_mounted`` was left at its dataclass default
+        # here — so ``BulkLcd``, which calls ``is_portrait_mounted`` itself,
+        # was the ONLY wire that ever answered True.  Driven on the adapters:
+        # a 960x540 panel reporting SUB=5 came back mounted on bulk and NOT
+        # mounted on HID type-2 (0416:5302 — the C#'s ``device2``, which is
+        # where the PS140 lives), so the same panel on the other wire started
+        # the owner at 0° and showed them a sideways picture.  That is #203 /
+        # #262 again, arriving by a different door.
+        portrait_mounted=is_portrait_mounted(profile.resolution, sub))
 
 
 def fbl_to_resolution(fbl: int, pm: int = 0) -> tuple[int, int]:

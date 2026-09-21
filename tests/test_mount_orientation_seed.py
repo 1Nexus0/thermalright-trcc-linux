@@ -49,6 +49,64 @@ def _settings(tmp_home: Path) -> Settings:
     return Settings(FakePaths(tmp_home))
 
 
+def _profile_over_the_wire(vid: int, pid: int, reply: bytes):
+    """Handshake a real adapter with scripted bytes and return its profile.
+
+    Driven through ``DEVICES[wire]`` rather than by calling a resolver, because
+    the defect below was precisely that one wire's resolver was not the one the
+    other wire used.  Asking the resolver would have agreed with itself.
+    """
+    from trcc.adapters.device._base import DEVICES
+    from trcc.core.registry import find_product
+
+    from .conftest import FakeBulkTransport
+
+    transport = FakeBulkTransport()
+    transport.read_script.append(reply)
+    product = find_product(vid, pid)
+    assert product is not None, f"{vid:04x}:{pid:04x} is not in the registry"
+    device = DEVICES[product.wire](product, transport)
+    device.connect()
+    return device.profile
+
+
+@pytest.mark.parametrize("sub, mounted", [(5, True), (0, False)])
+def test_the_mount_is_a_property_of_the_panel_not_the_wire(
+    sub: int, mounted: bool,
+) -> None:
+    """The same panel, the same SUB byte, on two wires — one answer.
+
+    ``get_profile`` took the SUB byte and spent it only on the encode rotation,
+    leaving ``portrait_mounted`` at its dataclass default.  ``BulkLcd`` calls
+    ``is_portrait_mounted`` itself, so bulk was the ONLY wire that could ever
+    answer True: a 960x540 reporting SUB=5 came back mounted on bulk and NOT
+    mounted on HID type-2 — 0416:5302, the C#'s ``device2``, which is where
+    the PS140 lives.  Its owner started at 0° and got a sideways picture: #203
+    and #262 arriving through a different door.
+
+    Both rows matter.  ``sub=0`` is the regression half — a normally-mounted
+    panel must still start upright, and a fix that answered True everywhere
+    would pass the interesting row and break every other cooler.
+    """
+    from . import mock_platform as mock
+
+    hid = _profile_over_the_wire(
+        0x0416, 0x5302, mock.hid_type2_reply(pm=10, sub=sub))
+    bulk = _profile_over_the_wire(
+        0x87AD, 0x70DB, mock.bulk_handshake_reply(pm=10, sub=sub))
+
+    assert hid.resolution == bulk.resolution == (960, 540), (
+        "both wires must land on the same panel, or the comparison below is "
+        "between two different devices"
+    )
+    assert hid.portrait_mounted is bulk.portrait_mounted is mounted, (
+        f"SUB={sub}: hid-type2 says portrait_mounted="
+        f"{hid.portrait_mounted}, bulk says {bulk.portrait_mounted}.  How a "
+        f"panel is bolted into its cooler is a fact about the panel, not "
+        f"about which wire carried the handshake"
+    )
+
+
 def test_the_reporters_panel_is_portrait_mounted() -> None:
     """PM=11 SUB=5 -> 854x480, portrait-mounted.  If this ever goes False the
     rest of the file is vacuous, so it is asserted rather than assumed."""

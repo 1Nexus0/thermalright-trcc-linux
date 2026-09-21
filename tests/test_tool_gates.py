@@ -29,7 +29,13 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
-_DEV_TOOLS = _ROOT / "dev" / "tools"
+_DEV = _ROOT / "dev"
+_DEV_TOOLS = _DEV / "tools"
+
+#: Searched recursively under ``dev/``, not just ``dev/tools/``.  The C# oracle
+#: audits live in ``dev/decompiler/`` and none carries a ``gate()`` today — but
+#: scoping discovery to one directory is how a gate added in the other would
+#: run nowhere, which is the exact failure this file was written about.
 
 #: Gates that must NOT run here, with the cause.  Not a convenience list — each
 #: entry is a tool whose gate cannot answer in a test process, and the name is
@@ -51,8 +57,9 @@ def _gated_tools() -> list[Path]:
     """Every tool exposing a ``gate()``, minus the ones that cannot run here."""
     return sorted(
         path
-        for path in _DEV_TOOLS.glob("*.py")
-        if path.name not in _EXCLUDED
+        for path in _DEV.rglob("*.py")
+        if "__pycache__" not in path.parts
+        and path.name not in _EXCLUDED
         and "\ndef gate(" in path.read_text(encoding="utf-8")
     )
 
