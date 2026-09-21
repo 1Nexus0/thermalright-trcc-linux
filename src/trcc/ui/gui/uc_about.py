@@ -17,12 +17,13 @@ Windows controls (from UCAbout.cs):
 from __future__ import annotations
 
 import logging
+import weakref
 import webbrowser
 from pathlib import Path
 from threading import Thread
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QIntValidator
 from PySide6.QtWidgets import (
     QComboBox,
@@ -49,6 +50,8 @@ from .base import BasePanel, create_image_button, set_background_pixmap
 from .constants import Layout, Sizes, Styles
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ...app import App
     from ._ui_state import UiStateStore
 
@@ -112,6 +115,41 @@ def _get_install_info(
         ui_state.set_install_info(method, distro)
     log.info("Recorded install info: method=%s, distro=%s", method, distro)
     return method, distro
+
+
+class _ToolTipFilter(QObject):
+    """Turn a watched widget's ToolTip event into one callback.
+
+    Owned by the widget it filters, so Qt destroys it with that widget and it
+    can never be consulted after its Python side is gone.  A panel that filters
+    its own child instead is the crash documented at the install site below.
+    """
+
+    def __init__(self, on_tooltip: Callable[[], None],
+                 parent: QObject | None = None) -> None:
+        log.debug("_ToolTipFilter.__init__: parent=%s", type(parent).__name__)
+        super().__init__(parent)
+        # WEAK, and that is the whole point.  A bound method held strongly here
+        # closes a cycle that spans both object graphs -- panel owns button owns
+        # filter, filter refs panel -- and Qt tears the C++ half down on a
+        # different schedule than CPython frees the Python half.  Measured: an
+        # identical filter holding ``lambda: None`` survives, and one holding
+        # the bound method segfaults even when it is never INSTALLED.
+        self._on_tooltip = weakref.WeakMethod(on_tooltip)  # type: ignore[arg-type]
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() != QEvent.Type.ToolTip:
+            return False
+        handler = self._on_tooltip()
+        if handler is None:
+            # The panel is gone; the tooltip has nowhere to go.  Swallow it
+            # rather than reviving a dead widget.
+            log.debug("_ToolTipFilter.eventFilter: owner gone — dropping")
+            return True
+        log.debug("_ToolTipFilter.eventFilter: tooltip on %s",
+                  type(obj).__name__)
+        handler()
+        return True
 
 
 class UCAbout(BasePanel):
@@ -262,7 +300,26 @@ class UCAbout(BasePanel):
         self.update_btn.setFlat(True)
         self.update_btn.setStyleSheet(Styles.FLAT_BUTTON)
         self.update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.update_btn.installEventFilter(self)
+        # The filter is its OWN QObject, parented to the BUTTON it watches —
+        # not ``self``.
+        #
+        # Installing the panel as a filter on its own child segfaults Qt during
+        # teardown, every time.  Core dump (2026-09-20):
+        #
+        #     QObject::property(char const*)
+        #     PySide::getWrapperForQObject(QObject*, _typeobject*)
+        #     QCoreApplicationPrivate::sendThroughObjectEventFilters(...)
+        #     QCoreApplicationPrivate::sendPostedEvents(...)
+        #
+        # Destroying the panel destroys the button, Qt dispatches through the
+        # button's filter list, and PySide tries to resolve the Python wrapper
+        # for a filter that is itself mid-destruction.  A filter owned by the
+        # object it watches dies WITH it and is never consulted afterwards —
+        # which is exactly the shape ``_BgPaintFilter`` in ``base.py`` already
+        # uses, and why that one has never crashed.
+        self._tooltip_filter = _ToolTipFilter(
+            self._on_update_btn_tooltip, self.update_btn)
+        self.update_btn.installEventFilter(self._tooltip_filter)
         self.update_btn.clicked.connect(self._on_update_clicked)
         self._update_available.connect(self._on_update_result)
         self._upgrade_finished.connect(self._on_upgrade_done)
@@ -295,12 +352,10 @@ class UCAbout(BasePanel):
                 return True
         return super().event(e)
 
-    def eventFilter(self, obj, e: QEvent) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
-        """Intercept tooltip on update button to use same custom position."""
-        if obj is self.update_btn and e.type() == QEvent.Type.ToolTip:
-            self._show_update_tooltip()
-            return True
-        return super().eventFilter(obj, e)
+    def _on_update_btn_tooltip(self) -> None:
+        """The button asked for a tooltip — place it the panel's way."""
+        log.debug("_on_update_btn_tooltip")
+        self._show_update_tooltip()
 
     def _make_checkbox(self, x, y, w, h, checked=False):
         """Create a checkbox-style toggle button using Windows checkbox images."""

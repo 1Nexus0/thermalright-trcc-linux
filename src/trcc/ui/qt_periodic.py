@@ -14,6 +14,7 @@ A panel owns an updater; its two public methods stay exactly where they were.
 from __future__ import annotations
 
 import logging
+import weakref
 from collections.abc import Callable
 
 from PySide6.QtCore import QTimer
@@ -29,11 +30,24 @@ class PeriodicUpdater:
     and a closed panel can't keep ticking.
     """
 
-    __slots__ = ("_owner", "_timer", "_wanted")
+    __slots__ = ("_owner", "_owner_name", "_timer", "_wanted")
 
     def __init__(self, owner: QWidget) -> None:
         log.debug("__init__: owner=%s", owner)
-        self._owner = owner
+        # WEAK.  A strong reference here closes a cycle that spans both object
+        # graphs -- the panel holds this updater, this updater held the panel,
+        # and the QTimer below is parented INTO the panel -- so Qt tears the C++
+        # half down on a different schedule than CPython frees the Python half.
+        # Measured 2026-09-20: that is what segfaulted the suite, in
+        # ``sendThroughObjectEventFilters`` -> ``getWrapperForQObject`` ->
+        # ``QObject::property`` on freed memory.
+        #
+        # The owner is needed as an OBJECT exactly once, to parent the timer.
+        # Every other use was ``self._owner_name`` for a log line, so
+        # the name is cached as a plain string and the reference can go weak
+        # without costing a single diagnostic.
+        self._owner = weakref.ref(owner)
+        self._owner_name = type(owner).__name__
         self._timer: QTimer | None = None
         # Whether the OWNER wants ticks at all, as opposed to whether the
         # timer happens to be running.  ``suspend``/``resume`` move the
@@ -49,11 +63,17 @@ class PeriodicUpdater:
         """
         log.info(
             "%s.start_periodic_updates: interval_ms=%d callback=%s",
-            type(self._owner).__name__, interval_ms,
+            self._owner_name, interval_ms,
             getattr(callback, "__qualname__", repr(callback)),
         )
         if self._timer is None:
-            self._timer = QTimer(self._owner)
+            owner = self._owner()
+            if owner is None:
+                log.warning("%s.start_periodic_updates: owner is gone — "
+                            "not starting a timer for a dead panel",
+                            self._owner_name)
+                return
+            self._timer = QTimer(owner)
         else:
             self._timer.stop()
             try:
@@ -72,7 +92,7 @@ class PeriodicUpdater:
         what separates this from :meth:`suspend`.
         """
         log.info("%s.stop_periodic_updates: active=%s",
-                 type(self._owner).__name__, self.is_active)
+                 self._owner_name, self.is_active)
         self._wanted = False
         if self._timer is not None:
             self._timer.stop()
@@ -86,7 +106,7 @@ class PeriodicUpdater:
         exactly the same rate as the visible one.
         """
         log.debug("%s.suspend: active=%s wanted=%s",
-                  type(self._owner).__name__, self.is_active, self._wanted)
+                  self._owner_name, self.is_active, self._wanted)
         if self._timer is not None:
             self._timer.stop()
 
@@ -96,7 +116,7 @@ class PeriodicUpdater:
         ``QTimer.start()`` with no argument reuses the interval, and ``stop``
         does not drop the connection, so nothing needs re-plumbing here.
         """
-        log.debug("%s.resume: wanted=%s", type(self._owner).__name__, self._wanted)
+        log.debug("%s.resume: wanted=%s", self._owner_name, self._wanted)
         if self._wanted and self._timer is not None:
             self._timer.start()
 
