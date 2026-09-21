@@ -82,3 +82,55 @@ def test_cut_video_is_kept_under_user_content_and_survives_close(
             "closing the GUI must still unload playback")
     finally:
         app.close()
+
+
+# =========================================================================
+# The W/H buttons must carry their choice out of the panel (#291)
+# =========================================================================
+
+
+def test_the_fit_buttons_carry_their_choice_out_of_the_panel(qtbot) -> None:
+    """Button → signal → the window's ``ExportVideoClip``.
+
+    The panel recorded the press into ``_width_fit`` and nothing ever read
+    it, so both buttons produced the same letterboxed export and the same
+    preview.  This is the hop that was missing, and the widget was
+    constructed in NO test, which is why nothing noticed.
+
+    The default matters as much as the presses: it must be ``None`` (auto),
+    not ``WIDTH``.  The old flag was a bool defaulting to True, so carrying
+    it through unchanged would have switched every untouched export to a
+    forced-width CROP.
+
+    MUTATION CHECK -- re-default ``_fit_mode`` to ``FitMode.WIDTH`` and the
+    first assertion fails; stop passing it to ``emit`` and the rest do.
+    """
+    from trcc.core.models import FitMode
+    from trcc.ui.gui.uc_video_cut import UCVideoCut
+
+    panel = UCVideoCut()
+    qtbot.addWidget(panel)
+
+    # Untouched: the auto arm, which is what every export did before.
+    assert panel._fit_mode is None
+
+    # A loaded clip and a trim, so the real ``_on_export`` guard passes.
+    panel._video_path = "/nonexistent/clip.mp4"
+    panel._start_ms, panel._end_ms = 0, 500
+
+    for handler, expected in ((panel._on_width_fit, FitMode.WIDTH),
+                              (panel._on_height_fit, FitMode.HEIGHT)):
+        handler()
+        assert panel._fit_mode is expected
+        # Drive the REAL emitter -- ``_on_export`` is what the Apply button
+        # calls.  Emitting the signal by hand here would assert my own
+        # arithmetic rather than the panel's, which is the fixture trap this
+        # whole issue turned on.
+        panel._is_processing = False
+        with qtbot.waitSignal(panel.export_requested, timeout=1000) as sig:
+            panel._on_export()
+        assert sig.args[3] is expected, (
+            "the fit the user pressed never left the panel — the window "
+            "builds ExportVideoClip from these arguments"
+        )
+        assert sig.args[:3] == [0, 500, 0]

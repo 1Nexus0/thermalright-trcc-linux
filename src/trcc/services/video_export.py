@@ -30,7 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..core import toolchain
-from ..core.geometry import fit_source_to_panel
+from ..core.geometry import fit_rect_for_mode
 from ..core.models import (
     SUBPROCESS_NO_WINDOW,
     ZT_FPS,
@@ -164,10 +164,23 @@ class VideoExporter:
             source_wh = (source_wh[1], source_wh[0])
         panel = (req.target_w, req.target_h)
         if source_wh[0] > 0 and source_wh[1] > 0:
-            fit = fit_source_to_panel(source_wh, panel)
+            fit = fit_rect_for_mode(source_wh, panel, req.fit_mode)
+            # scale -> crop -> pad, ALWAYS all three, because the forced-axis
+            # arms can overflow the canvas (a negative offset, which ``pad``
+            # cannot express) while the auto arm never does.  Written as one
+            # unconditional chain rather than a branch: on the auto path the
+            # crop is the full rect and the pad does the letterboxing, exactly
+            # as before; on a forced axis the crop takes the overflow and the
+            # pad becomes the no-op.  Same filters, no arm to get wrong.
             vf.append(f"scale={fit.width}:{fit.height}")
             vf.append(
-                f"pad={req.target_w}:{req.target_h}:{fit.x}:{fit.y}",
+                f"crop={min(fit.width, req.target_w)}:"
+                f"{min(fit.height, req.target_h)}:"
+                f"{max(0, -fit.x)}:{max(0, -fit.y)}",
+            )
+            vf.append(
+                f"pad={req.target_w}:{req.target_h}:"
+                f"{max(0, fit.x)}:{max(0, fit.y)}",
             )
             size_args: list[str] = []
         else:

@@ -717,6 +717,7 @@ Encode a clip of *path* into a loose ``Theme.zt`` for *key*'s panel.
 | `start_ms` | `int` | no |
 | `end_ms` | `int | None` | no |
 | `rotation` | `int` | no |
+| `fit_mode` | `FitMode | None` | no |
 
 ### `ImportConfig`
 

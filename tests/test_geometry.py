@@ -16,11 +16,12 @@ from trcc.core.geometry import (
     FitRect,
     OrientationPlan,
     content_is_portrait,
+    fit_rect_for_mode,
     fit_source_to_panel,
     lock_region_to_panel,
     plan_orientation,
 )
-from trcc.core.models import Theme
+from trcc.core.models import FitMode, Theme
 from trcc.core.protocol import FBL_PROFILES, DeviceProfile
 
 ANGLES = (0, 90, 180, 270)
@@ -364,3 +365,112 @@ def test_a_degenerate_source_fills_rather_than_divides_by_zero() -> None:
     """An unprobeable source must not crash the export."""
     assert fit_source_to_panel((0, 0), (480, 480)) == FitRect(480, 480, 0, 0)
     assert fit_source_to_panel((1920, 1080), (0, 0)) == FitRect(0, 0, 0, 0)
+
+
+# =========================================================================
+# fit_rect_for_mode — the trimmer's forced-axis arms (#291)
+# =========================================================================
+
+
+@pytest.mark.parametrize("panel", _CASCADE_PANELS)
+@pytest.mark.parametrize("source", [(1920, 1080), (1080, 1920), (640, 640),
+                                    (3840, 1080), (500, 2000)])
+def test_no_mode_is_exactly_the_auto_path(source, panel) -> None:
+    """``mode=None`` must BE ``fit_source_to_panel``, not merely resemble it.
+
+    Every export that existed before the W/H buttons could be carried takes
+    this arm, so if it drifts by a pixel it is a silent regression for
+    everyone who never touches a fit button.
+    """
+    assert fit_rect_for_mode(source, panel) == fit_source_to_panel(source,
+                                                                   panel)
+
+
+@pytest.mark.parametrize("panel", _CASCADE_PANELS)
+@pytest.mark.parametrize("source", [(1920, 1080), (1080, 1920), (640, 640),
+                                    (3840, 1080), (500, 2000)])
+def test_the_forced_arms_are_the_cs_formula(source, panel) -> None:
+    """Hand-computed from ``UCVideoCut.cs`` rather than from our own code.
+
+    ``buttonTPJCW_Click``  ::  wVal = 480;
+                               hVal = bitAngleH * 480 / bitAngleW;
+                               yVal += (480 - hVal) / 2;
+    ``buttonTPJCH_Click``  ::  hVal = 480;
+                               wVal = bitAngleW * 480 / bitAngleH;
+                               xVal += (480 - wVal) / 2;
+
+    The C# writes each once per resolution; the claim under test is that all
+    of those copies are this one formula with the panel substituted.
+    """
+    sw, sh = source
+    pw, ph = panel
+
+    w = fit_rect_for_mode(source, panel, FitMode.WIDTH)
+    assert w.width == pw, "the forced axis must be pinned to the panel"
+    assert w.height == sh * pw // sw
+    assert w.x == 0
+    assert w.y == (ph - w.height) // 2, "the free axis is centred"
+
+    h = fit_rect_for_mode(source, panel, FitMode.HEIGHT)
+    assert h.height == ph
+    assert h.width == sw * ph // sh
+    assert h.y == 0
+    assert h.x == (pw - h.width) // 2
+
+
+@pytest.mark.parametrize("panel", _CASCADE_PANELS)
+def test_a_forced_axis_may_overflow_and_the_auto_arm_may_not(panel) -> None:
+    """The crop IS the feature — it is the whole difference between the arms.
+
+    A gate that only asserted "fits inside" would pass on an implementation
+    that quietly letterboxed both buttons, which is precisely the bug: two
+    controls, one behaviour.  So this asserts the overflow happens, on a
+    source whose aspect cannot fit the forced axis.
+    """
+    pw, ph = panel
+    # A source far taller than the panel: forcing WIDTH must overflow height.
+    tall = (pw, ph * 4)
+    forced = fit_rect_for_mode(tall, panel, FitMode.WIDTH)
+    assert forced.height > ph, "forcing width must overflow the short axis"
+    assert forced.y < 0, "the overflow is centred, so the offset goes negative"
+    # ...while the auto arm on the same source never does.
+    auto = fit_rect_for_mode(tall, panel)
+    assert auto.height <= ph and auto.width <= pw
+    assert auto.x >= 0 and auto.y >= 0
+
+
+def test_stretch_fills_both_axes() -> None:
+    assert fit_rect_for_mode((1920, 1080), (480, 480),
+                             FitMode.STRETCH) == FitRect(480, 480, 0, 0)
+
+
+@pytest.mark.parametrize("mode", [FitMode.WIDTH, FitMode.HEIGHT])
+def test_a_degenerate_source_fills_rather_than_dividing_by_zero(mode) -> None:
+    """No source shape means no aspect to preserve — say so by filling.
+
+    Matches the render path's guard exactly, which is what let ``_fit``
+    delegate here without changing a pixel.
+    """
+    assert fit_rect_for_mode((0, 0), (480, 480), mode) == FitRect(480, 480,
+                                                                  0, 0)
+
+
+@pytest.mark.parametrize("mode", [FitMode.WIDTH, FitMode.HEIGHT,
+                                  FitMode.STRETCH])
+@pytest.mark.parametrize("panel", _CASCADE_PANELS)
+@pytest.mark.parametrize("source", [(1920, 1080), (1080, 1920), (640, 640)])
+def test_the_render_path_delegates_without_changing_a_pixel(
+    source, panel, mode,
+) -> None:
+    """``services/display._fit`` must stay byte-identical to the shared one.
+
+    The exporter and the render path each had their own copy of this
+    arithmetic, so the same button could mean one thing on screen and
+    another on the panel.  They are one implementation now; this is the
+    gate that says the consolidation changed no behaviour.
+    """
+    from trcc.services.display import _fit
+
+    rect = fit_rect_for_mode(source, panel, mode)
+    assert _fit(mode, *source, *panel) == (rect.width, rect.height,
+                                           rect.x, rect.y)

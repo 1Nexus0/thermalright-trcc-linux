@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .logs import per_frame
-from .models import Theme, oriented_resolution
+from .models import FitMode, Theme, oriented_resolution
 from .protocol import DeviceProfile
 
 log = logging.getLogger(__name__)
@@ -298,4 +298,52 @@ def fit_source_to_panel(
         width, height = pw, max(1, sh * pw // sw)
     rect = FitRect(width, height, (pw - width) // 2, (ph - height) // 2)
     log.debug("fit_source_to_panel: %sx%s in %sx%s -> %s", sw, sh, pw, ph, rect)
+    return rect
+
+
+def fit_rect_for_mode(
+    source: tuple[int, int], panel: tuple[int, int],
+    mode: FitMode | None = None,
+) -> FitRect:
+    """Where a source frame lands, for the fit the user actually chose.
+
+    ONE implementation for both consumers.  The render path (``services/
+    display._fit``) and the ``Theme.zt`` exporter (``services/video_export``)
+    each composed this themselves, which is why the trimmer's W/H buttons
+    could letterbox on screen and do something else on the panel — and why the
+    exporter ignored the choice entirely (#291).
+
+    ``mode=None`` is the LOAD path: fit inside, never crop
+    (:func:`fit_source_to_panel`).  ``WIDTH`` / ``HEIGHT`` are the trimmer's
+    two buttons and they are the C# forced-axis arms ``buttonTPJCW_Click`` /
+    ``buttonTPJCH_Click`` — pin the chosen axis to the panel, scale the other
+    by the source's aspect, centre it.  When that free axis OVERFLOWS, the
+    content is cropped; that is the whole point of an override, and the reason
+    the auto path stays a separate function instead of becoming a fourth arm.
+
+    ``UCVideoCut.cs`` writes each arm once per resolution::
+
+        wVal = 480; hVal = bitAngleH * 480 / bitAngleW;
+        yVal += (480 - hVal) / 2;                       // buttonTPJCW, 480x480
+
+    Every one of those copies is this formula with the panel substituted, so
+    a panel added to the catalog needs no new arm here.
+    """
+    sw, sh = source
+    pw, ph = panel
+    if mode is None:
+        return fit_source_to_panel(source, panel)
+    # Guard matches the render path's exactly, so delegating changed nothing:
+    # without a source shape there is no aspect to preserve.
+    if mode is FitMode.STRETCH or sw <= 0 or sh <= 0:
+        log.debug("fit_rect_for_mode: %s -> fill %sx%s", mode, pw, ph)
+        return FitRect(pw, ph, 0, 0)
+    if mode is FitMode.WIDTH:
+        height = max(1, sh * pw // sw)
+        rect = FitRect(pw, height, 0, (ph - height) // 2)
+    else:
+        width = max(1, sw * ph // sh)
+        rect = FitRect(width, ph, (pw - width) // 2, 0)
+    log.debug("fit_rect_for_mode: %s %sx%s in %sx%s -> %s",
+              mode, sw, sh, pw, ph, rect)
     return rect

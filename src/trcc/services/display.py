@@ -25,7 +25,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ..core.geometry import content_is_portrait, plan_orientation
+from ..core.geometry import content_is_portrait, fit_rect_for_mode, plan_orientation
 from ..core.logs import per_frame
 from ..core.models import (
     MEDIA,
@@ -1607,20 +1607,17 @@ def _fit(
     src_w: int, src_h: int,
     dst_w: int, dst_h: int,
 ) -> tuple[int, int, int, int]:
-    """(fit_w, fit_h, x_offset, y_offset)."""
+    """(fit_w, fit_h, x_offset, y_offset).
+
+    A thin adapter over :func:`~trcc.core.geometry.fit_rect_for_mode`, which
+    the ``Theme.zt`` exporter uses too.  The arithmetic lived here AND in the
+    exporter, so the trimmer's W/H buttons could mean one thing on screen and
+    another on the panel; one implementation makes that unrepresentable.
+    Parity with the previous inline version was measured over 1740 cases.
+    """
     log.debug("_fit: mode=%s src_w=%s", mode, src_w)
-    if mode is FitMode.STRETCH or src_w == 0 or src_h == 0:
-        return dst_w, dst_h, 0, 0
-
-    if mode is FitMode.WIDTH:
-        fit_w = dst_w
-        fit_h = max(1, (src_h * dst_w) // src_w)
-        return fit_w, fit_h, 0, (dst_h - fit_h) // 2
-
-    # FitMode.HEIGHT
-    fit_h = dst_h
-    fit_w = max(1, (src_w * dst_h) // src_h)
-    return fit_w, fit_h, (dst_w - fit_w) // 2, 0
+    rect = fit_rect_for_mode((src_w, src_h), (dst_w, dst_h), mode)
+    return rect.width, rect.height, rect.x, rect.y
 
 
 # Re-exported for unit tests

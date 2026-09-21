@@ -59,6 +59,7 @@ from ...core.commands import (
 from ...core.logs import per_frame
 from ...core.models import (
     SCREENCAST_TICK_S,
+    FitMode,
     HardwareMetrics,
     Kind,
     ThemeDir,
@@ -2236,14 +2237,20 @@ class TRCCApp(QMainWindow):
 
     def _on_video_export_requested(
         self, start_ms: int, end_ms: int, rotation: int,
+        fit_mode: FitMode | None = None,
     ) -> None:
         """The trimmer asked for an encode — dispatch it for the active LCD.
 
         The panel owns the trim, the window owns the device.  ``ExportVideoClip``
         resolves the canvas itself, so nothing here has to know the panel size.
+
+        ``fit_mode`` is the panel's W/H button, or ``None`` when the user
+        never pressed one — the auto arm, which is what every export did
+        before it could be carried at all (#291).
         """
-        log.info("_on_video_export_requested: start=%d end=%d rotation=%d",
-                 start_ms, end_ms, rotation)
+        log.info("_on_video_export_requested: start=%d end=%d rotation=%d "
+                 "fit_mode=%s", start_ms, end_ms, rotation,
+                 fit_mode.value if fit_mode else "auto")
         h = self._active_lcd()
         path = getattr(self.uc_video_cut, "_video_path", None)
         if h is None or not path:
@@ -2254,6 +2261,7 @@ class TRCCApp(QMainWindow):
         result = self._app.dispatch(ExportVideoClip(
             key=h.device_key, path=Path(path),
             start_ms=start_ms, end_ms=end_ms, rotation=rotation,
+            fit_mode=fit_mode,
         ))
         if not result.ok:
             log.warning("_on_video_export_requested: refused — %s",

@@ -36,6 +36,7 @@ from trcc.core.models import (
     ZT_FPS,
     ZT_MAGIC,
     ZT_MAX_DURATION_MS,
+    FitMode,
     VideoExportRequest,
 )
 from trcc.core.registry import ALL_DEVICES
@@ -390,3 +391,89 @@ def test_app_owns_a_runner_and_shuts_it_down(fake_platform) -> None:
     a = App(fake_platform)
     assert isinstance(a.video_export_runner, VideoExportRunner)
     a.close()   # must not raise
+
+
+# =========================================================================
+# fit_mode — the trimmer's W/H buttons (#291)
+# =========================================================================
+
+
+@pytest.mark.parametrize("mode", [None, FitMode.WIDTH, FitMode.HEIGHT,
+                                  FitMode.STRETCH])
+def test_the_fit_button_reaches_the_encoder(
+    app: App, fake_clip: Path, mode: FitMode | None,
+) -> None:
+    """The W/H choice must cross every hop to the ffmpeg invocation.
+
+    It crossed NONE of them.  ``ExportVideoClip`` had no ``fit_mode`` field,
+    so the trimmer's two buttons recorded a flag that nothing downstream
+    could read, and both letterboxed identically — reported by @ocarinal
+    (#291) after the ``-s WxH`` stretch was already gone.
+
+    MUTATION CHECK -- drop ``fit_mode=self.fit_mode`` from the
+    ``VideoExportRequest`` construction and this fails for all three
+    non-default arms while the ``None`` arm still passes, which is exactly
+    how the bug presented.
+    """
+    recorded: list[VideoExportRequest] = []
+
+    class RecordingRunner:
+        def submit(self, token: str, request: VideoExportRequest) -> None:
+            recorded.append(request)
+
+        def shutdown(self) -> None:
+            pass
+
+    app.video_export_runner = RecordingRunner()  # type: ignore[assignment]
+    result = app.dispatch(
+        ExportVideoClip(key=KEY, path=fake_clip, end_ms=500, fit_mode=mode),
+    )
+
+    assert result.ok is True
+    assert len(recorded) == 1
+    assert recorded[0].fit_mode is mode
+
+
+def test_an_untouched_export_still_takes_the_auto_arm(
+    app: App, fake_clip: Path,
+) -> None:
+    """The default must stay auto, or every existing export silently changes.
+
+    The panel's flag was a BOOL defaulting to True ("width"), so wiring it
+    through unchanged would have switched every user's export to forced-width
+    — a crop, on footage that used to letterbox.  ``None`` is the arm that
+    means "the user never pressed a fit button".
+    """
+    recorded: list[VideoExportRequest] = []
+
+    class RecordingRunner:
+        def submit(self, token: str, request: VideoExportRequest) -> None:
+            recorded.append(request)
+
+        def shutdown(self) -> None:
+            pass
+
+    app.video_export_runner = RecordingRunner()  # type: ignore[assignment]
+    app.dispatch(ExportVideoClip(key=KEY, path=fake_clip, end_ms=500))
+    assert recorded[0].fit_mode is None
+
+
+def test_an_unknown_fit_is_refused_before_queueing(
+    app: App, events: list, fake_clip: Path,
+) -> None:
+    """Reachable over IPC, where the union coercion passes a bad string on.
+
+    ``_coerce`` tries ``FitMode(raw)``, and on ``ValueError`` it falls back to
+    the raw value rather than raising — so a daemon client can put a string
+    here that the enum does not name.  Refuse it while the caller is still
+    listening instead of handing ffmpeg a filter it cannot mean.
+    """
+    result = app.dispatch(
+        ExportVideoClip(key=KEY, path=fake_clip, end_ms=500,
+                        fit_mode="diagonal"),  # type: ignore[arg-type]
+    )
+    assert result.ok is False
+    assert "Fit mode must be" in result.message
+    assert "diagonal" in result.message
+    assert result.token == ""
+    assert events == []

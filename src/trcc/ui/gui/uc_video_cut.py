@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import subprocess
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QRect, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -34,6 +34,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QLabel, QProgressBar, QWidget
 
+from ...core.geometry import fit_rect_for_mode
 from ...core.models import SUBPROCESS_NO_WINDOW as _NO_WINDOW
 from ...core.models import (
     ZT_FRAME_INTERVAL_MS as FRAME_INTERVAL_MS,
@@ -41,7 +42,7 @@ from ...core.models import (
 from ...core.models import (
     ZT_MAX_DURATION_MS as MAX_DURATION_MS,
 )
-from ...core.models import panel_asset_dims
+from ...core.models import FitMode, panel_asset_dims
 from .assets import Assets
 from .base import make_icon_button
 
@@ -100,14 +101,18 @@ class UCVideoCut(QWidget):
     fit mode buttons, rotation, and Theme.zt export.
 
     Signals:
-        export_requested(int, int, int): (start_ms, end_ms, rotation) — the
-            window turns this into ``ExportVideoClip`` for the active
-            device.  The panel does not know the device key or the canvas
-            size, and does not need to: the Command resolves both.
+        export_requested(int, int, int, object): (start_ms, end_ms,
+            rotation, fit_mode) — the window turns this into
+            ``ExportVideoClip`` for the active device.  The panel does not
+            know the device key or the canvas size, and does not need to:
+            the Command resolves both.  ``fit_mode`` is a
+            :class:`~trcc.core.models.FitMode` or ``None`` for auto, which
+            is why the signal carries ``object`` — a ``str`` slot could not
+            express "the user never pressed a fit button".
         video_cut_done(str): Emitted with Theme.zt path on export, or '' on cancel.
     """
 
-    export_requested = Signal(int, int, int)
+    export_requested = Signal(int, int, int, object)
     video_cut_done = Signal(str)
 
     def __init__(self, parent=None):
@@ -122,10 +127,12 @@ class UCVideoCut(QWidget):
         self._target_w = 0
         self._target_h = 0
         self._rotation = 0
-        # Which edge the preview fits to.  Display-only: the export is
-        # resized to the panel's exact pixels, so this never reached the
-        # encoder — it was carried into ``ExportWorker`` and never read.
-        self._width_fit = True
+        # Which edge the user forced, or None while they have not pressed
+        # W or H.  TRI-state on purpose: this was a bool defaulting to True,
+        # so wiring it straight through would have silently switched every
+        # export to forced-width.  None is the auto arm — fit inside, never
+        # crop — which is what an untouched export has always done (#291).
+        self._fit_mode: FitMode | None = None
 
         # Timeline handles (pixel x positions)
         self._start_x = TIMELINE_X
@@ -440,9 +447,11 @@ class UCVideoCut(QWidget):
             log.debug("uc_video_cut: frame extract via ffmpeg failed: %s", e)
             return
 
-        # Apply rotation and scale to fit preview
+        # Rotate, then compose exactly as the export will, so a forced axis
+        # crops here too and W/H finally look different BEFORE Apply.
         if self._rotation:
             img = img.transformed(QTransform().rotate(self._rotation))
+        img = self._compose_for_panel(img)
         w, h = img.width(), img.height()
         scale = min(PREVIEW_W / w, PREVIEW_H / h)
         new_w, new_h = int(w * scale), int(h * scale)
@@ -455,18 +464,51 @@ class UCVideoCut(QWidget):
         self._lbl_current.setText(_format_time(ms))
         self.update()
 
+    def _compose_for_panel(self, img):
+        """The frame as the PANEL will show it — the export's own geometry.
+
+        The preview always contain-fitted regardless of the fit buttons, so W
+        and H looked identical on screen even once the encoder honoured them.
+        Composing through the SAME :func:`fit_rect_for_mode` the exporter uses
+        is what makes the choice visible before Apply, and is why the two
+        cannot disagree (#291).
+
+        The canvas clips, which is exactly how a forced axis crops: the C#
+        composites onto ``new Bitmap(wValSub, hValSub)`` at a possibly
+        negative offset and lets the bitmap do the cropping.
+
+        Without a known panel size there is nothing to compose onto, so the
+        raw frame comes back and the caller's contain-fit still applies.
+        """
+        if self._target_w <= 0 or self._target_h <= 0:
+            log.debug("_compose_for_panel: no panel size yet — raw frame")
+            return img
+        rect = fit_rect_for_mode((img.width(), img.height()),
+                                 (self._target_w, self._target_h),
+                                 self._fit_mode)
+        canvas = QImage(self._target_w, self._target_h,
+                        QImage.Format.Format_RGB32)
+        canvas.fill(Qt.GlobalColor.black)
+        painter = QPainter(canvas)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.drawImage(QRect(rect.x, rect.y, rect.width, rect.height), img)
+        painter.end()
+        log.debug("_compose_for_panel: %s mode=%s -> %dx%d canvas", rect,
+                  self._fit_mode, self._target_w, self._target_h)
+        return canvas
+
     # =========================================================================
     # Fit mode and rotation
     # =========================================================================
 
     def _on_width_fit(self):
-        log.debug("_on_width_fit: width_fit=True")
-        self._width_fit = True
+        log.info("_on_width_fit: fit_mode %s -> WIDTH", self._fit_mode)
+        self._fit_mode = FitMode.WIDTH
         self._seek_and_show(self._start_ms)
 
     def _on_height_fit(self):
-        log.debug("_on_height_fit: width_fit=False")
-        self._width_fit = False
+        log.info("_on_height_fit: fit_mode %s -> HEIGHT", self._fit_mode)
+        self._fit_mode = FitMode.HEIGHT
         self._seek_and_show(self._start_ms)
 
     def _on_rotate(self):
@@ -522,7 +564,7 @@ class UCVideoCut(QWidget):
         self._lbl_info.setText("Starting export...")
         self._lbl_info.setVisible(True)
         self.export_requested.emit(
-            self._start_ms, self._end_ms, self._rotation)
+            self._start_ms, self._end_ms, self._rotation, self._fit_mode)
 
     def export_refused(self, message):
         """The window's dispatch was refused before anything was queued."""

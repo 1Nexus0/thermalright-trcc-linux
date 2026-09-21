@@ -23,7 +23,7 @@ from ..events import (
     ThemeSaved,
 )
 from ..geometry import content_is_portrait, save_folder_resolution
-from ..models import ZT_MAX_DURATION_MS, ThemeDir, VideoExportRequest
+from ..models import ZT_MAX_DURATION_MS, FitMode, ThemeDir, VideoExportRequest
 from ..ports import ContentStore
 from ..registry import find_product
 from ..results import (
@@ -2118,17 +2118,29 @@ class ExportVideoClip(Command[VideoExportResult]):
     The canvas is the panel's NATIVE size — never the oriented one, since
     the firmware applies the mount rotation itself and ``rotation`` here
     is the user's own turn of the footage on top.
+
+    ``fit_mode`` is the trimmer's W/H button, and it had no way to get
+    here: both buttons recorded a flag the exporter never read, so they
+    letterboxed identically and looked broken (#291).  ``None`` keeps the
+    load path — fit inside, never crop — so an export only changes for a
+    user who presses one.
     """
     key: str
     path: Path
     start_ms: int = 0
     end_ms: int | None = None
     rotation: int = 0
+    fit_mode: FitMode | None = None
 
     def execute(self, app: App) -> VideoExportResult:
+        # ``fit_mode`` is logged WITHOUT touching ``.value``: the entry log
+        # runs before validation, and over IPC an unknown string reaches here
+        # as a plain ``str``.  Reading an attribute off it crashed the
+        # Command before it could refuse the input politely.
         log.info("ExportVideoClip.execute: key=%s path=%s start_ms=%d "
-                 "end_ms=%s rotation=%d", self.key, self.path, self.start_ms,
-                 self.end_ms, self.rotation)
+                 "end_ms=%s rotation=%d fit_mode=%s", self.key, self.path,
+                 self.start_ms, self.end_ms, self.rotation,
+                 self.fit_mode or "auto")
         if not self.path.is_file():
             log.warning("ExportVideoClip.execute: %s not found", self.path)
             return VideoExportResult(
@@ -2193,6 +2205,19 @@ class ExportVideoClip(Command[VideoExportResult]):
                          f"{self.rotation}"),
             )
 
+        if self.fit_mode is not None and not isinstance(self.fit_mode, FitMode):
+            # Reachable over IPC, where an unknown string falls through the
+            # union coercion as itself rather than raising.  Say so instead of
+            # handing ffmpeg something it cannot mean.
+            log.warning("ExportVideoClip.execute: bad fit mode %r",
+                        self.fit_mode)
+            return VideoExportResult(
+                ok=False, source=str(self.path),
+                message=(f"Fit mode must be omitted for auto, or one of: "
+                         f"{', '.join(m.value for m in FitMode)} — got "
+                         f"{self.fit_mode!r}"),
+            )
+
         token = uuid4().hex
         app.video_export_runner.submit(token, VideoExportRequest(
             source=self.path,
@@ -2201,6 +2226,7 @@ class ExportVideoClip(Command[VideoExportResult]):
             target_w=target_w,
             target_h=target_h,
             rotation=self.rotation,
+            fit_mode=self.fit_mode,
         ))
         log.info("ExportVideoClip.execute: queued token=%s for %dx%d",
                  token, target_w, target_h)

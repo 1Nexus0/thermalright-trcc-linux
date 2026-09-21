@@ -1304,6 +1304,11 @@ class VideoExportRequest:
     of 90.  ``target_w`` / ``target_h`` are the device's NATIVE pixels —
     the exporter fit-resizes to them exactly, because the firmware does
     not crop.
+
+    ``fit_mode`` is the trimmer's W/H button.  ``None`` is the load path —
+    fit inside, never crop — which is what a user who never touches those
+    buttons already gets, so nobody's export changes.  It is the enum rather
+    than a string so an unknown fit cannot reach ffmpeg.
     """
     source: Path
     start_ms: int
@@ -1311,6 +1316,7 @@ class VideoExportRequest:
     target_w: int
     target_h: int
     rotation: int = 0
+    fit_mode: FitMode | None = None
 
 
 # DC file (main_count, sub_count) → ``HardwareMetrics`` field name.
