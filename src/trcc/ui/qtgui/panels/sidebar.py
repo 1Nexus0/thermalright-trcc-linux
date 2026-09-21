@@ -66,6 +66,10 @@ _ENTRIES: tuple[_Entry, ...] = (
 )
 
 
+#: The panel key a nav button carries, so its slot can be a named method
+#: instead of a closure over the loop variable.
+_KEY_PROPERTY = "trcc_panel_key"
+
 #: Qt.ItemDataRole.UserRole — the device key behind a rail row.
 _KEY_ROLE = 0x0100
 #: UserRole + 1 — its kind ("lcd" / "led"), which picks the selection.
@@ -117,7 +121,7 @@ class ActivitySidebar(BasePanel):
         # Attach / detach from ANY UI re-lists the rail.  Queued: the bridge
         # delivers on the Qt thread.
         for signal in (self._bus.device_connected, self._bus.device_disconnected):
-            signal.connect(lambda _evt: self.refresh_devices(),
+            signal.connect(self._on_fleet_changed,
                            type=_Qt.ConnectionType.QueuedConnection)
 
         self._group = QButtonGroup(self)
@@ -128,9 +132,11 @@ class ActivitySidebar(BasePanel):
             button = QPushButton(entry.label, self)
             button.setCheckable(True)
             button.setMinimumHeight(36)
-            button.clicked.connect(
-                lambda _checked=False, key=entry.key: self._on_clicked(key),
-            )
+            # The panel key rides on the button rather than being captured in
+            # a closure: ``feedback_no_lambdas`` — every callable gets a real
+            # symbol so a traceback, a debugger and a grep all name it.
+            button.setProperty(_KEY_PROPERTY, entry.key)
+            button.clicked.connect(self._on_nav_clicked)
             self._buttons[entry.key] = button
             self._group.addButton(button)
             layout.addWidget(button)
@@ -216,9 +222,18 @@ class ActivitySidebar(BasePanel):
         if button is not None and not button.isChecked():
             button.setChecked(True)
 
-    def _on_clicked(self, key: str) -> None:
-        log.info("_on_clicked: key=%s", key)
-        self.selected.emit(key)
+    def _on_nav_clicked(self) -> None:
+        """A navigation button was pressed — announce its panel key."""
+        button = self.sender()
+        key = "" if button is None else str(button.property(_KEY_PROPERTY))
+        log.info("_on_nav_clicked: key=%s", key)
+        if key:
+            self.selected.emit(key)
+
+    def _on_fleet_changed(self, event: object) -> None:
+        """A device attached or detached anywhere — re-list the rail."""
+        log.debug("_on_fleet_changed: event=%s", type(event).__name__)
+        self.refresh_devices()
 
     def apply_language(self, lang: str) -> None:
         # Translation keys come back when tr() wiring lands; the sidebar

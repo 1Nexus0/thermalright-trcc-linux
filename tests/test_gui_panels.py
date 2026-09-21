@@ -415,13 +415,21 @@ def test_autostart_picker_shows_the_installed_target(
 
 
 def test_activity_sidebar_emits_selection(gui_app: App) -> None:
-    """Sidebar click → selected signal fires with the entry key."""
+    """Sidebar click → selected signal fires with the entry key.
+
+    Clicks the real button rather than calling the slot with a key, because
+    the key no longer travels as a call argument: it rides on the button as a
+    Qt property so the slot can be a named method instead of a closure over
+    the loop variable (``feedback_no_lambdas``).  Driving the button exercises
+    the property, the connection and the slot together — calling the slot
+    directly would prove none of them.
+    """
     from trcc.ui.qtgui.panels.sidebar import ActivitySidebar
 
     sidebar = ActivitySidebar(gui_app, _bus(gui_app))
     captured: list[str] = []
     sidebar.selected.connect(captured.append)
-    sidebar._on_clicked("system")
+    sidebar._buttons["system"].click()
     assert captured == ["system"]
 
 

@@ -44,8 +44,13 @@ class PreviewPanel(BasePanel):
         root.addWidget(state_box)
         root.addStretch(1)
 
-        self._selection.changed.connect(lambda _key: self._refresh())
+        self._selection.changed.connect(self._on_device_changed)
         self.start_periodic_updates(_REFRESH_MS, self._refresh)
+        self._refresh()
+
+    def _on_device_changed(self, key: str) -> None:
+        """The window switched device — re-read this one's state."""
+        log.debug("_on_device_changed: key=%s", key)
         self._refresh()
 
     def set_render_size(self, width: int, height: int) -> None:
