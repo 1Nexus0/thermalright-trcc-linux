@@ -241,6 +241,124 @@ def clusters(root: Path) -> list[Cluster]:
 
 
 # =========================================================================
+# The cross-BASE lens — duplicates no amount of pooling by base can see
+# =========================================================================
+#
+# :func:`clusters` pools children of ONE base, which is the right unit for
+# "pull it up", because a base is where a pull-up would land.  It follows that
+# a body written identically under two UNRELATED bases is invisible to it:
+# there is no shared base to pull up to, so the tool never forms the group.
+#
+# That is not a hypothetical gap.  Measured 2026-09-20 the sensor layer writes
+# the same ``name`` accessor on four classes across three different ``*Source``
+# ABCs, and the same ``temp`` on three across three.  The per-kind bases
+# (``CpuSource``, ``GpuSource``, ``DiskSource``, ``DramSource``, ``FanSource``)
+# are one family wearing five hats, and the repetition lands exactly in the
+# blind spot.
+#
+# The destination differs from a pull-up, which is why this prints separately:
+# a free function, a mixin, or a common ancestor that does not exist yet.
+
+
+class CrossBaseCluster(Cluster):
+    """One method written identically on classes that share NO base."""
+
+    def __init__(self, name: str, methods: list[Method]) -> None:
+        super().__init__("<no shared base>", name, methods)
+
+    def render(self) -> str:
+        mark = "  [stub]" if self.methods[0].is_stub else ""
+        lines = [f"[{self.copies_saved:>3} lines] {self.name}{mark}"]
+        for method in self.methods:
+            bases = ", ".join(_base_names(method.cls)) or "-"
+            home = method.path.relative_to(_SRC.parent.parent)
+            lines.append(f"            {method.cls.name}({bases})"
+                         f"  {home}:{method.node.lineno}")
+        lines += [f"         !! self.{attr} differs: {values}"
+                  for attr, values in self.divergences]
+        return "\n".join(lines)
+
+
+def _ancestors(root: Path) -> dict[str, set[str]]:
+    """Class name -> every base name above it, transitively.
+
+    By NAME, like the rest of this tool: an AST cannot resolve inheritance, and
+    the alternative is importing the tree, which drags in PySide6.  The cost is
+    that two unrelated classes sharing a name merge; the benefit is catching the
+    case below, where a child rewrites its own parent's body.  Without it
+    ``ActivitySidebar(BasePanel)`` and ``BasePanel(QFrame)`` read as unrelated —
+    their base NAMES are disjoint — and a redundant override is reported as
+    cross-base duplication, which is a different finding with a different fix.
+    """
+    direct: dict[str, set[str]] = defaultdict(set)
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                direct[node.name] |= set(_base_names(node))
+
+    resolved: dict[str, set[str]] = {}
+
+    def walk(name: str, seen: frozenset[str]) -> set[str]:
+        if name in resolved:
+            return resolved[name]
+        if name in seen:                      # a cycle in the name graph
+            return set()
+        out = set(direct.get(name, ()))
+        for base in list(out):
+            out |= walk(base, seen | {name})
+        resolved[name] = out
+        return out
+
+    for name in list(direct):
+        walk(name, frozenset())
+    return resolved
+
+
+def cross_base_clusters(root: Path) -> list[CrossBaseCluster]:
+    """Identical method bodies on classes with no base in common.
+
+    Deliberately NOT filtered by body size.  A floor is a judgement the tool
+    has no standing to make, and picking one hid eleven of thirteen findings
+    here — including the three largest — behind a threshold chosen because it
+    produced a tidy number.  ``copies_saved`` is printed instead, so the reader
+    applies their own.
+    """
+    ancestors = _ancestors(root)
+    methods: list[Method] = []
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            methods += [
+                Method(node, member, path)
+                for member in node.body
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and not _is_abstract(member)
+            ]
+
+    groups: dict[tuple[str, str], list[Method]] = defaultdict(list)
+    for method in methods:
+        groups[(method.name, method.fingerprint)].append(method)
+
+    found: list[CrossBaseCluster] = []
+    for (name, _fp), group in sorted(groups.items()):
+        classes = {m.cls.name: m for m in group}
+        if len(classes) < 2:
+            continue                          # one class, listed twice
+        members = list(classes.values())
+        shared = set.intersection(*(set(_base_names(m.cls)) for m in members))
+        if shared:
+            continue                          # a common base: clusters() owns it
+        if any(other in ancestors.get(m.cls.name, set())
+               for m in members for other in classes if other != m.cls.name):
+            continue                          # a child rewriting its parent
+        found.append(CrossBaseCluster(name, members))
+    return sorted(found, key=lambda c: -c.copies_saved)
+
+
+# =========================================================================
 # --gate — prove the tool before trusting its number
 # =========================================================================
 
@@ -310,6 +428,59 @@ class InFileB(Shared):
 '''
 
 
+#: For the cross-BASE lens.  Two unrelated ABCs whose concretes write one body
+#: identically; a third pair that shares a base (``clusters`` owns those); and a
+#: child that rewrites its own parent's body, which is a redundant override and
+#: NOT cross-base duplication — without the ancestor walk it reads as one,
+#: because ``Child(Parent)`` and ``Parent(object)`` have disjoint base NAMES.
+_FIXTURE_CROSS = '''
+class CpuLike:
+    pass
+
+class DiskLike:
+    pass
+
+class OneCpu(CpuLike):
+    def label(self):
+        prefix = "s"
+        return prefix + "!"
+
+class OneDisk(DiskLike):
+    def label(self):
+        prefix = "s"
+        return prefix + "!"
+
+class SiblingA(CpuLike):
+    def shared_base_body(self):
+        value = 7
+        return value
+
+class SiblingB(CpuLike):
+    def shared_base_body(self):
+        value = 7
+        return value
+
+class Parent:
+    def inherited(self):
+        step = 1
+        return step
+
+    def two_deep(self):
+        depth = 3
+        return depth
+
+class Child(Parent):
+    def inherited(self):
+        step = 1
+        return step
+
+class Grandchild(Child):
+    def two_deep(self):
+        depth = 3
+        return depth
+'''
+
+
 def gate() -> int:
     """Re-prove the tool against known answers.  Offline and instant."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -338,6 +509,34 @@ def gate() -> int:
                    len(split) == 1
                    and {m.cls.name for m in split[0].methods}
                    == {"InFileA", "InFileB"}))
+
+    # --- the cross-BASE lens ---------------------------------------------
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "cross.py").write_text(_FIXTURE_CROSS, encoding="utf-8")
+        crossed = cross_base_clusters(root)
+        pooled = clusters(root)
+
+    by_name = {c.name: c for c in crossed}
+    checks.append(("a body shared across UNRELATED bases is cross-base",
+                   "label" in by_name
+                   and {m.cls.name for m in by_name["label"].methods}
+                   == {"OneCpu", "OneDisk"}))
+    checks.append(("siblings of ONE base are left to clusters()",
+                   "shared_base_body" not in by_name
+                   and any(c.name == "shared_base_body" for c in pooled)))
+    checks.append(("a child rewriting its PARENT's body is not cross-base",
+                   "inherited" not in by_name))
+    # Transitively, not just one hop: a GRANDchild rewriting the same body is
+    # the same redundant override, and a one-level check would report it.
+    checks.append(("a GRANDchild rewriting the body is not cross-base either",
+                   "two_deep" not in by_name))
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "cross.py").write_text(_FIXTURE_CROSS, encoding="utf-8")
+        tree_of = _ancestors(root)
+    checks.append(("the ancestor walk is transitive",
+                   tree_of.get("Grandchild") == {"Child", "Parent"}))
 
     for label, ok in checks:
         print(f"  {'PASS' if ok else 'FAIL'}  {label}")
@@ -373,6 +572,15 @@ def main(argv: list[str]) -> int:
               "sibling —\nthat is the `0` case (base takes the skeleton), not a "
               "pull-up.\nRun --gate to re-prove the tool before trusting these "
               "numbers.")
+
+    crossed = cross_base_clusters(root)
+    print(f"\n{len(crossed)} cross-base cluster(s), "
+          f"{sum(c.copies_saved for c in crossed)} line(s) of copy")
+    print("(identical bodies on classes sharing NO base — the pooling above "
+          "cannot\nform these groups, so the destination is a free function, "
+          "a mixin, or a\ncommon ancestor that does not exist yet)\n")
+    for cluster in crossed:
+        print(cluster.render())
     return 0
 
 

@@ -28,9 +28,18 @@ accumulate dead weight.  When both lists are empty, the core ring is sealed.
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
+
+# The UI->UI collectors live with the other instruments, so the tool a human
+# runs and the gate CI runs are the same code.  ``tests/test_ui_parity.py``
+# reaches for ``ui_contract`` the same way.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "dev" / "tools"))
+
+import ui_contract  # noqa: E402  # pyright: ignore[reportMissingImports]
+
 _GUARDED_TREES = ("trcc/core", "trcc/services")
 
 # The Presentation Model layer (``ui/presentation``) is the Qt-free precursor to
@@ -426,6 +435,95 @@ def test_selftest_lambda_detector_sees_one() -> None:
     """
     tree = ast.parse("handler = lambda v: v + 1\n")
     assert [n for n in ast.walk(tree) if isinstance(n, ast.Lambda)]
+
+
+# =========================================================================
+# The UI -> UI axis.  Collectors live in ``dev/tools/ui_contract.py`` and are
+# IMPORTED, never re-derived: a measurement written twice drifts, and this one
+# already did — a scratch copy resolved relative imports one package level too
+# low and lost a cross-skin reach without saying so.
+# =========================================================================
+
+#: All four are the CLI acting as the **router** — ``trcc gui`` is this process
+#: starting a DIFFERENT face, which ``ui/_uis.py`` states outright.  Ratcheted
+#: rather than exempted, because two of them are not purely routing:
+#: ``configure_auth`` / ``set_pairing_code`` are the CLI reaching into the API's
+#: auth internals, which is a contract hole wearing a router's coat.
+#:
+#:   ui/cli/main.py:158    -> qtgui.launch
+#:   ui/cli/main.py:217    -> gui.launch
+#:   ui/cli/main.py:267    -> api.main.configure_auth, serve, set_pairing_code
+#:   ui/cli/system.py:597  -> api.main.build_app
+MAX_CROSS_SKIN = 4
+
+#: Modules under ``ui/`` but outside every skin whose only production consumer
+#: is ONE skin — they claim to be shared and are not.  Measured 2026-09-20: all
+#: nine are in ``ui/presentation`` and all nine serve gui, 1361 of that
+#: package's 1756 lines.  Deleting ``ui/gui`` takes this to zero; until then it
+#: may not grow.
+MAX_SINGLE_SKIN_SHARED = 9
+
+
+def test_no_skin_reaches_into_another_skin() -> None:
+    """A UI may drive the core; it may not drive another UI.
+
+    ``ui_contract``'s original checks see only ``services`` / ``adapters``
+    imports, so a UI reaching SIDEWAYS was invisible to every gate in the tree.
+    """
+    flagged = [e for e in ui_contract.cross_edges() if e.kind == "cross-skin"]
+    assert len(flagged) <= MAX_CROSS_SKIN, (
+        f"{len(flagged)} skin-to-skin reach(es), over the ceiling of "
+        f"{MAX_CROSS_SKIN} — a skin is importing another skin's modules "
+        f"instead of dispatching a Command:\n"
+        + "\n".join(f"  {e.src} -> {e.dst}  {', '.join(e.names)}  {e.where}"
+                    for e in flagged)
+    )
+    assert len(flagged) >= MAX_CROSS_SKIN, (
+        f"only {len(flagged)} skin-to-skin reach(es) left — lower "
+        f"MAX_CROSS_SKIN to {len(flagged)} so the ground is not given back"
+    )
+
+
+def test_shared_ui_infrastructure_is_not_named_by_a_skin() -> None:
+    """Only the composition root may know which faces exist.
+
+    ``ui/_uis.py`` names every skin's entry point in order to build them, the
+    same way ``adapters/device/_base.py`` names its device classes to register
+    them.  Any OTHER shared module naming a skin is an inversion: infrastructure
+    that has learned who its consumers are cannot be reused by a new one.
+
+    Zero, not a ratchet — measured 2026-09-20, all nine shared-to-skin imports
+    in the tree are the composition root, so there is no ground to give back.
+    """
+    inversions = [e for e in ui_contract.cross_edges() if e.kind == "inversion"]
+    assert not inversions, (
+        "shared ui/ infrastructure names a skin (only ui/_uis.py may):\n"
+        + "\n".join(f"  {e.src} -> {e.dst}  {', '.join(e.names)}  {e.where}"
+                    for e in inversions)
+    )
+
+
+def test_shared_ui_modules_really_are_shared() -> None:
+    """A module outside every skin, used by exactly one, is mislocated.
+
+    Not a style point: ``ui/presentation`` is the layer plan §4.1 calls homeless
+    in the hexagon, and this is the measurement of that drift — 81% of its lines
+    serve gui alone while its location advertises otherwise.  Whoever deletes
+    ``ui/gui`` needs to know which of these go with it.
+    """
+    stranded = ui_contract.mislocated()
+    assert len(stranded) <= MAX_SINGLE_SKIN_SHARED, (
+        f"{len(stranded)} shared-location module(s) serve exactly one skin, "
+        f"over the ceiling of {MAX_SINGLE_SKIN_SHARED} — move it into that "
+        f"skin, or give it a second consumer:\n"
+        + "\n".join(f"  {skin:<6} {lines:>5} lines  {module}"
+                    for module, lines, skin in stranded)
+    )
+    assert len(stranded) >= MAX_SINGLE_SKIN_SHARED, (
+        f"only {len(stranded)} stranded module(s) left — lower "
+        f"MAX_SINGLE_SKIN_SHARED to {len(stranded)} so the ground is not "
+        f"given back"
+    )
 
 
 def test_presentation_layer_is_qt_app_and_adapter_free() -> None:

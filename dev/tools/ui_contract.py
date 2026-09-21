@@ -53,12 +53,21 @@ _SRC = _REPO / "src" / "trcc"
 # not re-derived from the AST, so the import has to resolve.
 sys.path.insert(0, str(_REPO / "src"))
 
+_UI_ROOT = _SRC / "ui"
+
 _UIS = {
-    "cli": _SRC / "ui" / "cli",
-    "api": _SRC / "ui" / "api",
-    "gui": _SRC / "ui" / "gui",
-    "qtgui": _SRC / "ui" / "qtgui",
+    "cli": _UI_ROOT / "cli",
+    "api": _UI_ROOT / "api",
+    "gui": _UI_ROOT / "gui",
+    "qtgui": _UI_ROOT / "qtgui",
 }
+
+#: The ONE module allowed to name a skin's internals.  It builds the faces,
+#: exactly as ``adapters/device/_base.py`` names its device classes in order to
+#: register them — infrastructure that knows its consumers is otherwise an
+#: inversion.  Measured 2026-09-20: all 9 shared->skin imports in the tree are
+#: this file, so it is an invariant the tree already holds, not a wish.
+_COMPOSITION_ROOT = "_uis"
 
 #: A floor, not a target — 135 today.  Guards the DENOMINATOR: a collector that
 #: silently returns little makes every UI look complete.  See
@@ -191,6 +200,225 @@ def _record_bypass(node: ast.AST, rel: Path, surface: UiSurface) -> None:
             surface.adapter_imports.setdefault(alias.name, where)
 
 
+# =========================================================================
+# The UI->UI axis — a second way to reach around the contract
+# =========================================================================
+#
+# The checks above ask "does a UI reach past the Command bus into services or
+# adapters?".  They cannot see a UI reaching SIDEWAYS, into another UI, because
+# ``_record_bypass`` matches only ``services`` / ``adapters`` in the module
+# path.  Three questions live on that axis, and all three are DERIVED from the
+# import graph rather than read off a list — a list of blessed modules is a
+# fact expressed twice, and would drift from the tree it describes.
+#
+#   cross-skin   one skin importing another skin's modules
+#   inversion    shared ui/ infrastructure naming a skin, other than the
+#                composition root that exists to build them
+#   mislocated   a module in a shared location whose production consumers are
+#                exactly ONE skin: it claims to be shared and is not
+#
+# Measured 2026-09-20: 0 cross-skin violations, 0 inversions, and **10 of the
+# 14 modules in ui/presentation serve gui alone** — 1416 of its 1756 lines.
+# The first two are a floor to hold; the third is the finding.
+
+
+@dataclass(frozen=True, slots=True)
+class CrossEdge:
+    """One import crossing between UI areas.  ``src``/``dst`` are areas."""
+
+    src: str
+    dst: str
+    where: str
+    names: tuple[str, ...]
+
+    @property
+    def kind(self) -> str | None:
+        """``"cross-skin"`` / ``"inversion"``, or None when legitimate."""
+        if self.src == "root" or self.dst in ("shared", "root"):
+            return None                      # the composition root, or a skin
+            #                                  using shared infrastructure
+        if self.src == "shared":
+            return "inversion"
+        return "cross-skin" if self.src != self.dst else None
+
+
+def _package_anchor(ui_root: Path) -> Path:
+    """The directory holding the TOP-level package, the way Python finds it.
+
+    Anchoring at ``ui_root.parent`` instead cost a real finding: on the real
+    tree that names ``ui/cli/system.py`` ``ui.cli.system``, and
+    ``from ...ui.api.main import build_app`` there walks up three levels from a
+    two-segment name, falls off the top and resolves to nothing.  One cross-skin
+    reach went silently missing — found only because a second measurement
+    disagreed.  Walking up while ``__init__.py`` exists gives ``trcc.ui.cli.system``
+    on the real tree and ``faces.alpha.window`` on a fixture, with no special case.
+    """
+    anchor = ui_root
+    while (anchor.parent / "__init__.py").exists():
+        anchor = anchor.parent
+    return anchor.parent
+
+
+def _module_name(path: Path, anchor: Path) -> str:
+    """Fully-qualified dotted name of *path*, relative to the package anchor."""
+    parts = list(path.relative_to(anchor).with_suffix("").parts)
+    if parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
+def _resolve_import(node: ast.ImportFrom, this: str, is_pkg: bool) -> str | None:
+    """Absolute module for an ``ImportFrom``, relative levels included.
+
+    A relative import contains NEITHER the package name nor a slash, so text
+    search cannot see it at all: grep reported 0 importers of ``ui.gui`` where
+    the AST reported 4.  Resolving the level is the whole job.
+    """
+    if node.level == 0:
+        return node.module
+    base = this.split(".")
+    if not is_pkg:
+        base = base[:-1]                     # a module: level 1 is its package
+    if (up := node.level - 1):
+        base = base[:-up] if up <= len(base) else []
+    if not base:
+        return None
+    return ".".join(base + ([node.module] if node.module else []))
+
+
+def _area(module: str, ui_pkg: str, skins: frozenset[str]) -> str | None:
+    """Which UI area *module* lives in — a skin name, ``root``, or ``shared``.
+
+    *ui_pkg* is the ui package's own dotted name (``trcc.ui``).  None when the
+    module is outside it entirely (core, services, PySide6, …); those are the
+    OTHER axis and ``_record_bypass`` already judges them.
+    """
+    if not module.startswith(ui_pkg + "."):
+        return None
+    head = module[len(ui_pkg) + 1:].split(".")[0]
+    if head in skins:
+        return head
+    return "root" if head == _COMPOSITION_ROOT else "shared"
+
+
+def _ui_files(ui_root: Path) -> list[Path]:
+    return [p for p in sorted(ui_root.rglob("*.py"))
+            if "__pycache__" not in p.parts]
+
+
+def cross_edges(ui_root: Path | None = None,
+                skins: frozenset[str] | None = None) -> list[CrossEdge]:
+    """Every import crossing UI areas.  Fixture-pointable, so it can be proven.
+
+    *ui_root* is a parameter rather than a constant for the reason ``scan_ui``
+    was fixed: a collector pinned to the real tree cannot be aimed at a fixture,
+    and one that cannot be aimed at a fixture cannot be shown to work.
+    """
+    ui_root = ui_root or _UI_ROOT
+    skins = skins if skins is not None else frozenset(_UIS)
+    anchor = _package_anchor(ui_root)
+    ui_pkg = _module_name(ui_root, anchor)
+    edges: list[CrossEdge] = []
+    for path in _ui_files(ui_root):
+        this = _module_name(path, anchor)
+        src = _area(this, ui_pkg, skins)
+        if src is None:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            target = _resolve_import(node, this, path.name == "__init__.py")
+            dst = _area(target, ui_pkg, skins) if target else None
+            if dst is None or dst == src:
+                continue
+            edges.append(CrossEdge(
+                src, dst, f"{path.relative_to(anchor)}:{node.lineno}",
+                tuple(a.name for a in node.names)))
+    return edges
+
+
+def mislocated(ui_root: Path | None = None,
+               skins: frozenset[str] | None = None) -> list[tuple[str, int, str]]:
+    """Shared-location modules serving ONE skin — ``(module, lines, skin)``.
+
+    "Shared location" is derived, not listed: anything under ``ui/`` that is not
+    inside a skin package.  A new ``ui/widgets/`` is covered the day it lands.
+
+    Package re-exports are followed.  ``presentation/__init__.py`` does
+    ``from .device_presentation import presentation_for``, so a consumer writing
+    ``from ..presentation import presentation_for`` credits the PACKAGE and the
+    module reads as having no consumer at all.  Measured without this, two
+    modules reported zero consumers when both have one — the false-zero shape
+    this file's own docstring warns about, one level down.
+    """
+    ui_root = ui_root or _UI_ROOT
+    skins = skins if skins is not None else frozenset(_UIS)
+    anchor = _package_anchor(ui_root)
+    ui_pkg = _module_name(ui_root, anchor)
+    files = _ui_files(ui_root)
+    trees = {p: ast.parse(p.read_text(encoding="utf-8")) for p in files}
+
+    # name -> defining module, for every `from .sub import Name` in a package
+    # __init__.  Only level-1: a deeper relative import is not a re-export.
+    reexport: dict[tuple[str, str], str] = {}
+    for path, tree in trees.items():
+        if path.name != "__init__.py":
+            continue
+        pkg = _module_name(path, anchor)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module:
+                for alias in node.names:
+                    reexport[(pkg, alias.name)] = f"{pkg}.{node.module}"
+
+    consumers: dict[str, set[str]] = {}
+    for path, tree in trees.items():
+        this = _module_name(path, anchor)
+        src = _area(this, ui_pkg, skins)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            target = _resolve_import(node, this, path.name == "__init__.py")
+            if not target or _area(target, ui_pkg, skins) is None:
+                continue
+            for alias in node.names:
+                real = reexport.get((target, alias.name), target)
+                if real != this and src in skins:
+                    consumers.setdefault(real, set()).add(src)
+
+    out: list[tuple[str, int, str]] = []
+    for path in files:
+        rel = path.relative_to(ui_root)
+        if rel.parts[0] in skins or path.name == "__init__.py":
+            continue                          # a skin's own code, or a package door
+        module = _module_name(path, anchor)
+        if len(found := consumers.get(module, set())) == 1:
+            lines = len(path.read_text(encoding="utf-8").splitlines())
+            out.append((module, lines, next(iter(found))))
+    return sorted(out, key=lambda row: -row[1])
+
+
+def _print_cross(edges: list[CrossEdge], stranded: list[tuple[str, int, str]]) -> None:
+    flagged = [e for e in edges if e.kind]
+    print(f"{_B}UI -> UI reaches{_RST}  "
+          f"{_GREY}({len(edges)} cross-area import(s) total){_RST}")
+    if not flagged:
+        print(f"  {_G}none — no skin names another skin, and only the "
+              f"composition root names a skin at all{_RST}")
+    for edge in flagged:
+        print(f"  {_R}{edge.kind}{_RST}  {edge.src} -> {edge.dst}  "
+              f"{', '.join(edge.names)}  {_GREY}{edge.where}{_RST}")
+
+    print(f"\n{_B}Shared in name only{_RST}  "
+          f"{_GREY}(a module outside every skin, used by exactly one){_RST}")
+    if not stranded:
+        print(f"  {_G}none — every shared module has more than one skin{_RST}")
+        return
+    for module, lines, skin in stranded:
+        print(f"  {_Y}{skin:<6}{_RST} {lines:>5} lines  {module}")
+    print(f"  {_GREY}{len(stranded)} module(s), "
+          f"{sum(n for _m, n, _s in stranded)} lines{_RST}")
+
+
 def _print_ui(surface: UiSurface) -> None:
     svc, adp = surface.service_imports, surface.adapter_imports
     holes = len(svc) + len(adp)
@@ -231,6 +459,67 @@ from ...core.commands import ListDevices
 def read(app):
     return app.dispatch(ListDevices())
 '''
+
+#: A whole ``ui/`` in miniature for the UI->UI axis: two skins, a composition
+#: root, shared infrastructure, and a shared package with one stranded module.
+#: Every import is RELATIVE, because resolving the level IS the job — a fixture
+#: written with absolute imports cannot fail on the bug this collector exists
+#: to avoid.
+_FIXTURE_FACES: dict[str, str] = {
+    "__init__.py": "",
+    # the composition root: names a skin's internals, and is allowed to
+    "_uis.py": "from .alpha.window import Window\n",
+    # shared infrastructure that names a skin — an INVERSION
+    "infra.py": "from .beta.panel import Panel\n\n\ndef thing():\n    return 1\n",
+    "alpha/__init__.py": "",
+    "alpha/window.py": (
+        "from ..beta.panel import Panel\n"        # CROSS-SKIN
+        # The same reach written as a DEEP relative import, the shape
+        # ``ui/cli/system.py`` uses: up past the ui package and back down
+        # through it by name.  Anchored one level too low this resolves to
+        # nothing and the reach vanishes silently — which it did.
+        "from ...faces.beta.panel import DeepMarker\n"
+        "from ..infra import thing\n"             # fine: shared infrastructure
+        "from ..shared.only_alpha import Lonely\n"
+        "from ..shared.both import Shared\n"      # direct
+        "from ..shared.solo import helper\n"      # a subpackage DOOR
+        "from ..shared.solo.impl import VALUE\n"
+        "\n\nclass Window:\n    pass\n"
+    ),
+    "beta/__init__.py": "",
+    "beta/panel.py": (
+        "from ..infra import thing\n"
+        "from ..shared import both_name\n"        # through the package DOOR
+        "\n\nDeepMarker = 1\n\n\nclass Panel:\n    pass\n"
+    ),
+    "shared/__init__.py": "from .both import both_name\n",
+    "shared/only_alpha.py": "class Lonely:\n    pass\n",
+    "shared/both.py": "class Shared:\n    pass\n\n\nboth_name = Shared\n",
+    # A shared SUBPACKAGE that serves one skin.  Its ``__init__`` defines
+    # ``helper`` itself, so nothing re-exports it and the door collects a real
+    # consumer — which is what makes the "a door is never itself stranded"
+    # check able to fail.  Without this the check was vacuous: module names
+    # have ``__init__`` stripped, so the string it looked for could not occur.
+    "shared/solo/__init__.py": "def helper():\n    return 2\n",
+    "shared/solo/impl.py": "VALUE = 3\n",
+}
+
+
+def _write_faces(tmp: Path) -> Path:
+    """Write the fixture and return its ui root.
+
+    Nested one package deep on purpose: a deep relative import needs somewhere
+    to walk UP to, so a flat fixture cannot express the ``from ...ui.api.main``
+    shape at all — and that is the shape whose resolution broke.
+    """
+    root = tmp / "pkgroot" / "faces"
+    (tmp / "pkgroot").mkdir(parents=True, exist_ok=True)
+    (tmp / "pkgroot" / "__init__.py").write_text("", encoding="utf-8")
+    for rel, text in _FIXTURE_FACES.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return root
 
 
 def gate() -> int:
@@ -308,6 +597,49 @@ def gate() -> int:
     checks.append(("a Command reached by IMPORT alone is reached",
                    by_alias.get("ListDevices") == {"probe2"}))
 
+    # --- the UI->UI axis: two skins, a root, and a shared package --------
+    skins = frozenset({"alpha", "beta"})
+    with tempfile.TemporaryDirectory() as tmp:
+        faces = _write_faces(Path(tmp))
+        edges = cross_edges(faces, skins)
+        stranded = mislocated(faces, skins)
+
+    kinds = {(e.src, e.dst): e.kind for e in edges}
+    names = {module for module, _lines, _skin in stranded}
+    # ``alias.name``, not ``asname`` — the tool records the symbol REACHED, so a
+    # marker that is renamed on import cannot be found by its local name.
+    deep = [e for e in edges if "DeepMarker" in e.names]
+
+    checks.append(("a skin importing ANOTHER skin is cross-skin",
+                   kinds.get(("alpha", "beta")) == "cross-skin"))
+    checks.append(("a DEEP relative reach resolves and is cross-skin",
+                   len(deep) == 1 and deep[0].kind == "cross-skin"))
+    checks.append(("shared infrastructure naming a skin is an inversion",
+                   kinds.get(("shared", "beta")) == "inversion"))
+    checks.append(("the composition root naming a skin is NOT flagged",
+                   kinds.get(("root", "alpha")) is None))
+    checks.append(("a skin using shared infrastructure is NOT flagged",
+                   kinds.get(("alpha", "shared")) is None))
+    checks.append(("a shared module used by ONE skin is mislocated",
+                   "pkgroot.faces.shared.only_alpha" in names))
+    # Beta reaches ``both`` ONLY through ``shared/__init__``.  If the re-export
+    # were not followed its import would credit the PACKAGE, ``both`` would
+    # read as alpha-only, and this module would be falsely reported stranded.
+    checks.append(("a package re-export is followed to its defining module",
+                   "pkgroot.faces.shared.both" not in names))
+    # ``shared.solo``'s door IS imported by exactly one skin, so it would be
+    # reported without the skip.  Its modules are reported individually; naming
+    # the door too would double-count the same finding.
+    checks.append(("a package door is never itself reported stranded",
+                   "pkgroot.faces.shared.solo" not in names
+                   and "pkgroot.faces.shared.solo.impl" in names))
+
+    # Denominator floor on the real tree: a collector that silently returns
+    # nothing would report a perfectly clean UI layer.
+    real = cross_edges()
+    checks.append(("the real tree yields cross-area edges at all",
+                   len(real) > 20))
+
     for label, ok in checks:
         print(f"  {'PASS' if ok else 'FAIL'}  {label}")
     failed = [label for label, ok in checks if not ok]
@@ -329,6 +661,10 @@ def main() -> int:
                          "exceeds N.  A ratchet, like MAX_SILENT: a UI that "
                          "reaches past the Command bus for something new "
                          "fails the build, and fixing one lets you lower N.")
+    ap.add_argument("--max-cross", type=int, default=None, metavar="N",
+                    help="exit non-zero if more than N UI->UI reaches are "
+                         "flagged (a skin naming another skin, or shared "
+                         "infrastructure naming a skin).  0 today.")
     args = ap.parse_args()
     commands, queries = contract_classes()
     reach = reach_by_command()
@@ -361,9 +697,21 @@ def main() -> int:
     if not flagged:
         print(f"  {_G}none — every service/adapter a GUI reaches, cli/api reach too{_RST}")
 
+    edges = cross_edges()
+    stranded = mislocated()
+    print()
+    _print_cross(edges, stranded)
+
     total = sum(len(s.service_imports) + len(s.adapter_imports)
                 for s in surfaces)
     print(f"\n{_B}total contract bypasses:{_RST} {total}")
+    flagged = len([e for e in edges if e.kind])
+    if args.max_cross is not None and flagged > args.max_cross:
+        print(f"{_R}FAIL{_RST} — {flagged} UI->UI reach(es) exceeds the "
+              f"--max-cross ceiling of {args.max_cross}.  A skin is reaching "
+              f"into another skin, or shared infrastructure has learned who "
+              f"its consumers are; both are inversions of the layering.")
+        return 1
     if args.max_bypasses is not None and total > args.max_bypasses:
         print(f"{_R}FAIL{_RST} — {total} bypass(es) exceeds the "
               f"--max-bypasses ceiling of {args.max_bypasses}.  A UI is "
