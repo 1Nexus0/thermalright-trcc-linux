@@ -88,7 +88,25 @@ class CztvState:
     isBiliPingmu: bool = False         # widescreen "split screen" mode
     isFanLcd: bool = False             # fan-hub LCD (fbl == 54)
 
-    ThemeML: str = "240320\\"          # C# field initialiser: PORTRAIT
+    #: ``FormCZTV.cs:468`` — ``private string ThemeML = "320240\\";``
+    #:
+    #: **LANDSCAPE, and it was written here as ``"240320\\"`` — transposed —
+    #: with a comment asserting "PORTRAIT".** Nothing in
+    #: ``SetThemeInfo_ThemeML`` ever assigns ``240320``; grep the decompile and
+    #: the string does not occur as a catalog at all. A panel the selector does
+    #: not branch on keeps this initialiser, so every such fingerprint was
+    #: compared against a value the C# never holds.
+    #:
+    #: Cost: **Mjolnir 320x240 pm5 (#176) was reported as a ThemeML divergence**
+    #: for as long as this line has existed. It is a MATCH — we answer
+    #: ``320240`` and so does the C#. It was the row that looked most
+    #: interesting precisely because 320x240 is NOT among the nine resolutions
+    #: the C# mount-tests, and the reason it was not among them is that no
+    #: mount rule was ever involved.
+    #:
+    #: (``FormLCD`` is a DIFFERENT form with its own default, ``2560720\\`` at
+    #: ``FormLCD.cs:206``. This model walks ``FormCZTV``.)
+    ThemeML: str = "320240\\"
     trace: list[str] = field(default_factory=list)
 
     def hit(self, line: int, msg: str) -> None:

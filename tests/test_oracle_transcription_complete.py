@@ -163,3 +163,133 @@ def test_control_flow_map_still_matches_the_live_decompile() -> None:
         "The committed map is stale — regenerate it with "
         "`python3.12 dev/decompiler/extract_control_flow.py`."
     )
+
+
+# =========================================================================
+# Field INITIALISERS — the state the branches start from
+# =========================================================================
+#
+# The checks above gate CONTROL FLOW: every PM the C# branches on is
+# transcribed, none is invented, and the committed map still describes the live
+# .cs.  None of them can see a field's DEFAULT VALUE, because a field no branch
+# assigns appears in no branch.
+#
+# That is exactly when the default is load-bearing.  A fingerprint that falls
+# through every arm of ``SetThemeInfo_ThemeML`` is answered entirely by the
+# initialiser, so a wrong one is not a rounding error — it is the whole answer.
+#
+# Measured 2026-09-20: ``CztvState.ThemeML`` was transcribed as ``"240320\\"``
+# and annotated "C# field initialiser: PORTRAIT".  ``FormCZTV.cs:468`` says
+# ``private string ThemeML = "320240\\";`` — LANDSCAPE, transposed, and the
+# string ``240320`` is never assigned as a catalog anywhere in the decompile.
+# Cost: **Mjolnir 320x240 pm5 (#176) was reported as a device divergence for as
+# long as that line existed.** It matches. The audit was accusing our shipping
+# code, and the reason the row looked mysterious — 320x240 is not among the
+# nine resolutions the C# mount-tests — is that no mount rule was ever involved.
+
+#: Deliberate divergences, each with the C# line that justifies it.  The same
+#: stance as ``audit_devices._SEMANTIC_SPLIT``: not an escape hatch, one
+#: verified case, and everything else compared directly.
+_DELIBERATE_DEFAULTS: dict[str, str] = {
+    # The C# initialises 0 (FormCZTV.cs:466), then its settings LOADER writes
+    # -1 when there is no persisted value (:1216, :1225), and
+    # SetThemeInfo_ThemeML branches on ``themeDirection == -1`` to mean FIRST
+    # BOOT (:1267, :1291, :1358, :1374, :1398).  This transcription simulates
+    # onboarding, so it starts at the post-load first-boot state on purpose.
+    # It is spelled as the named constant ``FIRST_BOOT``, not a bare -1 —
+    # which is precisely why this one survived review and ThemeML did not.
+    "themeDirection": "FormCZTV.cs:466 initialises 0; the loader sets -1 for "
+                      "first boot (:1216/:1225) and the selector branches on "
+                      "it (:1267…). We model onboarding, so we start at -1.",
+}
+
+
+def _csharp_field_initialisers(text: str) -> dict[str, str]:
+    """``{field: initialiser}`` for every non-const field the C# assigns inline.
+
+    Class-level declarations only — indented one tab, which is how ILSpy emits
+    members and what the control-flow extractor already relies on.  ``const``
+    is excluded: those are the catalog name table, not mutable state.
+    """
+    found: dict[str, str] = {}
+    pattern = re.compile(
+        r"^\t(?:private|public|protected|internal)\s+"
+        r"(?!const\b)(?:readonly\s+)?\w+\s+(\w+)\s*=\s*([^;]+);",
+        re.M,
+    )
+    for name, value in pattern.findall(text):
+        found[name] = value.strip()
+    return found
+
+
+@pytest.mark.skipif(
+    not _CS_SOURCE.is_file(),
+    reason=f"no decompile at {DECOMPILE_ROOT} — set TRCC_DECOMPILE",
+)
+def test_transcribed_field_defaults_match_the_decompile() -> None:
+    """Every meaningful default in ``CztvState`` is the C#'s, or is declared.
+
+    "Meaningful" = not falsy.  A ``False``/``0``/``""`` default carries no
+    claim about the C# — it is what the type would be anyway — so comparing
+    those would add noise without adding a guard.
+    """
+    import dataclasses
+
+    from formcztv_init import (  # pyright: ignore[reportMissingImports]
+        CztvState,
+    )
+
+    cs_text = _CS_SOURCE.read_text(encoding="utf-8", errors="replace")
+    cs_fields = _csharp_field_initialisers(cs_text)
+    assert "ThemeML" in cs_fields, (
+        "the field-declaration parser found no ThemeML in "
+        f"{_CS_FILE} — it has stopped matching ILSpy's output, so every "
+        "check below would pass by finding nothing"
+    )
+
+    mismatches: list[str] = []
+    for field in dataclasses.fields(CztvState):
+        default = field.default
+        if default is dataclasses.MISSING or not default:
+            continue
+        if field.name in _DELIBERATE_DEFAULTS:
+            continue
+        theirs = cs_fields.get(field.name)
+        if theirs is None:
+            continue          # a modelling field with no C# counterpart
+        # Compare as the C# spells it: strings keep their quotes and escaped
+        # trailing separator, ints are bare.
+        ours = (f'"{default}"'.replace("\\", "\\\\")
+                if isinstance(default, str) else str(default))
+        if ours != theirs:
+            mismatches.append(
+                f"  {field.name}: transcription {ours}, "
+                f"{_CS_FILE} says {theirs}")
+
+    assert not mismatches, (
+        "the transcription's field defaults disagree with the decompile.  A "
+        "field no branch assigns is answered ENTIRELY by its default, so this "
+        "is the whole answer for every fingerprint that falls through:\n"
+        + "\n".join(mismatches)
+        + "\n\nIf a difference is deliberate, add it to _DELIBERATE_DEFAULTS "
+          "with the C# line that justifies it."
+    )
+
+
+@pytest.mark.skipif(
+    not _CS_SOURCE.is_file(),
+    reason=f"no decompile at {DECOMPILE_ROOT} — set TRCC_DECOMPILE",
+)
+def test_every_declared_divergence_still_names_a_real_field() -> None:
+    """A declared exception must still correspond to a C# field.
+
+    Otherwise a rename leaves an entry excusing a field that no longer exists,
+    which silently exempts nothing and hides the next one that takes the name.
+    """
+    cs_fields = _csharp_field_initialisers(
+        _CS_SOURCE.read_text(encoding="utf-8", errors="replace"))
+    orphans = sorted(set(_DELIBERATE_DEFAULTS) - set(cs_fields))
+    assert not orphans, (
+        f"_DELIBERATE_DEFAULTS excuses field(s) {orphans} that no longer "
+        f"exist in {_CS_FILE} — drop the entry or fix the name"
+    )

@@ -25,14 +25,26 @@ so it doubles as a CI/regression guard on the FBL/resolution/widescreen port.
 Two things are reported but NOT counted toward the verdict:
 
   * **ThemeML** (native theme-catalog dir) — the C# seeds this from the
-    ``pmSub`` byte ONCE at onboarding (a hardware-mount default); ours is
-    re-derived at RUNTIME from the user orientation via ``oriented_resolution``.
-    They measure different things, so a difference here is *informational* — it
-    flags where the C# defaults a panel to portrait (``pmSub>=5``) that our port
-    defaults to landscape (orientation 0).  That gap is the likely #176/#203
-    root cause (a missing initial-orientation seed), NOT a rotation-math bug —
-    diffing it properly needs tracing our initial-orientation-on-connect, a
-    separate follow-up.
+    ``pmSub`` byte ONCE at onboarding (a hardware-mount default).
+
+    **This used to be incomparable, and is no longer.**  The note here said
+    diffing it properly "needs tracing our initial-orientation-on-connect, a
+    separate follow-up".  Done 2026-09-20: ``ConnectDevice.execute`` calls
+    ``Settings.seed_mount_orientation(key, profile.portrait_mounted)`` on first
+    connect, so a portrait-mounted panel starts at 90 and reads the transposed
+    catalog — the same thing the C# seeds from ``pmSub``.  Both sides are now
+    the FIRST-BOOT seeded value, so a row here is a REAL difference in the
+    mount rule.
+
+    Until that landed this compared our orientation-0 default against their
+    seeded value and reported **five** divergences, **two of which were this
+    auditor accusing correct code** (854x480 SUB=5 and 960x540 SUB=5) — the
+    same failure as the widescreen/``isBiliPingmu`` semantic split below.  It
+    is three now, and each carries its cause.
+
+    Still reported but NOT counted toward the verdict: the remaining rows are a
+    known modelling gap (``MOUNT_3_OF_9``), not a regression, and one of them
+    is not an orientation question at all.
 
   * **oracle-gap** rows — fingerprints our port handles that ``FormCZTVInit``
     does not branch on (the FBL 224/192 by-PM sub-splits live in a *different*
@@ -231,13 +243,28 @@ def audit(fp: Fingerprint) -> Row:
 
     # ours — the shipping port for the same fingerprint.
     our_fbl = pm_to_fbl(fp.pm, fp.sub) if fp.pm_driven else fp.fbl
-    profile = get_profile(our_fbl, fp.pm)
+    # The SUB byte is passed.  It was not, and this auditor therefore resolved
+    # a profile the shipping code never builds -- the same defect it exists to
+    # catch, in the instrument itself.  (`get_profile` spends SUB on the encode
+    # rotation, which this audit does not compare, and on `portrait_mounted`,
+    # which it now does.)
+    profile = get_profile(our_fbl, fp.pm, fp.sub)
     our_res = profile.resolution
     our_wide = profile.widescreen
-    # Our native catalog dir at the default orientation (0 = landscape); the
-    # runtime model swaps it at 90/270.  This is the value compared, for info,
-    # against the C#'s pmSub-seeded ThemeML default.
-    ow, oh = oriented_resolution(our_res, 0)
+    # Our catalog dir at the orientation a FIRST BOOT actually lands on, not at
+    # a hardcoded 0.
+    #
+    # This function's own docstring said comparing ThemeML "needs tracing our
+    # initial-orientation-on-connect, a separate follow-up".  That follow-up is
+    # done: `ConnectDevice.execute` seeds `Settings.seed_mount_orientation(key,
+    # profile.portrait_mounted)` on first connect, so a portrait-mounted panel
+    # starts at 90 and reads the transposed catalog -- which is precisely what
+    # the C# seeds from `pmSub`.  The two ARE comparable now.
+    #
+    # Compared at 0, this reported five divergences.  Two of them -- 854x480
+    # SUB=5 and 960x540 SUB=5 -- were the auditor accusing CORRECT code, the
+    # same failure as the widescreen/isBiliPingmu split recorded above.
+    ow, oh = oriented_resolution(our_res, 90 if profile.portrait_mounted else 0)
     our_thememl = f"{ow}{oh}"
 
     return Row(fp, their_fbl, their_res, their_wide, their_thememl,
@@ -350,11 +377,23 @@ def main() -> int:
 
     print(f"\n{'=' * 60}")
     if info:
-        print(f"ThemeML default differs (info, not a bug) on {len(info)} "
-              "device(s) — C# seeds native orientation from pmSub, ours "
-              "defaults to 0:")
+        # Both sides are now the SEEDED catalog, so a row here is a real
+        # difference in the mount rule -- not the old artifact of comparing our
+        # orientation-0 default against their pmSub-seeded value.
+        print(f"ThemeML differs on {len(info)} device(s) — both sides are the "
+              "FIRST-BOOT seeded catalog, so these are real:")
         for r in info:
-            print(f"  - {r.fp.label}: C#={r.their_thememl} ours={r.our_thememl}")
+            # A trailing letter is a per-SKU artwork LIBRARY suffix (Levita's
+            # `1600720l`), not a transposition -- a different phenomenon that
+            # widening the mount rule will not touch.
+            kind = ("variant suffix, not orientation"
+                    if r.their_thememl.rstrip("0123456789")
+                    else "mount rule")
+            print(f"  - {r.fp.label}: C#={r.their_thememl} "
+                  f"ours={r.our_thememl}  [{kind}]")
+        print("  Cause for the mount-rule rows: MOUNT_3_OF_9 — "
+              "`is_portrait_mounted` models 3 resolutions, the C# applies the "
+              "pmSub test to 9 (see tests/test_csharp_conformance.py).")
     if gaps:
         print(f"oracle-gap: {len(gaps)} device(s) FormCZTVInit resolves no "
               "geometry for — they fell through to the 240x320 default.")
