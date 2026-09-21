@@ -67,26 +67,51 @@ _PREFERRED_BASE = {
 }
 
 
-def _import_everything() -> None:
-    """Import every trcc module so subclass registries are complete."""
+def _import_everything() -> list[str]:
+    """Import every trcc module so subclass registries are complete.
+
+    Returns the modules that REFUSED, because a swallowed import silently
+    shrinks the page: the gate would then read "stale" and tell the
+    contributor to regenerate, which commits the truncation.  0 of 263 refuse
+    on a complete install, so a non-empty return names a broken environment
+    rather than a stale page.
+    """
     warnings.filterwarnings("ignore")
     import trcc
 
+    refused: list[str] = []
     for mod in pkgutil.walk_packages(trcc.__path__, "trcc."):
         if mod.name in _SKIP_MODULES:
             continue
         try:
             importlib.import_module(mod.name)
-        except Exception:
-            continue
+        except Exception as exc:
+            refused.append(f"{mod.name}: {type(exc).__name__}: {exc}")
+    return refused
 
 
 def _all_classes() -> list[type]:
+    """Every class the tree defines, as the garbage collector sees them.
+
+    The predicate is ``type(obj)``, never ``inspect.isclass`` — that is
+    ``isinstance(obj, type)``, which honours ``__class__``, and a weakref
+    proxy forwards ``__class__`` AND ``__module__`` to its referent.
+
+    ctypes is what made one: it caches every array type behind a weakproxy,
+    and the cached type wears the ``__module__`` of whichever module FIRST
+    evaluated ``c_uint8 * 32``.  Usually that is ``pynvml``, whose name this
+    sweep ignores — but ``adapters/sensors/_smc.py`` declares the same array,
+    and when it got there first the proxy wore ``trcc.``, passed both halves
+    of the filter, and ``issubclass`` raised ``arg 1 must be a class``.  Who
+    gets there first is import order, so under ``pytest -n`` it was whichever
+    worker drew ``tests/test_sensors_macos.py``: the page this module's header
+    calls deterministic was a coin flip.
+    """
     import gc
 
     return [
         obj for obj in gc.get_objects()
-        if inspect.isclass(obj)
+        if issubclass(type(obj), type)
         and getattr(obj, "__module__", "").startswith("trcc.")
     ]
 
