@@ -88,9 +88,16 @@ import logging_coverage  # noqa: E402  # pyright: ignore[reportMissingImports]
 #: 1306 -> 1305 the same day: ``ScreenCastPanel._get_aspect_ratio`` was a
 #: silent table lookup; deriving the ratio from the panel geometry gave it the
 #: branch log THE RULE asks for (it now says when there is no device yet).
+#: 342 -> 341 on 2026-09-20: ``UCAbout.eventFilter`` stopped being silent.
+#: The pass that fixed the xdist worker segfault replaced the self-installed
+#: filter with a weak-referencing ``_ToolTipFilter``, and the new body says
+#: which widget it is decorating and when its owner has already gone rather
+#: than dropping the event without a word (``71ec930b``).  Measured by
+#: diffing ``logging_coverage.py --list`` across the commit: it is the ONLY
+#: name that left the silent set.
 _SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "trcc"
 
-MAX_SILENT = 342
+MAX_SILENT = 341
 
 
 def test_logging_coverage_only_improves() -> None:
