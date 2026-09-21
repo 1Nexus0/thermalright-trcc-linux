@@ -38,6 +38,7 @@ device data still gets dev-console validation before it lands in variants.py.
 from __future__ import annotations
 
 import argparse
+import tempfile
 import re
 import subprocess
 import sys
@@ -496,7 +497,94 @@ def _lcd_panel_composition(cs: Path) -> dict[tuple[int, int], dict]:
                 popup = m.group(1)
         if res is not None:
             out[res] = {"widescreen": wide, "popup": popup}
+
+        # Panels assigned by EXPRESSION rather than by literal, e.g.
+        # ``is480x480 = fbl == 72;`` — 480x480, 640x480 and 360x360 (the round
+        # fan LCD) are all set this way and were invisible to the branch walk
+        # above, so the parity gate had never checked them.
+        #
+        # A SEPARATE pass, not a widened pattern in the loop: these three sit
+        # in a run of consecutive assignments with no ``if`` between them, and
+        # the walk only closes a row at a branch boundary — so widening it
+        # there would make each assignment overwrite the last and LOSE rows
+        # that are currently correct.  Anchored at the start of the statement
+        # so the fan-out block (``ucImageCut1.is320x320 = is320x320;``) cannot
+        # match.  ``setdefault``, so anything the branch walk established wins.
+        #
+        # Standard by construction: none of the expression-assigned panels is
+        # a ``isBiliPingmu`` screen — confirmed against
+        # ``UCScreenImage.SetMyUCScreenImage``, where 480x480 and 360x360 both
+        # draw the plain ``P320320`` frame.
+        for m in re.finditer(r"^\s*is(\d+)x(\d+) = (?!true\b)", body, re.M):
+            out.setdefault((int(m.group(1)), int(m.group(2))),
+                           {"widescreen": False, "popup": None})
     return out
+
+
+def gate() -> int:
+    """Re-prove the C# parsers against a fixture.  Offline and instant.
+
+    ``test_model_matches_csharp_audit`` asserts ``rows`` is non-empty, which is
+    not the same as COMPLETE: measured 2026-09-20 the parser returned 12 of the
+    15 ``is{W}x{H}`` flags in ``FormCZTV.cs``, because three are assigned by
+    EXPRESSION (``is480x480 = fbl == 72;``) and the pattern matched only
+    ``= true``.  One of the three is ``is360x360`` — the round fan LCD — so the
+    parity gate had never checked it.  Non-empty is not complete.
+    """
+    checks: list[tuple[str, bool]] = []
+    fixture = '''
+public void FormCZTVInit(int fbl, int m, int pm, int pmSub)
+{
+    if (myDeviceMode == 2 && pm == 9)
+    {
+        isBiliPingmu = true;
+        is854x480 = true;
+        ((Control)formScreenImage).BackgroundImage = Resources.P0预览弹窗854X480;
+    }
+    else if (myDeviceMode == 2 && pm == 15)
+    {
+        is640x172 = true;
+    }
+    is480x480 = fbl == 72;
+    is360x360 = fbl == 54;
+    ucImageCut1.is320x320 = is320x320;
+    ucThemeSetting1.ucTouPingXianShi1.is1234x567 = is1234x567;
+}
+'''
+    with tempfile.TemporaryDirectory() as tmp:
+        cs = Path(tmp) / "Form.cs"
+        cs.write_text(fixture, encoding="utf-8")
+        rows = _lcd_panel_composition(cs)
+
+    checks.append(("a widescreen arm is found with its popup",
+                   rows.get((854, 480), {}).get("widescreen") is True
+                   and rows.get((854, 480), {}).get("popup") == "854X480"))
+    checks.append(("an arm with no isBiliPingmu reads as standard",
+                   rows.get((640, 172), {}).get("widescreen") is False))
+    checks.append(("a popup is not attributed to the next arm",
+                   rows.get((640, 172), {}).get("popup") is None))
+    # The three the `= true` pattern could not see.
+    checks.append(("an EXPRESSION-assigned flag is found (is480x480)",
+                   (480, 480) in rows))
+    checks.append(("an EXPRESSION-assigned flag is found (is360x360)",
+                   (360, 360) in rows))
+    checks.append(("every is{W}x{H} flag in the body is reported",
+                   len(rows) == 4))
+    # The fan-out block assigns each flag onto five child controls.  An
+    # unanchored pattern matches those too and invents panels that do not
+    # exist — 1234x567 is in the fixture solely to be NOT found.
+    checks.append(("the fan-out block does not invent panels",
+                   (1234, 567) not in rows and (320, 320) not in rows))
+
+    for label, ok in checks:
+        print(f"  {'PASS' if ok else 'FAIL'}  {label}")
+    failed = [label for label, ok in checks if not ok]
+    if failed:
+        print(f"\n{len(failed)} gate check(s) FAILED — do not trust this "
+              f"tool's output until they pass.")
+        return 1
+    print(f"\nAll {len(checks)} gate checks passed.")
+    return 0
 
 
 def _show(label: str, only_new: set, only_ours: set) -> None:
@@ -508,6 +596,8 @@ def _show(label: str, only_new: set, only_ours: set) -> None:
 
 
 def main() -> None:
+    if "--gate" in sys.argv:
+        raise SystemExit(gate())
     ap = argparse.ArgumentParser()
     ap.add_argument("--resx", default=str(DECOMPILE_ROOT),
                     help="decompile carrying the .resx files (ilspycmd -p <exe>)")

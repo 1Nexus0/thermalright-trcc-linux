@@ -26,6 +26,7 @@ from __future__ import annotations
 import ast
 import collections
 import sys
+import tempfile
 from pathlib import Path
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "trcc"
@@ -221,25 +222,33 @@ def _is_abstract(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     )
 
 
-def silent_functions() -> list[str]:
-    """Every countable function with no log call, as ``path::name``."""
+def silent_functions(root: Path | None = None) -> list[str]:
+    """Every countable function with no log call, as ``path::name``.
+
+    *root* exists so :func:`gate` can point the tool at a fixture — the same
+    seam ``class_census.census`` and ``dup_bodies.clusters`` already take.  A
+    tool that can only ever read the live tree cannot be proven against a
+    known answer.
+    """
+    base = root or _SRC
     out: list[str] = []
-    for path in sorted(_SRC.rglob("*.py")):
+    for path in sorted(base.rglob("*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError:
             continue
-        rel = path.relative_to(_SRC)
+        rel = path.relative_to(base)
         for fn in _countable(tree):
             if not _emits_log(fn):
                 out.append(f"{rel}::{fn.name}")
     return out
 
 
-def countable_total() -> int:
+def countable_total(root: Path | None = None) -> int:
     """How many functions the rule applies to at all."""
+    base = root or _SRC
     total = 0
-    for path in sorted(_SRC.rglob("*.py")):
+    for path in sorted(base.rglob("*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError:
@@ -249,7 +258,139 @@ def countable_total() -> int:
     return total
 
 
+# =========================================================================
+# --gate — prove the tool before trusting its number
+# =========================================================================
+
+#: Every arm here is a rule this module argues for in prose, plus the two
+#: near-misses its own comments record.  A ratchet asserts this tool's OUTPUT;
+#: only a gate asserts its CORRECTNESS, and a miscount ratchets forever.
+_FIXTURE_A = '''
+import abc
+import logging
+
+log = logging.getLogger(__name__)
+
+
+def speaks():
+    log.info("something happened")
+
+
+def silent():
+    return 1
+
+
+def via_self_attr(self):
+    self.log.debug("bound logger on an attribute")
+
+
+def via_direct_call():
+    logging.getLogger(__name__).info("inline getLogger")
+
+
+def looks_like_logging(box):
+    """NOT a log call: a QMessageBox also has .warning().
+
+    This exact false positive shipped once and lowered the ratchet
+    permanently, because a name-only match counted it as coverage.
+    """
+    box.warning("parent", "title", "text")
+
+
+class Port(abc.ABC):
+    @abc.abstractmethod
+    def contract(self): ...
+
+
+class Stub:
+    def only_pass(self):
+        pass
+
+    def only_docstring(self):
+        """Nothing ran."""
+
+    def __repr__(self):
+        return "<Stub>"
+
+
+class MyFormatter(logging.Formatter):
+    def format(self, record):
+        return str(record)
+
+
+class LCDHandler(BaseHandler):
+    """NOT a logging handler — the GUI's per-device handler.
+
+    The exemption used to be a suffix test on the base name, which this
+    class matched.  Its own comment claimed the enclosing class qualified
+    it; measured, it did not.  ``format`` here must still be counted.
+    """
+
+    def format(self, value):
+        return str(value)
+'''
+
+_FIXTURE_B = '''
+def elsewhere():
+    return 1
+'''
+
+
+def gate() -> int:
+    """Re-prove the tool against known answers.  Offline and instant."""
+    checks: list[tuple[str, bool]] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "pkg"
+        root.mkdir()
+        (root / "a.py").write_text(_FIXTURE_A, encoding="utf-8")
+        (root / "b.py").write_text(_FIXTURE_B, encoding="utf-8")
+        silent = {s.split("::")[-1] for s in silent_functions(root)}
+        counted = countable_total(root)
+
+    checks.append(("a function that logs is NOT silent",
+                   "speaks" not in silent))
+    checks.append(("a function that does not log IS silent",
+                   "silent" in silent))
+    checks.append(("self.log.debug counts (attribute receiver)",
+                   "via_self_attr" not in silent))
+    checks.append(("logging.getLogger(...).info counts (call receiver)",
+                   "via_direct_call" not in silent))
+    checks.append(("box.warning is NOT a log call (the QMessageBox bug)",
+                   "looks_like_logging" in silent))
+    checks.append(("@abstractmethod is exempt", "contract" not in silent))
+    checks.append(("a pass-only stub is exempt", "only_pass" not in silent))
+    checks.append(("a docstring-only stub is exempt",
+                   "only_docstring" not in silent))
+    checks.append(("__repr__ is exempt (the logger invokes it)",
+                   "__repr__" not in silent))
+    checks.append(("Formatter.format IS exempt",
+                   sum(1 for s in silent if s == "format") == 1))
+    checks.append(("a NON-logging class named *Handler is NOT exempt",
+                   "format" in silent))
+    checks.append(("a function in a SEPARATE module is found",
+                   "elsewhere" in silent))
+    # Hand-counted from the rule: speaks, silent, via_self_attr,
+    # via_direct_call, looks_like_logging, LCDHandler.format, elsewhere.
+    # The five exempt are the abstract one, two stubs, __repr__, and
+    # Formatter.format.  (First draft said 8 — the gate caught the arithmetic,
+    # which is the same service it did for function_census minutes earlier.)
+    checks.append(("countable_total excludes the exempt", counted == 7))
+
+    for label, ok in checks:
+        print(f"  {'PASS' if ok else 'FAIL'}  {label}")
+    failed = [label for label, ok in checks if not ok]
+    if failed:
+        print(f"\n{len(failed)} gate check(s) FAILED — do not trust this "
+              f"tool's output until they pass.")
+        return 1
+    print(f"\nAll {len(checks)} gate checks passed.")
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if "--gate" in argv:
+        return gate()
+
     silent = silent_functions()
     total = countable_total()
     area = ""

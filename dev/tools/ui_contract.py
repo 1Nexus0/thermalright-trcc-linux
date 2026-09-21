@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import tempfile
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -99,8 +100,16 @@ def contract_classes() -> tuple[set[str], set[str]]:
     return concrete - queries, queries
 
 
-def reach_by_command() -> dict[str, set[str]]:
+def reach_by_command(
+    uis: dict[str, Path] | None = None,
+) -> dict[str, set[str]]:
     """Which UI trees reach each contract class, by AST — never by regex.
+
+    *uis* exists so :func:`gate` can point the collector at a fixture.  Without
+    it the two reference kinds below cannot be told apart on the real tree —
+    every Command a UI uses by NAME is also imported by ALIAS there, so
+    deleting the ``ast.Name`` arm changed no number and a first cut of the gate
+    passed with it deleted.
 
     A reference is an ``ast.Name`` (``dispatch(Foo(...))``) or an ``ast.alias``
     (``from ... import Foo``).  Deliberately broader than "an inline call in a
@@ -112,7 +121,7 @@ def reach_by_command() -> dict[str, set[str]]:
     """
     commands, queries = contract_classes()
     reach: dict[str, set[str]] = {n: set() for n in commands | queries}
-    for ui, root in _UIS.items():
+    for ui, root in (uis or _UIS).items():
         for path in root.rglob("*.py"):
             if "__pycache__" in path.parts:
                 continue
@@ -127,7 +136,7 @@ def reach_by_command() -> dict[str, set[str]]:
     if not any(reach.values()):
         raise SystemExit(
             f"reach collector found no Command referenced by any of "
-            f"{sorted(_UIS)} — the UI roots are wrong or empty."
+            f"{sorted(uis or _UIS)} — the UI roots are wrong or empty."
         )
     return reach
 
@@ -154,7 +163,15 @@ def scan_ui(name: str, root: Path, dispatched: set[str]) -> UiSurface:
             tree = ast.parse(path.read_text())
         except SyntaxError:
             continue
-        rel = path.relative_to(_SRC)
+        try:
+            rel = path.relative_to(_SRC)
+        except ValueError:
+            # *root* is advertised as a parameter but this was pinned to
+            # ``_SRC``, so the function only ever worked for roots inside the
+            # tree — which meant it could not be pointed at a fixture, which
+            # meant it could not be proven.  ``rel`` is a human-readable
+            # location label and nothing more.
+            rel = path.relative_to(root.parent)
         for node in ast.walk(tree):
             _record_bypass(node, rel, surface)
     return surface
@@ -188,7 +205,124 @@ def _print_ui(surface: UiSurface) -> None:
     print()
 
 
+# =========================================================================
+# --gate — prove the tool before trusting its number
+# =========================================================================
+
+#: A UI package, in the shape the real ones have: several modules, and imports
+#: written RELATIVELY.  A single-file fixture cannot fail on a path- or
+#: level-resolution bug, which is the class of bug that has shipped here
+#: before — ``dup_bodies`` reported zero for every multi-module family while
+#: its single-file gate stayed green.
+_FIXTURE_PANEL = '''
+from ...core.commands import SendColor          # the contract — NOT a bypass
+from ...services.display import DisplayService  # a bypass
+from ...adapters.render.qt import QtRenderer    # a bypass
+
+
+def act(app):
+    return app.dispatch(SendColor(key="x", r=1, g=2, b=3))
+'''
+
+_FIXTURE_CLEAN = '''
+from ...core.commands import ListDevices
+
+
+def read(app):
+    return app.dispatch(ListDevices())
+'''
+
+
+def gate() -> int:
+    """Re-prove the tool against known answers.  Offline except the import."""
+    checks: list[tuple[str, bool]] = []
+
+    # --- the AST half: fixture-able -------------------------------------
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "skin"
+        root.mkdir()
+        (root / "panel.py").write_text(_FIXTURE_PANEL, encoding="utf-8")
+        (root / "clean.py").write_text(_FIXTURE_CLEAN, encoding="utf-8")
+        surface = scan_ui("fixture", root, set())
+
+    checks.append(("a services import IS a bypass",
+                   "DisplayService" in surface.service_imports))
+    checks.append(("an adapters import IS a bypass",
+                   "QtRenderer" in surface.adapter_imports))
+    checks.append(("a core.commands import is NOT a bypass",
+                   "SendColor" not in surface.service_imports
+                   and "SendColor" not in surface.adapter_imports))
+    checks.append(("a RELATIVE import is still resolved",
+                   surface.service_imports.get("DisplayService", "")
+                   .startswith("skin/panel.py")
+                   or "panel.py" in surface.service_imports.get(
+                       "DisplayService", "")))
+    checks.append(("a second module in the package is scanned",
+                   "ListDevices" not in surface.service_imports))
+
+    # --- the runtime half: cannot use a fixture --------------------------
+    # ``contract_classes`` imports the LIVE classes on purpose (``Query``
+    # subclasses ``Command``, and two classes are named ``DeviceState``), so
+    # it is gated against invariants of the real tree instead.
+    commands, queries = contract_classes()
+    checks.append(("commands and queries do not overlap",
+                   not (commands & queries)))
+    checks.append(("the contract clears its own floor",
+                   len(commands | queries) >= _MIN_CONTRACT))
+    checks.append(("a known Command is classified as one",
+                   "SendColor" in commands and "SendColor" not in queries))
+    checks.append(("a known Query is classified as one",
+                   "ListDevices" in queries and "ListDevices" not in commands))
+    checks.append(("the abstract bases are not capabilities",
+                   "Command" not in commands | queries
+                   and "Query" not in commands | queries))
+
+    # The reason this tool walks the AST instead of matching text: SendFrame
+    # is NAMED in two UI trees and dispatched by neither.  A text match would
+    # report it as reached by both.
+    reach = reach_by_command()
+    checks.append(("a Command only MENTIONED in comments reads as unreached",
+                   reach.get("SendFrame") == set()))
+    checks.append(("a Command genuinely dispatched reads as reached",
+                   reach.get("SendColor") == {"cli", "api"}))
+
+    # The two reference kinds, isolated.  On the real tree every Command used
+    # by NAME is also imported by ALIAS, so deleting either arm changes no
+    # number there — a first cut of this gate passed with ast.Name deleted.
+    with tempfile.TemporaryDirectory() as tmp:
+        name_only = Path(tmp) / "probe"
+        name_only.mkdir()
+        (name_only / "m.py").write_text(
+            "def act(app):\n    return app.dispatch(SendColor(key='x'))\n",
+            encoding="utf-8")
+        by_name = reach_by_command({"probe": name_only})
+
+        alias_only = Path(tmp) / "probe2"
+        alias_only.mkdir()
+        (alias_only / "m.py").write_text(
+            "from trcc.core.commands import ListDevices\n", encoding="utf-8")
+        by_alias = reach_by_command({"probe2": alias_only})
+
+    checks.append(("a Command used by NAME with no import is reached",
+                   by_name.get("SendColor") == {"probe"}))
+    checks.append(("a Command reached by IMPORT alone is reached",
+                   by_alias.get("ListDevices") == {"probe2"}))
+
+    for label, ok in checks:
+        print(f"  {'PASS' if ok else 'FAIL'}  {label}")
+    failed = [label for label, ok in checks if not ok]
+    if failed:
+        print(f"\n{len(failed)} gate check(s) FAILED — do not trust this "
+              f"tool's output until they pass.")
+        return 1
+    print(f"\nAll {len(checks)} gate checks passed.")
+    return 0
+
+
 def main() -> int:
+    if "--gate" in sys.argv:
+        return gate()
+
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--max-bypasses", type=int, default=None, metavar="N",
                     help="exit non-zero if the total contract bypass count "

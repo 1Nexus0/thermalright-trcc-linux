@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import ast
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -177,7 +178,125 @@ def too_branchy(
     return [f for f in census(root) if f.decisions >= threshold]
 
 
+# =========================================================================
+# --gate — prove the tool before trusting its number
+# =========================================================================
+
+#: Hand-counted, so the gate's expectations come from the RULE and not from a
+#: run of the tool being gated.  ``weigh_me`` decomposes as:
+#:
+#:     if / elif                 2   (the ``else`` is not a decision)
+#:     if a and b and c          1
+#:     a and b and c             2   (BoolOp: len(values) - 1)
+#:     for                       1
+#:     ternary                   1
+#:     except                    1
+#:     comprehension             1   (its loop only)
+#:                             ---
+#:                               9
+#:
+#: The nested ``inner`` and the ``lambda`` are NOT charged to it — if the
+#: lambda's own ternary were counted this would read 10.
+#:
+#: The first draft of this block said 8: it grouped the third ``if`` into the
+#: if/elif row and summed one short.  The gate caught it, which is the point —
+#: an expectation written by the same hand that wrote the tool is worth
+#: exactly as much as the arithmetic behind it.
+_FIXTURE_A = '''
+def weigh_me(flag, items, a, b, c):
+    def inner(x):
+        if x:                      # nested — charged to inner, not weigh_me
+            return 1
+        return 0
+
+    handler = lambda v: v if v else 0      # noqa: E731 — lambda is nested too
+
+    if flag:
+        total = 1
+    elif items:
+        total = 2
+    else:
+        total = 3
+    for item in items:
+        total += item
+    total = total if total else 0
+    try:
+        total += 1
+    except ValueError:
+        total = 0
+    if a and b and c:
+        total += 1
+    squares = [i for i in items]
+    return total, inner, handler, squares
+
+
+class Holder:
+    def method(self):
+        return 1
+'''
+
+_FIXTURE_B = '''
+def elsewhere():
+    return 1
+'''
+
+
+def gate() -> int:
+    """Re-prove the tool against hand-counted answers.  Offline and instant."""
+    checks: list[tuple[str, bool]] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "pkg"
+        root.mkdir()
+        (root / "a.py").write_text(_FIXTURE_A, encoding="utf-8")
+        (root / "b.py").write_text(_FIXTURE_B, encoding="utf-8")
+        rows = {f.name: f for f in census(root)}
+
+        checks.append(("decisions match the hand count",
+                       rows["weigh_me"].decisions == 9))
+        checks.append(("a LAMBDA body is not charged to its parent either",
+                       rows["weigh_me"].decisions != 10))
+        checks.append(("a NESTED function is not charged to its parent",
+                       rows["inner"].decisions == 1))
+        checks.append(("a method is qualified by its class",
+                       "Holder.method" in rows))
+        checks.append(("a function in a SEPARATE module is found",
+                       rows.get("elsewhere") is not None))
+
+        # The two thresholds are deliberately asymmetric — OVER for lines, AT
+        # OR OVER for decisions.  Both docstrings say so, and a flipped
+        # comparison is a one-character edit that shifts every ratchet.
+        checks.append(("too_branchy is AT OR OVER",
+                       [f.name for f in too_branchy(9, root)] == ["weigh_me"]
+                       and too_branchy(10, root) == []))
+        long_rows = too_long(rows["weigh_me"].lines - 1, root)
+        checks.append(("too_long is strictly OVER",
+                       [f.name for f in long_rows] == ["weigh_me"]
+                       and too_long(rows["weigh_me"].lines, root) == []))
+
+        # Scope defence: the docstring promises a raise, not a skip.
+        (root / "broken.py").write_text("def (:\n", encoding="utf-8")
+        try:
+            census(root)
+        except SyntaxError:
+            checks.append(("an unparseable file RAISES, never skips", True))
+        else:
+            checks.append(("an unparseable file RAISES, never skips", False))
+
+    for label, ok in checks:
+        print(f"  {'PASS' if ok else 'FAIL'}  {label}")
+    failed = [label for label, ok in checks if not ok]
+    if failed:
+        print(f"\n{len(failed)} gate check(s) FAILED — do not trust this "
+              f"tool's output until they pass.")
+        return 1
+    print(f"\nAll {len(checks)} gate checks passed.")
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if "--gate" in argv:
+        return gate()
+
     lines = LONG_FUNCTION_LINES
     decisions = BRANCHY_FUNCTION_DECISIONS
     if "--lines" in argv:

@@ -37,14 +37,26 @@ Usage::
     PYTHONPATH=src python3.12 dev/tools/class_census.py
     PYTHONPATH=src python3.12 dev/tools/class_census.py --threshold 20
     PYTHONPATH=src python3.12 dev/tools/class_census.py --area ui/qtgui
+    PYTHONPATH=src python3.12 dev/tools/class_census.py --gate  # prove the tool
 
 ``tests/test_god_classes.py`` imports :func:`god_classes` and ratchets the
 answer, so the tool and the gate can never measure different things.
+
+**Run ``--gate`` before you trust a number.**  A ratchet asserts this tool's
+OUTPUT, never its CORRECTNESS: a miscounting census ratchets the wrong number
+forever and stays green.  That is not hypothetical — a sibling ratchet once
+counted ``QMessageBox.warning`` as a log line, and the false positive lowered
+the bar permanently.  The gate re-proves the answer against a fixture in both
+directions: an implemented method IS counted, an ``@abstractmethod`` is NOT
+(plain *and* dotted), the abstract column still reports it, classes in
+SEPARATE modules are both found, and an unparseable file RAISES rather than
+silently shrinking the scope.
 """
 from __future__ import annotations
 
 import ast
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -121,7 +133,105 @@ def god_classes(
     return [c for c in census(root) if c.methods >= threshold]
 
 
+# =========================================================================
+# --gate — prove the tool before trusting its number
+# =========================================================================
+
+#: Two modules, not one.  A fixture confined to a single file cannot fail on a
+#: path- or walk-resolution bug, which is exactly the class of bug that has
+#: shipped here before: ``dup_bodies`` reported ZERO for every multi-module
+#: family while its single-file gate stayed green, and a 2026-09-20 scratch
+#: probe reported ZERO cross-UI imports because it mis-built one package path.
+_FIXTURE_A = '''
+import abc
+
+
+class Port(abc.ABC):
+    """A port's width is its CONTRACT — abstract methods weigh nothing."""
+
+    @abc.abstractmethod
+    def dotted(self): ...
+
+    @abstractmethod
+    def plain(self): ...
+
+    def concrete(self):
+        return 1
+
+
+class Worker:
+    CONSTANT = 3          # not a method
+
+    def one(self):
+        return 1
+
+    async def two(self):  # async still implements something
+        return 2
+
+    @property
+    def three(self):
+        return 3
+'''
+
+_FIXTURE_B = '''
+class Elsewhere:
+    def only(self):
+        return 1
+'''
+
+
+def gate() -> int:
+    """Re-prove the tool against known answers.  Offline and instant."""
+    checks: list[tuple[str, bool]] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "pkg"
+        root.mkdir()
+        (root / "a.py").write_text(_FIXTURE_A, encoding="utf-8")
+        (root / "b.py").write_text(_FIXTURE_B, encoding="utf-8")
+        rows = {c.name: c for c in census(root)}
+
+        checks.append(("an implemented method is counted",
+                       rows["Worker"].methods == 3))
+        checks.append(("an @abstractmethod is NOT counted as implemented",
+                       rows["Port"].methods == 1))
+        checks.append(("a DOTTED @abc.abstractmethod is excluded too",
+                       rows["Port"].abstract == 2))
+        checks.append(("a class attribute is not a method",
+                       "CONSTANT" not in {r for r in rows}))
+        checks.append(("a class in a SEPARATE module is found",
+                       rows.get("Elsewhere") is not None
+                       and rows["Elsewhere"].methods == 1))
+        checks.append(("the threshold filters",
+                       [c.name for c in god_classes(3, root)] == ["Worker"]))
+        checks.append(("below the threshold is excluded",
+                       god_classes(4, root) == []))
+
+        # Scope defence: the docstring promises a raise, not a skip.  A census
+        # that silently drops what it cannot read shrinks its own scope, and
+        # the dropped file is the one being edited.
+        (root / "broken.py").write_text("def (:\n", encoding="utf-8")
+        try:
+            census(root)
+        except SyntaxError:
+            checks.append(("an unparseable file RAISES, never skips", True))
+        else:
+            checks.append(("an unparseable file RAISES, never skips", False))
+
+    for label, ok in checks:
+        print(f"  {'PASS' if ok else 'FAIL'}  {label}")
+    failed = [label for label, ok in checks if not ok]
+    if failed:
+        print(f"\n{len(failed)} gate check(s) FAILED — do not trust this "
+              f"tool's output until they pass.")
+        return 1
+    print(f"\nAll {len(checks)} gate checks passed.")
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if "--gate" in argv:
+        return gate()
+
     threshold = GOD_CLASS_METHODS
     if "--threshold" in argv:
         threshold = int(argv[argv.index("--threshold") + 1])
