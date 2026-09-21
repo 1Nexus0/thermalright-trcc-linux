@@ -219,6 +219,48 @@ def test_a_full_queue_drops_instead_of_blocking(server) -> None:
     assert srv._dropped >= 50
 
 
+def test_the_ack_is_written_only_after_the_subscriber_is_registered(
+    server, connect, monkeypatch,
+) -> None:
+    """The receipt must not outrun the registration.
+
+    ``_handle_subscribe`` used to ack first and append second, so every event
+    published in that window reached nobody while the client had already been
+    told it was attached.  Registering first, on its own, is no better: the
+    fan-out snapshots its targets under ``_sub_lock`` and writes OUTSIDE it,
+    so an event line could be written before the ack line and the client
+    would parse an event where it expects its receipt.  Both halves are why
+    the two operations now happen under one lock, registration first.
+
+    Pinned DIRECTLY rather than left to a race.  The test below
+    (``test_shutdown_releases_subscriber_streams``) does observe the same bug,
+    but only by losing a race: it passed 25 times out of 25 in isolation and
+    failed once under 16 xdist workers.  A gate that fires by luck is not a
+    gate.  This one reads the invariant at the only instant it is decidable —
+    the moment the ack is handed to the socket.
+    """
+    from trcc import ipc as ipc_mod
+
+    _app, srv = server
+    registered_at_ack: list[int] = []
+    real_send = ipc_mod._send_json
+
+    def _spy(sock: socket.socket, payload: dict[str, Any]) -> None:
+        if payload.get("ok") and "subscribed" in payload:
+            registered_at_ack.append(len(srv._subscribers))
+        real_send(sock, payload)
+
+    monkeypatch.setattr(ipc_mod, "_send_json", _spy)
+    assert connect().subscribe(["*"])["ok"]
+
+    assert registered_at_ack == [1], (
+        "the ack was written while the server held "
+        f"{registered_at_ack} subscriber(s) — registration must precede the "
+        "receipt, or an event published in the gap is lost to a client that "
+        "has been told it is attached"
+    )
+
+
 def test_shutdown_releases_subscriber_streams(server, connect) -> None:
     """Otherwise the daemon cannot exit while a GUI is attached."""
     _app, srv = server

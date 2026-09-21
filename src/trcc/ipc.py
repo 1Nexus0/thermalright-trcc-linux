@@ -695,15 +695,39 @@ class IPCServer:
         wanted = set(names)
         self._bridge_events(wanted)
         sub = _Subscriber(client, wanted)
+        # Register and acknowledge under ONE lock, registration first.  Each
+        # ordering on its own breaks a different invariant:
+        #   ack-then-register loses every event published in the gap, to a
+        #     client that has just been told it is attached;
+        #   register-then-ack outside the lock lets ``_fanout_loop`` write an
+        #     event line BEFORE the ack line, so the client parses an event
+        #     where it expects its receipt -- a desynced stream, which is
+        #     worse than a dropped event.
+        # The fan-out snapshots its targets under this same lock (see
+        # ``_fanout_loop``), so while it is held no event can reach this
+        # socket, and by the time one can the ack is already on the wire.
+        # The ack keeps the bounded send timeout: a client that has stopped
+        # reading must not be able to park this thread inside the lock and
+        # stall the fan-out for every other subscriber.
+        client.settimeout(_SUBSCRIBER_SEND_TIMEOUT_S)
+        with self._sub_lock:
+            self._subscribers.append(sub)
+            try:
+                _send_json(client, {"ok": True, "subscribed": sorted(wanted)})
+            except OSError as e:
+                # The stream died between accept and receipt.  Un-register
+                # inline -- ``_evict`` takes ``_sub_lock``, which is not
+                # reentrant -- and let the caller close the socket.
+                self._subscribers.remove(sub)
+                log.warning("_handle_subscribe: ack failed, not attached "
+                            "-- %s: %s", type(e).__name__, e)
+                return False
+            attached = len(self._subscribers)
         # The stream has no further requests on it, so the 30s read timeout
         # that guards a one-shot dispatch would kill a healthy subscriber.
         client.settimeout(None)
-        _send_json(client, {"ok": True, "subscribed": sorted(wanted)})
-        with self._sub_lock:
-            self._subscribers.append(sub)
         self._ensure_fanout()
-        log.info("_handle_subscribe: %d subscriber(s) now attached",
-                 len(self._subscribers))
+        log.info("_handle_subscribe: %d subscriber(s) now attached", attached)
         return True
 
     def _bridge_events(self, names: set[str]) -> None:
