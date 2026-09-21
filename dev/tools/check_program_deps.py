@@ -1114,6 +1114,15 @@ class WingetChannel(Channel):
         for suffix in ("installer", "locale.en-US", ""):
             name = f"{package_id}.{suffix}.yaml" if suffix else f"{package_id}.yaml"
             text += _get(f"{base}/{newest}/{name}") or ""
+        # winget-pkgs manifests are CRLF.  Normalise ONCE here rather than
+        # teaching every pattern below to tolerate it: the PortableCommandAlias
+        # regex happens to survive \r because \S+ stops at it, the Commands
+        # regex did not -- it anchors on a bare \n -- so every package that
+        # declares Commands (the MSI/EXE installers, i.e. most of them) parsed
+        # as "no binaries", which this tool reports as "no such package".
+        # 7zip.7zip read STALE on that basis while its manifest plainly says
+        # "Commands:\r\n- 7z".  A false STALE blocks a release by our own rule.
+        text = text.replace("\r\n", "\n")
         cmds = re.findall(r"^\s*PortableCommandAlias:\s*(\S+)", text, re.M)
         block = re.search(r"^Commands:\n((?:\s*-\s*\S+\n)+)", text, re.M)
         if block:
@@ -1208,6 +1217,18 @@ _CHANNEL_CASES: list[
      "transitional dummy depending on ffmpeg6 — both Void hints work"),
     ("void", "p7zip-unrar", ("7z",), (), "nonfree",
      "positive control — proves the nonfree index loaded, not just current"),
+    # winget had ZERO cases here, and that is how a false STALE shipped: the
+    # gate re-proved every channel EXCEPT the one whose verdict was wrong.
+    # These two are chosen to separate the two manifest shapes, because only
+    # one of them was broken.
+    ("winget", "7zip.7zip", ("7z",), (), "",
+     "declares Commands: — the shape that parsed as absent while the manifest "
+     "plainly listed 7z, because winget-pkgs is CRLF and the pattern anchored "
+     "on a bare newline.  A false STALE blocks a release by our own rule"),
+    ("winget", "Gyan.FFmpeg", ("ffmpeg", "ffprobe"), (), "",
+     "declares PortableCommandAlias: — the shape that always worked, because "
+     "\\S+ happens to stop at the \\r.  Keeps the two shapes separable, so a "
+     "regression in one cannot hide behind the other"),
 ]
 
 
