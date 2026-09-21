@@ -1,5 +1,34 @@
 # Changelog
 
+## v9.10.2
+
+**A screen bolted into its cooler sideways now starts upright on six more
+sizes.** Some coolers mount the panel turned ninety degrees, and the display
+says so in its own handshake. TRCC read that for three screen sizes and
+ignored it for the other six, so an owner of one of those six was shown a
+sideways picture and had to rotate the dial by hand to read it. All nine are
+read now. This only ever applies the first time a display is set up — if you
+already turned yours to compensate, your setting is left exactly as it is.
+
+**A 176x320 display is recognised instead of being guessed at.** TRCC had no
+entry for this panel, so it fell back to a default that was wrong about its
+size and about how its pixels are packed. Its artwork had been shipping all
+along with nothing able to select it.
+
+**Installing with pip can no longer produce a version that refuses to start
+its web interface.** The required version of one packaging library was twelve
+releases out of date, and old enough to predate a rename that FastAPI now
+depends on. Picked up from a contributor whose entire API surface failed to
+load for exactly this reason.
+
+**Under the hood**, the reference the project checks itself against had two
+mistakes of its own: it invented a sideways mount for one panel that the
+original software never performs, and it was one step out on another. Both had
+been recorded as differences against TRCC's own correct behaviour. The checks
+that compare TRCC to the original now cover the mount rule, the displays that
+connect over HID, and whether a screen size has artwork to go with it at all —
+none of which was checked before.
+
 ## v9.10.1
 
 **The log stops erasing itself.** Four lines were writing ninety percent of
