@@ -54,6 +54,12 @@ from .uc_screen_led import UCScreenLED
 
 log = logging.getLogger(__name__)
 
+#: Values a widget carries so its slot is a named method rather than a closure
+#: over a loop variable — ``feedback_no_lambdas``.
+_INDEX_PROPERTY = "trcc_index"
+_PRESET_PROPERTY = "trcc_preset_rgb"
+_FLAG_PROPERTY = "trcc_flag"
+
 # =========================================================================
 # Layout constants (from FormLED.cs InitializeComponent, ClientSize 1274x800)
 #
@@ -386,7 +392,8 @@ class UCLedControl(QWidget):
             btn.setGeometry(x, MODE_Y, MODE_W, MODE_H)
             btn.setCheckable(True)
             btn.setStyleSheet(self._mode_button_style(False))
-            btn.clicked.connect(lambda checked, idx=i: self._on_mode_clicked(idx))
+            btn.setProperty(_INDEX_PROPERTY, i)
+            btn.clicked.connect(self._on_mode_button)
             btn.setToolTip(label)
             self._mode_buttons.append(btn)
 
@@ -420,9 +427,8 @@ class UCLedControl(QWidget):
                 "color: white; background: rgba(40, 40, 40, 180); "
                 "border: none; font-size: 11px;"
             )
-            spinbox.valueChanged.connect(
-                lambda val, idx=i: self._on_spinbox_changed(idx, val)
-            )
+            spinbox.setProperty(_INDEX_PROPERTY, i)
+            spinbox.valueChanged.connect(self._on_rgb_spun)
             self._rgb_spinboxes.append(spinbox)
 
             # Slider (right of spinbox — C# ucScrollAR/G/B)
@@ -469,9 +475,8 @@ class UCLedControl(QWidget):
                     f"QPushButton:hover {{ border: 2px solid white; }}"
                 )
             btn.setFlat(True)
-            btn.clicked.connect(
-                lambda checked, cr=r, cg=g, cb=b: self._set_color(cr, cg, cb)
-            )
+            btn.setProperty(_PRESET_PROPERTY, (r, g, b))
+            btn.clicked.connect(self._on_preset_button)
             self._preset_buttons.append(btn)
 
         # -- Temperature color legend (modes 5-6, hidden by default) --
@@ -542,8 +547,7 @@ class UCLedControl(QWidget):
             "background: #FF9800; }"
         )
         self._test_cb.setToolTip("LED test mode — cycles white/red/green/blue")
-        self._test_cb.toggled.connect(
-            lambda on: self.test_mode_changed.emit(on))
+        self._test_cb.toggled.connect(self.test_mode_changed.emit)
         self._test_cb.setVisible(False)  # C# checkBox1.Visible = false
 
         # -- Zone buttons (C# button1-4/5-6/N1-4 — images swapped per style) --
@@ -556,9 +560,8 @@ class UCLedControl(QWidget):
             btn.setFlat(True)
             btn.setToolTip(f"Select zone {i + 1}")
             btn.setStyleSheet(_STYLE_FLAT_CHECKABLE_BTN)
-            btn.clicked.connect(
-                lambda checked, idx=i: self._on_zone_clicked(idx)
-            )
+            btn.setProperty(_INDEX_PROPERTY, i)
+            btn.clicked.connect(self._on_zone_button)
             btn.setVisible(False)
             self._zone_buttons.append(btn)
 
@@ -650,7 +653,8 @@ class UCLedControl(QWidget):
         self._btn_24h.setFlat(True)
         self._btn_24h.setStyleSheet(_cb_style)
         self._btn_24h.setToolTip("24-hour format")
-        self._btn_24h.clicked.connect(lambda: self._set_clock_format(True))
+        self._btn_24h.setProperty(_FLAG_PROPERTY, True)
+        self._btn_24h.clicked.connect(self._on_clock_format_button)
         self._btn_24h.setVisible(False)
 
         self._btn_12h = QPushButton(self)
@@ -659,7 +663,8 @@ class UCLedControl(QWidget):
         self._btn_12h.setFlat(True)
         self._btn_12h.setStyleSheet(_cb_style)
         self._btn_12h.setToolTip("12-hour format")
-        self._btn_12h.clicked.connect(lambda: self._set_clock_format(False))
+        self._btn_12h.setProperty(_FLAG_PROPERTY, False)
+        self._btn_12h.clicked.connect(self._on_clock_format_button)
         self._btn_12h.setVisible(False)
 
         # "First day of the week" header + Monday/Sunday beside their buttons
@@ -681,7 +686,8 @@ class UCLedControl(QWidget):
         self._btn_sun.setFlat(True)
         self._btn_sun.setStyleSheet(_cb_style)
         self._btn_sun.setToolTip("Week starts on Sunday")
-        self._btn_sun.clicked.connect(lambda: self._set_week_start(True))
+        self._btn_sun.setProperty(_FLAG_PROPERTY, True)
+        self._btn_sun.clicked.connect(self._on_week_start_button)
         self._btn_sun.setVisible(False)
 
         self._btn_mon = QPushButton(self)
@@ -1183,6 +1189,53 @@ class UCLedControl(QWidget):
     # ================================================================
     # Internal handlers
     # ================================================================
+
+    # ── Widget slots ───────────────────────────────────────────────────
+    #
+    # Each reads its index / colour / flag off the widget that sent it, so one
+    # named method serves a whole row of buttons.  The alternative is a closure
+    # per widget, which names nothing in a traceback.
+
+    def _sender_property(self, name: str):
+        """The value the sending widget carries, or None."""
+        widget = self.sender()
+        return None if widget is None else widget.property(name)
+
+    def _on_mode_button(self) -> None:
+        index = self._sender_property(_INDEX_PROPERTY)
+        log.debug("_on_mode_button: index=%s", index)
+        if index is not None:
+            self._on_mode_clicked(int(index))
+
+    def _on_zone_button(self) -> None:
+        index = self._sender_property(_INDEX_PROPERTY)
+        log.debug("_on_zone_button: index=%s", index)
+        if index is not None:
+            self._on_zone_clicked(int(index))
+
+    def _on_rgb_spun(self, value: int) -> None:
+        index = self._sender_property(_INDEX_PROPERTY)
+        log.debug("_on_rgb_spun: index=%s value=%s", index, value)
+        if index is not None:
+            self._on_spinbox_changed(int(index), value)
+
+    def _on_preset_button(self) -> None:
+        rgb = self._sender_property(_PRESET_PROPERTY)
+        log.info("_on_preset_button: rgb=%s", rgb)
+        if rgb is not None:
+            self._set_color(*rgb)
+
+    def _on_clock_format_button(self) -> None:
+        is_24h = self._sender_property(_FLAG_PROPERTY)
+        log.info("_on_clock_format_button: is_24h=%s", is_24h)
+        if is_24h is not None:
+            self._set_clock_format(bool(is_24h))
+
+    def _on_week_start_button(self) -> None:
+        is_sunday = self._sender_property(_FLAG_PROPERTY)
+        log.info("_on_week_start_button: is_sunday=%s", is_sunday)
+        if is_sunday is not None:
+            self._set_week_start(bool(is_sunday))
 
     def _on_mode_clicked(self, index: int):
         """Handle mode button click."""

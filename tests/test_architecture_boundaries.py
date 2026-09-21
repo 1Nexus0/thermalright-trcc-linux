@@ -384,6 +384,50 @@ def test_os_path_confined_to_zip_slip_normalisation() -> None:
     )
 
 
+def test_no_lambdas_in_src() -> None:
+    """``feedback_no_lambdas`` (2026-05-14): every callable gets a real symbol.
+
+    A traceback, a debugger and a grep should all name the handler.  Forty
+    ``<lambda>`` frames name nothing, and the ones that close over a loop
+    variable hide *which* widget fired.
+
+    Zero, not a ratchet.  The count was 45 on 2026-09-20 and went to 0 in one
+    pass, so there is no ground to give back — and the rule had existed for
+    four months while nothing enforced it, which is how two fresh ones shipped
+    in ``a081f037``.
+
+    The replacement shapes, for whoever trips this:
+
+    * plain delegation -> a named method that takes the signal's argument;
+    * a value captured per widget -> put it ON the widget with
+      ``setProperty`` and read it from ``sender()`` in ONE named slot;
+    * an injected callback -> hold it as an attribute and call it from a slot.
+    """
+    offenders: list[str] = []
+    for path in _files_under("trcc"):
+        rel = str(path.relative_to(_SRC))
+        tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+        offenders += [
+            f"  {rel}:{node.lineno}"
+            for node in ast.walk(tree) if isinstance(node, ast.Lambda)
+        ]
+    assert not offenders, (
+        "lambda in src/ — give the callable a name so a traceback can print "
+        "it (see feedback_no_lambdas):\n" + "\n".join(offenders)
+    )
+
+
+def test_selftest_lambda_detector_sees_one() -> None:
+    """The detector must find a lambda it is shown.
+
+    A ban that has only ever returned zero has not been proven to look —
+    ``dup_bodies`` records shipping a confident zero from a broken probe, and
+    a scratch probe did exactly that again on 2026-09-20.
+    """
+    tree = ast.parse("handler = lambda v: v + 1\n")
+    assert [n for n in ast.walk(tree) if isinstance(n, ast.Lambda)]
+
+
 def test_presentation_layer_is_qt_app_and_adapter_free() -> None:
     """``ui/presentation`` (the Presentation Model layer) imports only inward.
 

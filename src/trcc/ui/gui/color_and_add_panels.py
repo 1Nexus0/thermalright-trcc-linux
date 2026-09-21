@@ -23,6 +23,11 @@ from .constants import Colors, Layout, Sizes, Styles
 
 log = logging.getLogger(__name__)
 
+#: Values a widget carries so its slot is a named method rather than a closure
+#: over a loop variable — ``feedback_no_lambdas``.
+_SWATCH_PROPERTY = "trcc_swatch_rgb"
+_MODE_PROPERTY = "trcc_overlay_mode"
+
 
 class ColorPickerPanel(QFrame):
     """Color and position editor (matches UCXiTongXianShiColor 230x374)."""
@@ -129,7 +134,8 @@ class ColorPickerPanel(QFrame):
                 f"QPushButton:hover {{ border: 1px solid white; }}"
             )
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(lambda checked, cr=r, cg=g, cb=b: self._set_color_from_swatch(cr, cg, cb))
+            btn.setProperty(_SWATCH_PROPERTY, (r, g, b))
+            btn.clicked.connect(self._on_swatch_clicked)
 
         # History color swatches
         self._history_btns = []
@@ -182,6 +188,14 @@ class ColorPickerPanel(QFrame):
             return
         log.info("ColorPickerPanel._on_rgb_changed: (%d,%d,%d)", r, g, b)
         self._apply_color(r, g, b)
+
+    def _on_swatch_clicked(self) -> None:
+        """A preset swatch was pressed — read its colour off the button."""
+        button = self.sender()
+        rgb = None if button is None else button.property(_SWATCH_PROPERTY)
+        log.debug("_on_swatch_clicked: rgb=%s", rgb)
+        if rgb is not None:
+            self._set_color_from_swatch(*rgb)
 
     def _set_color_from_swatch(self, r, g, b):
         log.info("ColorPickerPanel._set_color_from_swatch: (%d,%d,%d)",
@@ -305,8 +319,17 @@ class AddElementPanel(QFrame):
             btn.setGeometry(Layout.ADD_BTN_X, y, Layout.ADD_BTN_W, Layout.ADD_BTN_H)
             btn.setStyleSheet(Styles.ADD_ELEMENT_BTN)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(lambda checked, m=mode: self._on_type_clicked(m))
+            btn.setProperty(_MODE_PROPERTY, mode)
+            btn.clicked.connect(self._on_type_button)
             y += Layout.ADD_BTN_DY
+
+    def _on_type_button(self) -> None:
+        """An add-element button was pressed — read its mode off the button."""
+        button = self.sender()
+        mode = None if button is None else button.property(_MODE_PROPERTY)
+        log.debug("_on_type_button: mode=%s", mode)
+        if mode is not None:
+            self._on_type_clicked(mode)
 
     def _on_type_clicked(self, mode: OverlayMode):
         log.info("AddElementPanel._on_type_clicked: mode=%s", mode.name)

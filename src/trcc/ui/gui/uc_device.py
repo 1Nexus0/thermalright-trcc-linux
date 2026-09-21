@@ -27,6 +27,10 @@ from .panel_renderer import render as render_spec
 
 log = logging.getLogger(__name__)
 
+#: Values a widget carries so its slot is a named method rather than a closure
+#: over a loop variable — ``feedback_no_lambdas``.
+_DEVICE_PROPERTY = "trcc_device"
+
 # Thin dark scrollbar for the device area (overflow-y: auto).  Styling the
 # QScrollArea (a descendant) is safe — only ANCESTOR stylesheets block the
 # sidebar's QPalette background, and the viewport/content stay transparent.
@@ -343,7 +347,8 @@ class UCDevice(BasePanel):
             # (Text-fallback buttons get their own :checked rule in base.py.)
             if not btn.icon().isNull():
                 btn.setStyleSheet(_DEVICE_BTN_QSS)
-            btn.clicked.connect(lambda _=False, d=device: self._on_device_clicked(d))
+            btn.setProperty(_DEVICE_PROPERTY, device)
+            btn.clicked.connect(self._on_device_button)
             btn.show()
             self.device_buttons.append(btn)
 
@@ -360,6 +365,14 @@ class UCDevice(BasePanel):
         self._build_device_buttons(self.devices)
         if self.device_buttons:
             self._select_device(self.devices[0])
+
+    def _on_device_button(self) -> None:
+        """A device button was pressed — read which device off the button."""
+        button = self.sender()
+        device = None if button is None else button.property(_DEVICE_PROPERTY)
+        log.debug("_on_device_button: device=%s", device)
+        if device is not None:
+            self._on_device_clicked(device)
 
     def _on_device_clicked(self, device_info: dict) -> None:
         log.debug("_on_device_clicked: %s", device_info.get('path'))

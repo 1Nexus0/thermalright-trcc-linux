@@ -28,6 +28,16 @@ from ...core.models import PanelConfig, SensorBinding, SensorReading
 log = logging.getLogger(__name__)
 
 
+def _idle_fans_last(reading) -> tuple[bool, str]:
+    """Sort key: fans reading 0 RPM sink below live ones, then by id.
+
+    Named rather than inline so a traceback out of ``sorted`` names the rule
+    being applied.
+    """
+    log.debug("_idle_fans_last: %s = %s", reading.sensor_id, reading.value)
+    return ((reading.value or 0.0) <= 0.0, reading.sensor_id)
+
+
 # (panel.category_id, row_index) → sensor_id from the aggregator.
 #
 # Replaces the pre-cutover ``_LEGACY_KEYS`` table that matched on the
@@ -313,7 +323,7 @@ class SysInfoConfig:
                      if r.sensor_id.startswith("fan:")
                      and r.sensor_id.endswith(":rpm")
                      and r.sensor_id not in bound_fan_ids),
-                    key=lambda r: ((r.value or 0.0) <= 0.0, r.sensor_id),
+                    key=_idle_fans_last,
                 )
             ]
             for (slot_idx, binding), fan_id in zip(

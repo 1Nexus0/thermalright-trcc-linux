@@ -271,7 +271,8 @@ def _geteuid_or_minus1() -> int:
     """``os.geteuid`` is Unix-only; return -1 (≠ 0) on Windows so we don't
     accidentally fall through to the subprocess path on non-macOS."""
     log.debug("_geteuid_or_minus1")
-    return getattr(os, "geteuid", lambda: -1)()
+    geteuid = getattr(os, "geteuid", None)
+    return -1 if geteuid is None else geteuid()
 
 
 def _default_fetcher(samplers: str) -> bytes | None:

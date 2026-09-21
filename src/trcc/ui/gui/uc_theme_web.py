@@ -28,6 +28,10 @@ from .constants import Layout, Sizes
 
 log = logging.getLogger(__name__)
 
+#: The catalog category a filter button carries, so its slot can be a named
+#: method — ``feedback_no_lambdas``.
+_CATEGORY_PROPERTY = "trcc_category"
+
 
 def _ensure_thumb_gif(mp4_path: str, size: int = Sizes.THUMB_IMAGE) -> str | None:
     """Create a 120x120 animated GIF from an MP4 via ffmpeg (cached).
@@ -143,7 +147,10 @@ class UCThemeWeb(DownloadableThemeBrowser):
 
         for cat_id, x, y, w, h in Layout.WEB_CATEGORIES:
             btn = self._make_filter_button(x, y, w, h, btn_normal, btn_active,
-                lambda checked, c=cat_id: self._set_category(c))
+                                           self._on_category_button)
+            # The category rides ON the button rather than in a closure over
+            # the loop variable — ``feedback_no_lambdas``.
+            btn.setProperty(_CATEGORY_PROPERTY, cat_id)
             self.cat_buttons[cat_id] = btn
 
         self.cat_buttons['all'].setChecked(True)
@@ -165,6 +172,14 @@ class UCThemeWeb(DownloadableThemeBrowser):
         """Set resolution for cloud downloads (e.g., '320x320')."""
         log.debug("set_resolution: %s", resolution)
         self._resolution = resolution
+
+    def _on_category_button(self) -> None:
+        """A category filter was pressed — read which off the button."""
+        button = self.sender()
+        category = None if button is None else button.property(_CATEGORY_PROPERTY)
+        log.debug("_on_category_button: category=%s", category)
+        if category is not None:
+            self._set_category(category)
 
     def _set_category(self, category):
         log.debug("_set_category called: category=%r, _downloading=%s", category, self._downloading)

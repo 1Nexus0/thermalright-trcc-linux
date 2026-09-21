@@ -29,7 +29,17 @@ frame_log = per_frame(__name__)
 
 
 _DEFAULT_FPS = 15          # Matches C# originalImageHz = 15
-_FRAME_SIZE_RGB24 = lambda w, h: w * h * 3  # noqa: E731
+
+
+def _frame_size_rgb24(width: int, height: int) -> int:
+    """Bytes in one RGB24 frame — three channels, one byte each.
+
+    A ``def``, not an assigned lambda.  It carried ``# noqa: E731`` (ruff's
+    "do not assign a lambda, use a def"), and a suppression comment is the
+    thing CLAUDE.md bans outright rather than the rule it silences.
+    """
+    frame_log.debug("_frame_size_rgb24: %dx%d", width, height)
+    return width * height * 3
 
 
 # =========================================================================

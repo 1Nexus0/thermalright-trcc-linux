@@ -70,6 +70,13 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _always_visible() -> bool:
+    """Default visibility predicate — a named function, not a lambda, so a
+    traceback through the render gate names something."""
+    log.debug("_always_visible: no predicate injected — assuming visible")
+    return True
+
+
 class _DataReadyNotifier(QObject):
     """Thread-safe notifier: emits ``ready`` from any thread to the Qt main thread."""
     ready = Signal()
@@ -106,7 +113,7 @@ class LCDHandler(BaseHandler):
         self._device_key: str = str(lcd_idx) if lcd_idx else key
         self._w = widgets
         self._data_dir = data_dir
-        self._is_visible = is_visible_fn or (lambda: True)
+        self._is_visible = is_visible_fn or _always_visible
         # "" until a Result proves the live surface cannot reach this process,
         # then "png" for the life of the handler.  An observation, not a
         # configured mode and not a sniffed environment.

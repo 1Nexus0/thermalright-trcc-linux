@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPalette
+from PySide6.QtGui import QColor, QIcon, QIntValidator, QPalette
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
@@ -26,6 +26,13 @@ from .base import set_background_pixmap
 from .constants import Colors, Layout, Sizes, Styles
 
 log = logging.getLogger(__name__)
+
+#: Values a widget carries so its slot can be a named method rather than a
+#: closure over a loop variable — ``feedback_no_lambdas``.
+_ACTION_PROPERTY = "trcc_action"
+_ENTRY_PROPERTY = "trcc_entry"
+_DELTA_PROPERTY = "trcc_delta"
+_AXIS_PROPERTY = "trcc_axis"
 
 
 class DataTablePanel(QFrame):
@@ -105,8 +112,7 @@ class DataTablePanel(QFrame):
         self.text_input.setPlaceholderText("Text/Value")
         self.text_input.setToolTip("Custom text")
         self.text_input.setMaxLength(100)
-        self.text_input.editingFinished.connect(
-            lambda: self.text_changed.emit(self.text_input.text()))
+        self.text_input.editingFinished.connect(self._on_text_committed)
         self.text_input.setVisible(False)
 
         self._current_mode = -1
@@ -136,6 +142,12 @@ class DataTablePanel(QFrame):
         if px and not px.isNull():
             self.date_btn.setIcon(QIcon(px))
             self.date_btn.setIconSize(self.date_btn.size())
+
+    def _on_text_committed(self) -> None:
+        """The custom-text field lost focus or was committed."""
+        text = self.text_input.text()
+        log.info("_on_text_committed: text=%r", text)
+        self.text_changed.emit(text)
 
     def set_mode(self, mode, mode_sub=0):
         """Show the appropriate control for the selected element mode."""
@@ -273,8 +285,89 @@ class DisplayModePanel(QFrame):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setToolTip(self._TOOLTIP_MAP.get(action_name, action_name))
             btn.setEnabled(False)  # Disabled until toggle is ON (C# buttonOnOff_Set)
-            btn.clicked.connect(lambda checked, a=action_name: self.action_requested.emit(a))
+            # The action rides ON the button rather than in a closure over
+            # the loop variable — ``feedback_no_lambdas``.
+            btn.setProperty(_ACTION_PROPERTY, action_name)
+            btn.clicked.connect(self._on_action_clicked)
             self._action_buttons.append(btn)
+
+    def _on_action_clicked(self) -> None:
+        """An action button was pressed — read which off the button."""
+        button = self.sender()
+        action = "" if button is None else str(button.property(_ACTION_PROPERTY))
+        log.info("_on_action_clicked: action=%s", action)
+        if action:
+            self.action_requested.emit(action)
+
+    # Shared by MaskPanel and ScreenCastPanel, which carried byte-identical
+    # copies until 2026-09-20 — ``dup_bodies`` clustered all three, and the
+    # style constant resolved to the same string in both, so this is a pull-up
+    # rather than the `0` case where each subclass supplies its own value.
+    _ENTRY_STYLE = (
+        "background-color: black; color: #B4964F; border: none;"
+        " font-family: 'Microsoft YaHei'; font-size: 9pt;"
+    )
+
+    def _make_entry(self, x, y, w, h):
+        """Create a numeric coordinate entry field (0-9999)."""
+        entry = QLineEdit(self)
+        entry.setGeometry(x, y, w, h)
+        entry.setText("0")
+        entry.setAlignment(Qt.AlignmentFlag.AlignRight)
+        entry.setStyleSheet(self._ENTRY_STYLE)
+        entry.setValidator(QIntValidator(0, 9999, entry))
+        return entry
+
+    def _make_pm_btn(self, x, y, w, h, delta, entry):
+        """Create a +/- button for a coordinate."""
+        btn = QPushButton(self)
+        btn.setGeometry(x, y, w, h)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        img_name = Assets.PLUS if delta > 0 else Assets.MINUS
+        pix = Assets.load_pixmap(img_name, w, h)
+        if not pix.isNull():
+            btn.setIcon(QIcon(pix))
+            btn.setIconSize(btn.size())
+            btn.setStyleSheet(Styles.FLAT_BUTTON)
+        else:
+            btn.setText("+" if delta > 0 else "-")
+            btn.setStyleSheet(
+                "QPushButton { background: #333; color: #888; border: none; font-size: 9px; }"
+            )
+        btn.setProperty(_ENTRY_PROPERTY, entry)
+        btn.setProperty(_DELTA_PROPERTY, delta)
+        btn.clicked.connect(self._on_step_clicked)
+
+    def _increment(self, entry, delta):
+        """Increment/decrement an entry value, clamped to 0..9999.
+
+        On the BASE: ``MaskPanel`` and ``ScreenCastPanel`` carried
+        byte-identical copies (``dup_bodies`` clustered them), and
+        ``_on_step_clicked`` needs exactly one of them to resolve against.
+        """
+        try:
+            val = max(0, min(9999, int(entry.text() or '0') + delta))
+            entry.setText(str(val))
+        except ValueError:
+            log.debug("_increment: %r is not a number — ignored", entry.text())
+
+    def _on_step_clicked(self) -> None:
+        """A +/- stepper was pressed — read its field and step off the button.
+
+        Lives on the shared base, not on both subclasses: ``_increment`` is
+        already a duplicate pair (``dup_bodies`` reports
+        ``DisplayModePanel._increment <- MaskPanel, ScreenCastPanel``) and one
+        slot resolving through it keeps this from becoming a third copy.
+        """
+        button = self.sender()
+        if button is None:
+            return
+        entry = button.property(_ENTRY_PROPERTY)
+        delta = button.property(_DELTA_PROPERTY)
+        log.debug("_on_step_clicked: delta=%s", delta)
+        if entry is not None and delta is not None:
+            self._increment(entry, int(delta))
 
     def _on_toggle(self, checked):
         log.debug("_on_toggle: mode_id=%s checked=%s", self.mode_id, checked)
@@ -334,11 +427,6 @@ class MaskPanel(DisplayModePanel):
     # Eye toggle position
     _BTN_EYE = (309, 6, 24, 16)
 
-    _ENTRY_STYLE = (
-        "background-color: black; color: #B4964F; border: none;"
-        " font-family: 'Microsoft YaHei'; font-size: 9pt;"
-    )
-
     def __init__(self, parent=None):
         super().__init__("mask", ["Load", "Upload"], parent)
         # Reposition action buttons to align with left-side text labels
@@ -386,44 +474,6 @@ class MaskPanel(DisplayModePanel):
         lbl.setGeometry(x, y, 10, 16)
         lbl.setStyleSheet(self._LABEL_STYLE)
         return lbl
-
-    def _make_entry(self, x, y, w, h):
-        """Create a coordinate entry field."""
-        entry = QLineEdit(self)
-        entry.setGeometry(x, y, w, h)
-        entry.setText("0")
-        entry.setAlignment(Qt.AlignmentFlag.AlignRight)
-        entry.setStyleSheet(self._ENTRY_STYLE)
-        from PySide6.QtGui import QIntValidator
-        entry.setValidator(QIntValidator(0, 9999, entry))
-        return entry
-
-    def _make_pm_btn(self, x, y, w, h, delta, entry):
-        """Create a +/- button for a coordinate."""
-        btn = QPushButton(self)
-        btn.setGeometry(x, y, w, h)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        img_name = Assets.PLUS if delta > 0 else Assets.MINUS
-        pix = Assets.load_pixmap(img_name, w, h)
-        if not pix.isNull():
-            btn.setIcon(QIcon(pix))
-            btn.setIconSize(btn.size())
-            btn.setStyleSheet(Styles.FLAT_BUTTON)
-        else:
-            btn.setText("+" if delta > 0 else "-")
-            btn.setStyleSheet(
-                "QPushButton { background: #333; color: #888; border: none; font-size: 9px; }"
-            )
-        btn.clicked.connect(lambda: self._increment(entry, delta))
-
-    def _increment(self, entry, delta):
-        """Increment/decrement an entry value."""
-        try:
-            val = max(0, min(9999, int(entry.text() or '0') + delta))
-            entry.setText(str(val))
-        except ValueError:
-            pass
 
     def _on_position_changed(self):
         """Handle X/Y value change."""
@@ -506,11 +556,6 @@ class ScreenCastPanel(DisplayModePanel):
     _BTN_BORDER = (309, 16, 24, 16)
     _BTN_AUDIO = (280, 16, 24, 16)
 
-    _ENTRY_STYLE = (
-        "background-color: black; color: #B4964F; border: none;"
-        " font-family: 'Microsoft YaHei'; font-size: 9pt;"
-    )
-
     capture_requested = Signal()  # launch screen capture
 
     def __init__(self, parent=None):
@@ -533,10 +578,10 @@ class ScreenCastPanel(DisplayModePanel):
         self.entry_w = self._make_entry(*self._TEXTBOX_W)
         self.entry_h = self._make_entry(*self._TEXTBOX_H)
 
-        self.entry_x.textChanged.connect(lambda: self._on_coord_changed('x'))
-        self.entry_y.textChanged.connect(lambda: self._on_coord_changed('y'))
-        self.entry_w.textChanged.connect(lambda: self._on_coord_changed('w'))
-        self.entry_h.textChanged.connect(lambda: self._on_coord_changed('h'))
+        for axis, field in (("x", self.entry_x), ("y", self.entry_y),
+                            ("w", self.entry_w), ("h", self.entry_h)):
+            field.setProperty(_AXIS_PROPERTY, axis)
+            field.textChanged.connect(self._on_coord_edited)
 
         # +/- buttons
         self._make_pm_btn(*self._BTN_ADD_X, +1, self.entry_x)
@@ -565,44 +610,13 @@ class ScreenCastPanel(DisplayModePanel):
         self.audio_btn.clicked.connect(self._on_audio_toggle)
         self._update_audio_icon()
 
-    def _make_entry(self, x, y, w, h):
-        """Create a coordinate entry field."""
-        entry = QLineEdit(self)
-        entry.setGeometry(x, y, w, h)
-        entry.setText("0")
-        entry.setAlignment(Qt.AlignmentFlag.AlignRight)
-        entry.setStyleSheet(self._ENTRY_STYLE)
-        # Numeric-only: accept 0-9999
-        from PySide6.QtGui import QIntValidator
-        entry.setValidator(QIntValidator(0, 9999, entry))
-        return entry
-
-    def _make_pm_btn(self, x, y, w, h, delta, entry):
-        """Create a +/- button for a coordinate."""
-        btn = QPushButton(self)
-        btn.setGeometry(x, y, w, h)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        img_name = Assets.PLUS if delta > 0 else Assets.MINUS
-        pix = Assets.load_pixmap(img_name, w, h)
-        if not pix.isNull():
-            btn.setIcon(QIcon(pix))
-            btn.setIconSize(btn.size())
-            btn.setStyleSheet(Styles.FLAT_BUTTON)
-        else:
-            btn.setText("+" if delta > 0 else "-")
-            btn.setStyleSheet(
-                "QPushButton { background: #333; color: #888; border: none; font-size: 9px; }"
-            )
-        btn.clicked.connect(lambda: self._increment(entry, delta))
-
-    def _increment(self, entry, delta):
-        """Increment/decrement an entry value."""
-        try:
-            val = max(0, min(9999, int(entry.text() or '0') + delta))
-            entry.setText(str(val))
-        except ValueError:
-            pass
+    def _on_coord_edited(self) -> None:
+        """A coordinate field changed — read which axis off the widget."""
+        field = self.sender()
+        axis = "" if field is None else str(field.property(_AXIS_PROPERTY))
+        log.debug("_on_coord_edited: axis=%s", axis)
+        if axis:
+            self._on_coord_changed(axis)
 
     def _on_coord_changed(self, which):
         """Handle coordinate value change with aspect ratio locking."""
