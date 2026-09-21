@@ -16,7 +16,7 @@ from typing import Any
 
 from ..core.errors import ThemeError
 from ..core.logs import per_frame
-from ..core.models import OverlayElement, ThemeDir
+from ..core.models import OverlayElement, ThemeDir, element_family
 from ..core.ports import Renderer
 from . import _dc as Dc
 from ._clock import is_default_date_pattern, resolve_clock
@@ -141,33 +141,6 @@ def effective_overlay_layout(
         len(out), minted,
     )
     return out
-
-
-def _element_family(element: dict[str, Any]) -> str:
-    """The element's own font family, or "" for the renderer's theme default.
-
-    **Two producers, two shapes, and reading one of them was a silent bug.**
-
-    * ``_dc.py`` spreads the font dict FLAT onto the element (``**font``), so a
-      DC theme's family arrives as ``element["name"]``.
-    * ``ui/presentation/overlay_serialization.py`` NESTS it -- ``element
-      ["font"]["name"]`` -- which is the shape every user edit takes.
-
-    This read only the flat key, so theme fonts applied and the font the user
-    picked in the overlay editor never did: ``_element_family`` returned ``""``
-    and the renderer fell back to its default family.  Reported by @ocarinal
-    (#291) against v9.9.11, with a patch, and reproduced here from the
-    serializer's own output before fixing.
-
-    Reading both shapes is deliberately the SMALL fix.  Making the two
-    producers agree on one shape is the right cleanup and a separate change --
-    it moves a format both a DC parser and a saved-theme round-trip depend on.
-    """
-    font = element.get("font")
-    nested = font.get("name", "") if isinstance(font, dict) else ""
-    family = str(element.get("name", "") or nested)
-    frame_log.debug("_element_family: %r", family)
-    return family
 
 
 class OverlayService:
@@ -388,7 +361,7 @@ class OverlayService:
             size=size,
             bold=bool(element.get("bold", False)),
             italic=bool(element.get("italic", False)),
-            family=_element_family(element),
+            family=element_family(element),
         )
 
     def _draw_metric(
@@ -448,7 +421,7 @@ class OverlayService:
             size=int(element.get("size", 16)),
             bold=bool(element.get("bold", False)),
             italic=bool(element.get("italic", False)),
-            family=_element_family(element),
+            family=element_family(element),
         )
 
     def _draw_clock(
@@ -493,5 +466,5 @@ class OverlayService:
             size=int(element.get("size", 16)),
             bold=bool(element.get("bold", False)),
             italic=bool(element.get("italic", False)),
-            family=_element_family(element),
+            family=element_family(element),
         )

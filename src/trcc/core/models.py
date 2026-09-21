@@ -762,6 +762,35 @@ OVERLAY_DEFAULT_FORMAT = "{value}"
 OVERLAY_DEFAULT_CLOCK_SOURCE: ClockSource = "time"
 
 
+def element_family(data: Mapping[str, Any]) -> str:
+    """The font family an overlay element declares, or "" for the default.
+
+    **THE one reader.**  Three producers write this fact and none of them
+    agree on a key:
+
+    * ``services/_dc.py`` spreads a DC theme's font dict FLAT (``**font``), so
+      the family arrives as ``name``;
+    * ``OverlayElement.to_dict`` writes ``name``, while ``dataclasses.asdict``
+      persists the dataclass FIELD name, ``font``;
+    * ``ui/presentation/overlay_serialization`` NESTS it under
+      ``font["name"]`` for the editor's keyed shape.
+
+    ``from_dict`` and the render path each resolved this privately, with
+    OPPOSITE precedence, and handed back different families for one input --
+    on a nested font ``from_dict`` stringified the dict and called
+    ``"{'size': 24, 'style': 'bold', ...}"`` a typeface.  A fact read in two
+    places drifts; this one already had.
+
+    ``name`` wins so a DC theme's own font is never shadowed by the editor's
+    shape.  Reported by @ocarinal (#291).
+    """
+    font = data.get("font")
+    nested = font.get("name", "") if isinstance(font, dict) else font
+    family = str(data.get("name") or nested or "")
+    frame_log.debug("element_family: %r", family)
+    return family
+
+
 @dataclass
 class OverlayElement:
     """One user-edited overlay element.
@@ -847,14 +876,10 @@ class OverlayElement:
             size=int(data.get("size", 16)),
             bold=bool(data.get("bold", False)),
             italic=bool(data.get("italic", False)),
-            # Font family, under EITHER key, because two writers are real:
-            # ``asdict`` persists the dataclass FIELD name (``font``) into
-            # trcc.json, while ``to_dict`` and both theme parsers use ``name``
-            # -- the key the renderer resolves.  Reading one and not the other
-            # dropped the family on reload, so a user element rendered in its
-            # own font all session and reverted to the theme default on the
-            # next start.  Gated by ``test_overlay_font_family.py``.
-            font=str(data.get("font") or data.get("name") or ""),
+            # Every shape this family can arrive in, resolved in ONE place --
+            # see :func:`element_family`.  Gated by
+            # ``test_overlay_font_family.py``.
+            font=element_family(data),
             text=str(data.get("text", "")),
             metric=str(data.get("metric", "")),
             format=str(data.get("format", "{value}")),

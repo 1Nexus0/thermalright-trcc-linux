@@ -11,7 +11,7 @@ every shipped theme uses Microsoft YaHei, which is also the default.
 That invisibility is why this file measures the ARGUMENT rather than pixels:
 the only proof is what ``draw_text`` was handed.
 
-MUTATION CHECK -- drop the family in ``OverlayService._element_family`` or stop
+MUTATION CHECK -- drop the family in ``core.models.element_family`` or stop
 passing it at the three ``draw_text`` call sites, and
 ``test_each_element_type_carries_its_font`` must fail for all three types.  If
 it still passes, this file is guarding nothing.
@@ -139,7 +139,7 @@ def test_the_commands_can_set_a_font(tmp_home: Path) -> None:
 
     Everything below the Command was already in place -- ``OverlayElement``
     has ``font``, ``to_dict`` publishes it under ``name``, ``from_dict`` reads
-    it back, and ``OverlayService._element_family`` hands it to
+    it back, and ``core.models.element_family`` hands it to
     ``draw_text``.  But ``AddOverlayElement`` had no ``font`` field, so every
     element a CLI, API or daemon client created was born with ``font=""``,
     and ``UpdateOverlayElement`` had none either, so nothing could ever change
@@ -214,51 +214,95 @@ def test_updating_another_field_leaves_the_font_alone(tmp_home: Path) -> None:
 # ── The GUI editor's shape — a THIRD producer nobody tested (#291) ───────────
 
 
-def test_the_gui_editors_own_output_carries_the_family() -> None:
-    """The family the user picks must survive the GUI serializer.
+def test_the_dispatch_serializer_carries_the_family(tmp_path: Path) -> None:
+    """The family must survive the path a real edit actually takes.
 
-    There are THREE producers, not two, and this file tested the two FLAT
-    ones:
+    THE live path is ``uc_theme_setting._on_elements_changed`` →
+    ``overlay_grid.to_next_elements()`` → ``configs_to_next_elements`` →
+    ``SetOverlayConfig``, and that serializer emitted no family key at all, so
+    every font the user picked was dropped at the dispatch boundary.
 
-    * ``services/_dc.py``           spreads the font dict onto the element
-      (``**font``), so the family lands at ``element["name"]``
-    * ``OverlayElement.to_dict()``  writes ``name`` directly
-    * ``ui/presentation/overlay_serialization.py``  **NESTS** it, as
-      ``element["font"]["name"]`` -- and this is the shape EVERY GUI overlay
-      edit takes
+    The previous version of this test hand-BUILT the element dict for the
+    NESTED shape and asserted a reader could parse it -- in a docstring that
+    accused seven sibling tests of hand-building their fixtures.  It was
+    guarding a path with no production consumer: the nested shape is written
+    by ``configs_to_overlay_config``, whose only caller in the tree is another
+    test, and by ``_element_to_legacy_entry``, which loads the EDITOR.
+    Neither ever reaches the renderer.
 
-    ``_element_family`` read only the flat key, so theme fonts applied and the
-    font picked in the overlay editor silently did not: it returned ``""`` and
-    the renderer used its default family.  Reported by @ocarinal (#291) against
-    v9.9.11, with a patch, while these seven tests were green.
+    So this drives the real serializer into the real Command and reads the
+    family back off stored state -- the only version that could have failed
+    while @ocarinal was hitting the bug (#291).
 
-    They were green because every one of them hand-BUILDS its element dict.
-    Hand-built fixtures restate what the author believes the shape is; this one
-    asserts against the serializer's real output instead, which is the only
-    version of this test that could have failed.
+    MUTATION CHECK -- drop ``"name": cfg.font_name`` from
+    ``configs_to_next_elements`` and this must fail with ``''``.
     """
-    from trcc.services.overlay import _element_family
-
-    # The nested shape, exactly as configs_to_overlay_config writes it.
-    picked = "Noto Sans CJK SC"
-    entry = {
-        "x": 10, "y": 20, "color": "#ffffff", "enabled": True,
-        "font": {"size": 24, "style": "regular", "name": picked},
-    }
-    assert _element_family(entry) == picked, (
-        "the font the user picked in the overlay editor never reached the "
-        "renderer — _element_family read element['name'] while the GUI "
-        "serializer writes element['font']['name']"
+    from tests.conftest import FakePlatform
+    from trcc.adapters.render.qt import QtRenderer
+    from trcc.app import App
+    from trcc.core.commands import SetOverlayConfig
+    from trcc.core.models import (
+        OverlayElementConfig,
+        OverlayMode,
+        element_family,
     )
+    from trcc.ui.presentation.overlay_serialization import (
+        configs_to_next_elements,
+    )
+
+    picked = "Noto Sans CJK SC"
+    app = App(platform=FakePlatform(tmp_path))
+    app.set_renderer(QtRenderer())
+    key = "0402:3922"
+
+    elements = configs_to_next_elements([
+        OverlayElementConfig(mode=OverlayMode.CUSTOM, text="hi", x=1, y=2,
+                             font_name=picked, font_size=20),
+    ])
+
+    # The dict the bus receives names the family...
+    assert elements[0]["name"] == picked
+    # ...and it survives the Command, so it outlives a restart.
+    assert app.dispatch(
+        SetOverlayConfig(key=key, elements=tuple(elements))).ok is True
+    stored = app.settings.for_device(key).user_overlay_elements[0]
+    assert stored.font == picked, (
+        "the font picked in the overlay editor never reached the device — "
+        "configs_to_next_elements emitted no family key"
+    )
+    # ...and the renderer resolves it off that stored element.
+    assert element_family(stored.to_dict()) == picked
 
 
 def test_the_dc_flat_shape_still_wins_when_both_are_present() -> None:
     """Reading two shapes must not let the nested one shadow a DC theme's.
 
     The flat key is what the DC parser produces, so it stays authoritative;
-    the nested read is a fallback for the GUI shape, not an override.
+    the nested read is a fallback for the editor's shape, not an override.
     """
-    from trcc.services.overlay import _element_family
+    from trcc.core.models import element_family
 
     both = {"name": "DejaVu Sans", "font": {"name": "Noto Sans CJK SC"}}
-    assert _element_family(both) == "DejaVu Sans"
+    assert element_family(both) == "DejaVu Sans"
+
+
+def test_one_reader_answers_for_every_writer() -> None:
+    """``from_dict`` and the render path must not disagree on one input.
+
+    They used to.  ``from_dict`` read ``font`` first and ``_element_family``
+    read ``name`` first, so each returned a different family for the same
+    element -- and on the NESTED shape ``from_dict`` stringified the dict and
+    stored ``"{'size': 20, 'style': 'bold', ...}"`` as a typeface.  One
+    function now answers for both, which is what makes that unrepresentable.
+    """
+    from trcc.core.models import OverlayElement, element_family
+
+    picked = "Noto Sans CJK SC"
+    for shape in ({"name": picked},
+                  {"font": picked},
+                  {"font": {"size": 20, "style": "bold", "name": picked}}):
+        assert element_family(shape) == picked, shape
+        assert OverlayElement.from_dict(shape).font == picked, shape
+
+    assert element_family({}) == ""
+    assert OverlayElement.from_dict({}).font == ""

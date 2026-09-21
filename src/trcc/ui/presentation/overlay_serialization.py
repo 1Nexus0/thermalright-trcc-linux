@@ -223,6 +223,14 @@ def configs_to_next_elements(configs: list[Any]) -> list[dict[str, Any]]:
             "size": cfg.font_size,
             "bold": cfg.font_style == 1,
             "italic": cfg.font_style == 2,
+            # The family the user picked in the font dialog.  THIS is the
+            # serializer the live edit path uses (``_on_elements_changed`` →
+            # ``to_next_elements`` → ``SetOverlayConfig``); it emitted no
+            # family at all, so every pick was dropped at the dispatch
+            # boundary and the renderer fell back to its default.  ``name``
+            # is the flat key ``element_family`` resolves and ``to_dict``
+            # writes back, so one key survives all four hops.  #291.
+            "name": cfg.font_name,
         }
         match cfg.mode:
             case OverlayMode.CUSTOM:
