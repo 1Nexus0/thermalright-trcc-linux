@@ -33,6 +33,9 @@ from ._base import LedTabBase
 
 log = logging.getLogger(__name__)
 
+#: The LED mode a radio carries, so its slot can be a named method.
+_MODE_PROPERTY = "trcc_led_mode"
+
 _MODE_LABELS: tuple[tuple[LEDMode, str, str], ...] = (
     (LEDMode.STATIC,
      "Static",
@@ -80,9 +83,10 @@ class ModeTab(LedTabBase):
         for mode, label, helper in _MODE_LABELS:
             radio = QRadioButton(label, self)
             radio.setToolTip(helper)
-            radio.toggled.connect(
-                lambda checked, m=mode: self._on_radio_toggled(m, checked),
-            )
+            # The mode rides ON the radio rather than in a closure over the
+            # loop variable — ``feedback_no_lambdas``.
+            radio.setProperty(_MODE_PROPERTY, mode)
+            radio.toggled.connect(self._on_radio_switched)
             self._radios[mode] = radio
             self._group.addButton(radio)
             root.addWidget(radio)
@@ -114,6 +118,14 @@ class ModeTab(LedTabBase):
             radio.blockSignals(False)
 
     # ── Handlers ──────────────────────────────────────────────────────
+
+    def _on_radio_switched(self, checked: bool) -> None:
+        """A mode radio changed — read which one off the widget."""
+        radio = self.sender()
+        mode = None if radio is None else radio.property(_MODE_PROPERTY)
+        log.debug("_on_radio_switched: mode=%s checked=%s", mode, checked)
+        if mode is not None:
+            self._on_radio_toggled(mode, checked)
 
     def _on_radio_toggled(self, mode: LEDMode, checked: bool) -> None:
         log.info("_on_radio_toggled: mode=%s checked=%s", mode, checked)

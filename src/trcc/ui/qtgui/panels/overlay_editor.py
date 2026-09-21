@@ -67,7 +67,7 @@ class OverlayEditorPanel(BasePanel):
             self.app, self._bus, kind_filter="lcd",
             parent=self, selection=self._selection,
         )
-        self._picker.key_changed.connect(lambda _key: self.refresh())
+        self._picker.key_changed.connect(self._on_key_changed)
 
         self._refresh_btn = QPushButton("Load", self)
         self._refresh_btn.clicked.connect(self.refresh)
@@ -82,7 +82,7 @@ class OverlayEditorPanel(BasePanel):
         self._list.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection,
         )
-        self._list.itemDoubleClicked.connect(lambda _item: self._on_edit())
+        self._list.itemDoubleClicked.connect(self._on_row_activated)
 
         self._add_btn = QPushButton("Add element…", self)
         self._add_btn.clicked.connect(self._on_add)
@@ -114,6 +114,11 @@ class OverlayEditorPanel(BasePanel):
         root.addWidget(self._status)
 
     # ── Refresh ───────────────────────────────────────────────────────
+
+    def _on_key_changed(self, key: str) -> None:
+        """The window switched device — re-list this one's overlay."""
+        log.debug("_on_key_changed: key=%s", key)
+        self.refresh()
 
     def refresh(self) -> None:
         log.debug("refresh")
@@ -230,6 +235,11 @@ class OverlayEditorPanel(BasePanel):
         self._status.setText(result.message)
         if result.ok:
             self.refresh()
+
+    def _on_row_activated(self, item: object) -> None:
+        """Double-click edits the row; the item itself is read from the list."""
+        log.debug("_on_row_activated: item=%s", item)
+        self._on_edit()
 
     def _on_edit(self) -> None:
         log.info("_on_edit")

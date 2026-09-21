@@ -73,6 +73,10 @@ class _ZoneRow(QWidget):
         self._on_radio = on_radio
         self._on_mode = on_mode
         self._on_brightness = on_brightness
+        # Held like the three above rather than captured in a closure, so the
+        # slots below can be named methods — ``feedback_no_lambdas``.
+        self._on_pick = on_pick
+        self._on_toggle = on_toggle
 
         self._radio = QRadioButton(f"Zone {index + 1}", self)
         self._radio.toggled.connect(self._on_radio_toggled)
@@ -96,14 +100,10 @@ class _ZoneRow(QWidget):
 
         self._enabled = QCheckBox("On", self)
         self._enabled.setChecked(True)
-        self._enabled.toggled.connect(
-            lambda checked: on_toggle(self._index, checked),
-        )
+        self._enabled.toggled.connect(self._on_enabled_toggled)
 
         self._pick_btn = QPushButton("Pick…", self)
-        self._pick_btn.clicked.connect(
-            lambda: on_pick(self._index, self._color),
-        )
+        self._pick_btn.clicked.connect(self._on_pick_clicked)
 
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
@@ -133,6 +133,17 @@ class _ZoneRow(QWidget):
         self._radio.blockSignals(True)
         self._radio.setChecked(active)
         self._radio.blockSignals(False)
+
+    def _on_enabled_toggled(self, checked: bool) -> None:
+        """This zone's On box changed — tell the tab which zone."""
+        log.debug("_on_enabled_toggled: index=%s checked=%s",
+                  self._index, checked)
+        self._on_toggle(self._index, checked)
+
+    def _on_pick_clicked(self) -> None:
+        """Pick… pressed — hand the tab this zone and its current colour."""
+        log.info("_on_pick_clicked: index=%s", self._index)
+        self._on_pick(self._index, self._color)
 
     def _on_radio_toggled(self, checked: bool) -> None:
         log.info("_on_radio_toggled: checked=%s", checked)

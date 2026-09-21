@@ -108,9 +108,7 @@ class ScreencastPanel(BasePanel):
             "more CPU; the LCD's refresh limit is usually 25–30 fps.",
         )
         self._fps_label = QLabel(f"{_DEFAULT_FPS} fps", self)
-        self._fps.valueChanged.connect(
-            lambda v: self._fps_label.setText(f"{v} fps"),
-        )
+        self._fps.valueChanged.connect(self._on_fps_slid)
         self._fps.valueChanged.connect(self._on_fps_changed)
         fps_row = QHBoxLayout()
         fps_row.addWidget(self._fps, stretch=1)
@@ -204,6 +202,11 @@ class ScreencastPanel(BasePanel):
         self._status.setText("Region selection cancelled.")
 
     # ── FPS plumbing ─────────────────────────────────────────────────
+
+    def _on_fps_slid(self, value: int) -> None:
+        """Echo the slider position beside it.  ``_on_fps_changed`` applies."""
+        log.debug("_on_fps_slid: value=%s", value)
+        self._fps_label.setText(f"{value} fps")
 
     def _on_fps_changed(self, value: int) -> None:
         log.info("_on_fps_changed: value=%s", value)

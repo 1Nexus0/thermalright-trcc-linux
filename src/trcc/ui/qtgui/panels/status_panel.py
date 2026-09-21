@@ -32,11 +32,21 @@ from PySide6.QtWidgets import (
 )
 
 from ....core.commands import DeviceConnectionIssues, LcdSnapshot
+from ....core.events import (
+    DeviceConnected,
+    DeviceDisconnected,
+    ErrorOccurred,
+    FrameSent,
+    ThemeLoaded,
+)
+from ....core.logs import per_frame
 from ..._errors import format_device_error
 from ..base import BasePanel
 from ..device_picker import DevicePickerWidget
 
 log = logging.getLogger(__name__)
+#: FrameSent arrives once per rendered frame — see core.logs.per_frame.
+frame_log = per_frame(__name__)
 
 _MAX_EVENT_LINES = 20
 
@@ -50,7 +60,7 @@ class StatusPanel(BasePanel):
             self.app, self._bus, kind_filter="lcd",
             parent=self, selection=self._selection,
         )
-        self._picker.key_changed.connect(lambda _key: self._on_refresh())
+        self._picker.key_changed.connect(self._on_key_changed)
 
         key_form = QFormLayout()
         key_form.addRow("Device key:", self._picker)
@@ -96,30 +106,16 @@ class StatusPanel(BasePanel):
         root.addWidget(state_box)
         root.addWidget(event_box, stretch=1)
 
-        # Subscribe to bus events for the rolling log.
+        # Subscribe to bus events for the rolling log.  Named slots, not
+        # closures: ``feedback_no_lambdas`` — a traceback from inside one of
+        # these should name the handler, and five identical
+        # ``<lambda>`` frames name nothing.
         qconn = Qt.ConnectionType.QueuedConnection
-        self._bus.device_connected.connect(
-            lambda e: self._add_event(f"CONNECT  {e.key}  {e.resolution}"),
-            type=qconn,
-        )
-        self._bus.device_disconnected.connect(
-            lambda e: self._add_event(f"DISCONN  {e.key}"),
-            type=qconn,
-        )
-        self._bus.frame_sent.connect(
-            lambda e: self._add_event(f"FRAME    {e.key}  {e.bytes_sent} bytes"),
-            type=qconn,
-        )
-        self._bus.theme_loaded.connect(
-            lambda e: self._add_event(f"THEME    {e.key}  {e.theme_name}"),
-            type=qconn,
-        )
-        self._bus.error_occurred.connect(
-            lambda e: self._add_event(
-                f"ERROR    [{e.kind}] {format_device_error(e)}",
-            ),
-            type=qconn,
-        )
+        self._bus.device_connected.connect(self._on_connected, type=qconn)
+        self._bus.device_disconnected.connect(self._on_disconnected, type=qconn)
+        self._bus.frame_sent.connect(self._on_frame_sent, type=qconn)
+        self._bus.theme_loaded.connect(self._on_theme_loaded, type=qconn)
+        self._bus.error_occurred.connect(self._on_error, type=qconn)
 
         # Pull connect failures that fired before this panel subscribed —
         # the same DeviceConnectionIssues query every UI uses (bus-pure).
@@ -150,6 +146,40 @@ class StatusPanel(BasePanel):
         self._time_label.setText(result.time_format)
         self._date_label.setText(result.date_format)
         self._temp_label.setText(result.temp_unit)
+
+    # ── Bus slots ──────────────────────────────────────────────────────
+    #
+    # One per event rather than one generic formatter: each reads different
+    # fields off a different Event type, so a single slot would have to branch
+    # on the type it was handed — a logic table the signal already resolved.
+
+    def _on_key_changed(self, key: str) -> None:
+        """The window switched device — re-read this one's snapshot."""
+        log.debug("_on_key_changed: key=%s", key)
+        self._on_refresh()
+
+    def _on_connected(self, event: DeviceConnected) -> None:
+        log.debug("_on_connected: key=%s", event.key)
+        self._add_event(f"CONNECT  {event.key}  {event.resolution}")
+
+    def _on_disconnected(self, event: DeviceDisconnected) -> None:
+        log.debug("_on_disconnected: key=%s", event.key)
+        self._add_event(f"DISCONN  {event.key}")
+
+    def _on_frame_sent(self, event: FrameSent) -> None:
+        # Per-frame: the shared ``trcc.frame`` family, so it is silent at the
+        # default rung and cannot drown the one-shot lines a report is read
+        # for.  ``_add_event`` below is the pre-existing per-event line.
+        frame_log.debug("_on_frame_sent: key=%s", event.key)
+        self._add_event(f"FRAME    {event.key}  {event.bytes_sent} bytes")
+
+    def _on_theme_loaded(self, event: ThemeLoaded) -> None:
+        log.debug("_on_theme_loaded: key=%s", event.key)
+        self._add_event(f"THEME    {event.key}  {event.theme_name}")
+
+    def _on_error(self, event: ErrorOccurred) -> None:
+        log.debug("_on_error: kind=%s", event.kind)
+        self._add_event(f"ERROR    [{event.kind}] {format_device_error(event)}")
 
     def _add_event(self, text: str) -> None:
         log.debug("_add_event: text=%s", text)

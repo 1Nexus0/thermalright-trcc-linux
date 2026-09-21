@@ -29,6 +29,9 @@ from ._base import LedTabBase
 
 log = logging.getLogger(__name__)
 
+#: The segment index a checkbox carries, so its slot can be a named method.
+_INDEX_PROPERTY = "trcc_segment_index"
+
 _GRID_COLUMNS = 4
 
 
@@ -110,9 +113,10 @@ class SegmentTab(LedTabBase):
             for i, on in enumerate(segment_on):
                 check = QCheckBox(f"Seg {i + 1}", self)
                 check.setChecked(on)
-                check.toggled.connect(
-                    lambda checked, idx=i: self._on_toggled(idx, checked),
-                )
+                # The segment index rides ON the checkbox rather than in a
+                # closure over the loop variable — ``feedback_no_lambdas``.
+                check.setProperty(_INDEX_PROPERTY, i)
+                check.toggled.connect(self._on_segment_switched)
                 row, col = divmod(i, _GRID_COLUMNS)
                 self._grid.addWidget(check, row, col)
                 self._checks.append(check)
@@ -121,6 +125,14 @@ class SegmentTab(LedTabBase):
                 check.blockSignals(True)
                 check.setChecked(on)
                 check.blockSignals(False)
+
+    def _on_segment_switched(self, checked: bool) -> None:
+        """A segment box changed — read which index off the widget."""
+        check = self.sender()
+        index = None if check is None else check.property(_INDEX_PROPERTY)
+        log.debug("_on_segment_switched: index=%s checked=%s", index, checked)
+        if index is not None:
+            self._on_toggled(int(index), checked)
 
     def _on_toggled(self, index: int, on: bool) -> None:
         log.info("_on_toggled: index=%s on=%s", index, on)

@@ -36,6 +36,10 @@ from ._base import LedTabBase
 
 log = logging.getLogger(__name__)
 
+#: The preset colour a swatch carries, so its slot can be a named method
+#: instead of a closure over the loop variable.
+_PRESET_PROPERTY = "trcc_preset_rgb"
+
 
 class ColorTab(LedTabBase):
     """Global colour + brightness + on/off + presets."""
@@ -82,9 +86,7 @@ class ColorTab(LedTabBase):
         self._brightness.setRange(0, 100)
         self._brightness.setValue(65)
         self._brightness_label = QLabel("65%", self)
-        self._brightness.valueChanged.connect(
-            lambda v: self._brightness_label.setText(f"{v}%"),
-        )
+        self._brightness.valueChanged.connect(self._on_brightness_slid)
 
         brightness_row = QHBoxLayout()
         brightness_row.addWidget(self._brightness, stretch=1)
@@ -101,9 +103,11 @@ class ColorTab(LedTabBase):
                 f"background-color: rgb({r},{g},{b}); border: 1px solid #333;",
             )
             btn.setToolTip(f"#{r:02x}{g:02x}{b:02x}")
-            btn.clicked.connect(
-                lambda _checked=False, c=(r, g, b): self._set_color(*c),
-            )
+            # The colour rides ON the button rather than in a closure over the
+            # loop variable, so one named slot serves all eight presets —
+            # ``feedback_no_lambdas``.
+            btn.setProperty(_PRESET_PROPERTY, (r, g, b))
+            btn.clicked.connect(self._on_preset_clicked)
             preset_grid.addWidget(btn, i // 4, i % 4)
 
         # Apply / On / Off
@@ -147,6 +151,19 @@ class ColorTab(LedTabBase):
         self._brightness_label.setText(f"{snapshot.brightness}%")
 
     # ── Internals ─────────────────────────────────────────────────────
+
+    def _on_brightness_slid(self, value: int) -> None:
+        """Echo the slider position beside it.  Not the apply path."""
+        log.debug("_on_brightness_slid: value=%s", value)
+        self._brightness_label.setText(f"{value}%")
+
+    def _on_preset_clicked(self) -> None:
+        """A preset swatch was pressed — read its colour off the button."""
+        button = self.sender()
+        rgb = None if button is None else button.property(_PRESET_PROPERTY)
+        log.info("_on_preset_clicked: rgb=%s", rgb)
+        if rgb is not None:
+            self._set_color(*rgb)
 
     def _make_spin(self) -> QSpinBox:
         log.debug("_make_spin")

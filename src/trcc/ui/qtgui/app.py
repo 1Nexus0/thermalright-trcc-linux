@@ -149,11 +149,8 @@ class MainWindow(QMainWindow):
         sidebar.select(initial)
         self._wire_device_selection(sidebar)
 
-        sidebar.selected.connect(
-            lambda key: content.setCurrentWidget(
-                self._panels.get(key, self._panels["devices"]),
-            ),
-        )
+        self._content = content
+        sidebar.selected.connect(self._on_navigate)
 
         self.setCentralWidget(self._build_chrome(app, sidebar, content))
 
@@ -415,6 +412,13 @@ class MainWindow(QMainWindow):
         self._lcd_selection.changed.connect(sidebar.show_device)
         self._led_selection.changed.connect(sidebar.show_device)
         sidebar.show_device(self._lcd_selection.key)
+
+    def _on_navigate(self, key: str) -> None:
+        """Show the panel the rail asked for; fall back to Devices."""
+        log.info("MainWindow._on_navigate: key=%s", key)
+        self._content.setCurrentWidget(
+            self._panels.get(key, self._panels["devices"]),
+        )
 
     def _on_device_chosen(self, key: str, kind: str) -> None:
         """Route a rail choice to the DeviceSelection for that device kind.

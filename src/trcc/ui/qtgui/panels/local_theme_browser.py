@@ -55,7 +55,7 @@ class LocalThemeBrowser(AssetBrowserPanel):
             self.app, self._bus, kind_filter="lcd",
             parent=self, selection=self._selection,
         )
-        self._picker.key_changed.connect(lambda _key: self.refresh())
+        self._picker.key_changed.connect(self._on_key_changed)
 
         key_form = QFormLayout()
         key_form.addRow("Device key:", self._picker)
@@ -130,6 +130,11 @@ class LocalThemeBrowser(AssetBrowserPanel):
         self.refresh()
 
     # ── Public API ────────────────────────────────────────────────────
+
+    def _on_key_changed(self, key: str) -> None:
+        """The window switched device — re-list that device's themes."""
+        log.debug("_on_key_changed: key=%s", key)
+        self.refresh()
 
     def refresh(self) -> None:
         """Re-fetch the theme list for the picked device's resolution."""

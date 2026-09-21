@@ -56,9 +56,7 @@ class DisplayPanel(BasePanel):
         self._brightness.setRange(0, 100)
         self._brightness.setValue(100)
         self._brightness_label = QLabel("100%", self)
-        self._brightness.valueChanged.connect(
-            lambda v: self._brightness_label.setText(f"{v}%")
-        )
+        self._brightness.valueChanged.connect(self._on_brightness_slid)
 
         brightness_row = QHBoxLayout()
         brightness_row.addWidget(self._brightness, stretch=1)
@@ -166,6 +164,11 @@ class DisplayPanel(BasePanel):
         log.info("_on_restore_last: key=%s", key)
         result = self.dispatch(RestoreLastTheme(key=key))
         self._status.setText(result.message)
+
+    def _on_brightness_slid(self, value: int) -> None:
+        """Echo the slider position beside it.  Not the apply path."""
+        log.debug("_on_brightness_slid: value=%s", value)
+        self._brightness_label.setText(f"{value}%")
 
     def _on_set_background(self) -> None:
         """Override the background with a STILL IMAGE, keeping the theme.

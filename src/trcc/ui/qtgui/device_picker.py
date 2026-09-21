@@ -76,14 +76,14 @@ class DevicePickerWidget(QWidget):
             # Refresh dropdown when devices are attached/detached from
             # any UI — events arrive on the Qt thread thanks to the
             # bridge's queued connection setup.
-            bus.device_connected.connect(
-                lambda _evt: self._populate_from_app(),
-                type=Qt.ConnectionType.QueuedConnection,
-            )
-            bus.device_disconnected.connect(
-                lambda _evt: self._populate_from_app(),
-                type=Qt.ConnectionType.QueuedConnection,
-            )
+            for signal in (bus.device_connected, bus.device_disconnected):
+                signal.connect(self._on_fleet_changed,
+                               type=Qt.ConnectionType.QueuedConnection)
+
+    def _on_fleet_changed(self, event: object) -> None:
+        """A device attached or detached anywhere — rebuild the dropdown."""
+        log.debug("_on_fleet_changed: %s", type(event).__name__)
+        self._populate_from_app()
 
     def _bind(self, selection: DeviceSelection) -> None:
         """Make this combo a VIEW of the window's shared selection.

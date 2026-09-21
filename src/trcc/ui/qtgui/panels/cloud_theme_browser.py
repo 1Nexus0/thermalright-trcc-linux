@@ -61,7 +61,7 @@ class CloudThemeBrowser(BasePanel):
 
         self._list = QListWidget(self)
         self._list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        self._list.itemDoubleClicked.connect(lambda _item: self._on_apply())
+        self._list.itemDoubleClicked.connect(self._on_row_activated)
         # Thumbnail grid (parity with the gui skin): each catalog entry shows
         # its extracted preview PNG (data/web/{w}{h}/<id>.png).
         self._list.setViewMode(QListWidget.ViewMode.IconMode)
@@ -173,6 +173,11 @@ class CloudThemeBrowser(BasePanel):
             self._status.setText(_user_friendly_error(result.message))
 
     # ── Apply ─────────────────────────────────────────────────────────
+
+    def _on_row_activated(self, item: object) -> None:
+        """Double-click applies the row; the item is read from the list."""
+        log.debug("_on_row_activated: item=%s", item)
+        self._on_apply()
 
     def _on_apply(self) -> None:
         log.info("_on_apply")
