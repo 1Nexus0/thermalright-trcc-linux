@@ -88,20 +88,11 @@ BULK_PM_GAP = (
     "issues is PM 4, 5, 7, 11, 32 or 64 (checked 2026-08-18)."
 )
 
-MOUNT_3_OF_9 = (
-    "is_portrait_mounted models 3 resolutions; SetThemeInfo_ThemeML applies "
-    "the pmSub mount test to 9 — 176x320, 1920x462, 1920x440, 640x480, "
-    "640x172, 854x480, 960x320, 960x540, 800x480.  Note 1920x462 uses "
-    "'pmSub <= 5', not '< 5', so SUB 5 lands portrait there and landscape in "
-    "ours.  Closing this means widening is_portrait_mounted to the C#'s nine "
-    "with the right boundary per family."
-)
 
 # (pm, sub, axis) → cause.  GENERATED from the live comparison, not hand-typed:
 # a hand-written list of 60 rows is exactly how 37 non-existent method names
 # reached a doc earlier this month.
 _KNOWN_DIVERGENCES: dict[tuple[int, int, str], str] = {
-    (1, 49, "mount"): MOUNT_3_OF_9,
     (13, 0, "resolution"): BULK_PM_GAP,
     (13, 0, "widescreen"): BULK_PM_GAP,
     (14, 1, "resolution"): BULK_PM_GAP,
@@ -121,7 +112,11 @@ _KNOWN_DIVERGENCES: dict[tuple[int, int, str], str] = {
     (17, 5, "resolution"): BULK_PM_GAP,
     (17, 5, "widescreen"): BULK_PM_GAP,
     (17, 5, "encode"): BULK_PM_GAP,
-    (17, 5, "mount"): MOUNT_3_OF_9,
+    # NOT a mount-rule gap: `_BULK_KNOWN_PMS` has no 17, so bulk_profile
+    # falls back to 480x480 and no mount table can match a resolution the
+    # panel does not have.  Same root cause as the three rows above it,
+    # and it was filed under MOUNT_3_OF_9 for as long as that existed.
+    (17, 5, "mount"): BULK_PM_GAP,
     (18, 0, "resolution"): BULK_PM_GAP,
     (18, 0, "widescreen"): BULK_PM_GAP,
     (18, 1, "resolution"): BULK_PM_GAP,
@@ -144,7 +139,6 @@ _KNOWN_DIVERGENCES: dict[tuple[int, int, str], str] = {
     (63, 4, "resolution"): BULK_PM_GAP,
     (63, 4, "widescreen"): BULK_PM_GAP,
     (63, 4, "encode"): BULK_PM_GAP,
-    (65, 5, "mount"): MOUNT_3_OF_9,
     (66, 0, "resolution"): BULK_PM_GAP,
     (66, 0, "widescreen"): BULK_PM_GAP,
     (66, 0, "encode"): BULK_PM_GAP,
@@ -166,7 +160,7 @@ _KNOWN_DIVERGENCES: dict[tuple[int, int, str], str] = {
 # Ratchet, in the shape MAX_SILENT already proves works: this number only ever
 # goes DOWN.  Fixing a divergence means deleting its row and lowering this;
 # a NEW divergence fails the build outright rather than being appended.
-MAX_DIVERGENCES = 60
+MAX_DIVERGENCES = 58
 
 
 def _bulk_fingerprints() -> list[tuple[int, int]]:
@@ -242,7 +236,8 @@ def test_the_allowlist_is_not_silently_empty() -> None:
         f"{MAX_DIVERGENCES}.  A NEW divergence is a bug to fix, not a row to add."
     )
     assert len(_bulk_fingerprints()) > 40, "the corpus collapsed"
-    assert set(_KNOWN_DIVERGENCES.values()) == {BULK_PM_GAP, MOUNT_3_OF_9}, (
-        "a divergence has a cause outside the two documented root causes — "
-        "name it, or it is not understood"
+    assert set(_KNOWN_DIVERGENCES.values()) == {BULK_PM_GAP}, (
+        "a divergence has a cause outside the documented root cause — "
+        "name it, or it is not understood.  MOUNT_3_OF_9 was the second "
+        "and is PAID: is_portrait_mounted now models the C#'s nine."
     )

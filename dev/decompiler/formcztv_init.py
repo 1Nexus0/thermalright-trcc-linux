@@ -287,22 +287,38 @@ def form_cztv_init(
     return st
 
 
-# Resolution -> (landscape token, portrait token).  Every one of these blocks
-# has the identical shape in the C#: on first boot `pmSub < 5` picks landscape
-# (and sets the angle to 0) or portrait (angle 90); afterwards the saved angle
-# decides, `% 180 == 0` being landscape.  1600x720 is the exception and is
-# handled separately because it is the only one that assigns mySubMode.
-_THEME_TOKENS: tuple[tuple[str, str, str], ...] = (
-    ("is176x320",  "320176",  "176320"),
-    ("is1280x480", "1280480", "4801280"),
-    ("is1920x462", "1920462", "4621920"),
-    ("is1920x440", "1920440", "4401920"),
-    ("is640x480",  "640480",  "480640"),
-    ("is640x172",  "640172",  "172640"),
-    ("is854x480",  "854480",  "480854"),
-    ("is960x320",  "960320",  "320960"),
-    ("is960x540",  "960540",  "540960"),
-    ("is800x480",  "800480",  "480800"),
+# Resolution -> (landscape token, portrait token, first pmSub meaning PORTRAIT,
+# the guard's line in FormCZTV.cs).
+#
+# These blocks DO NOT have the identical shape, which is what this table used
+# to claim while applying one hardcoded `pmSub < 5` to all ten rows.  Measured
+# against `control-flow.json` (which walks every line of the .cs and cannot
+# skip), SetThemeInfo_ThemeML holds:
+#
+#     8 x `pmSub < 5`      -> portrait from 5
+#     1 x `pmSub <= 5`     -> is1920x462 ONLY, portrait from 6
+#     1 x no pmSub guard   -> is1280x480, landscape on first boot ALWAYS;
+#                             its `4801280\` catalog is reached only once the
+#                             USER has turned the dial (`themeDirection % 180`)
+#
+# Shipping the uniform rule reported a portrait mount for 1280x480 that the C#
+# never performs, and put 1920x462's boundary one SUB byte too low.  Both
+# reached `tests/test_csharp_conformance.py` as recorded divergences against
+# our own correct code.
+#
+# ``portrait_from = None`` means the block has no pmSub guard at all.
+# 1600x720 is handled separately: it is the only one that assigns mySubMode.
+_THEME_TOKENS: tuple[tuple[str, str, str, int | None, int], ...] = (
+    ("is176x320",  "320176",  "176320",     5, 1269),
+    ("is1280x480", "1280480", "4801280", None, 1356),
+    ("is1920x462", "1920462", "4621920",    6, 1376),
+    ("is1920x440", "1920440", "4401920",    5, 1400),
+    ("is640x480",  "640480",  "480640",     5, 1424),
+    ("is640x172",  "640172",  "172640",     5, 1448),
+    ("is854x480",  "854480",  "480854",     5, 1472),
+    ("is960x320",  "960320",  "320960",     5, 1496),
+    ("is960x540",  "960540",  "540960",     5, 1520),
+    ("is800x480",  "800480",  "480800",     5, 1544),
 )
 
 # The squares, which ignore orientation entirely (:1249-1264).
@@ -353,26 +369,29 @@ def set_theme_info_theme_ml(st: CztvState) -> None:
         st.hit(1289, f"is1600x720 -> ThemeML = {st.ThemeML!r}")
         return
 
-    for flag, land, port in _THEME_TOKENS:
+    for flag, land, port, portrait_from, line in _THEME_TOKENS:
         if not getattr(st, flag):
             continue
         if st.themeDirection == FIRST_BOOT:
-            # FIRST BOOT: the SUB byte picks the mount orientation.  This is
-            # the same `pmSub < 5` test our port calls `portrait_mounted`.
-            if st.pmSub < 5:
+            # FIRST BOOT: the SUB byte picks the mount orientation — but the
+            # threshold is the ROW's, not a shared 5, and a row with no guard
+            # (1280x480) is landscape whatever the SUB byte says.
+            if portrait_from is None or st.pmSub < portrait_from:
                 st.ThemeML, st.themeDirection = f"{land}\\", 0
-                st.hit(1471, f"{flag} first boot, pmSub<5 -> ThemeML = "
+                why = ("no pmSub guard" if portrait_from is None
+                       else f"pmSub<{portrait_from}")
+                st.hit(line, f"{flag} first boot, {why} -> ThemeML = "
                              f"{st.ThemeML!r}, themeDirection = 0 (landscape)")
             else:
                 st.ThemeML, st.themeDirection = f"{port}\\", 90
-                st.hit(1477, f"{flag} first boot, pmSub>=5 -> ThemeML = "
-                             f"{st.ThemeML!r}, themeDirection = 90 "
+                st.hit(line, f"{flag} first boot, pmSub>={portrait_from} -> "
+                             f"ThemeML = {st.ThemeML!r}, themeDirection = 90 "
                              f"(PORTRAIT MOUNT)")
         else:
             landscape = st.themeDirection % 180 == 0
             st.ThemeML = f"{land if landscape else port}\\"
-            st.hit(1483, f"{flag} angle={st.themeDirection} -> ThemeML = "
-                         f"{st.ThemeML!r}")
+            st.hit(line + 11, f"{flag} angle={st.themeDirection} -> ThemeML = "
+                              f"{st.ThemeML!r}")
         return
 
     st.hit(1247, f"no resolution flag set -> ThemeML stays {st.ThemeML!r} "

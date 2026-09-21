@@ -291,6 +291,7 @@ def test_360_fan_hub_matches_the_csharp_default_branch() -> None:
 _CSHARP_MODE3_REWRITES: dict[int, tuple[int, int]] = {
     129: (480, 480),
     59: (640, 172),
+    60: (176, 320),
 }
 
 
@@ -317,20 +318,112 @@ def test_fbl_59_is_the_same_panel_as_the_pm_15_route() -> None:
     assert get_profile(59, 100) == get_profile(224, 15)
 
 
-def test_the_176x320_panel_is_still_unsupported() -> None:
-    """The third rewrite is NOT implemented, and says so out loud.
+def test_the_176x320_panel_is_dual_orientation_not_just_a_size() -> None:
+    """fbl 60 landed; this is what it took beyond the size.
 
-    ``fbl == 60`` is a dual-orientation screen: FormCZTV.cs:1265 picks the
-    theme directory by SUB — ``pmSub < 5`` → ``320176\\`` at 0°, otherwise
-    ``176320\\`` at 90° — so it needs SUB-keyed geometry, not a table row.  We
-    already ship ``theme176320.7z`` and ``theme320176.7z``, which no code path
-    can currently select.
+    It was pinned unsupported for a long time with the note that it "needs
+    SUB-keyed geometry, not a table row" -- correct, and that geometry arrived
+    separately: ``is_portrait_mounted`` now covers 176x320 (``pmSub < 5`` ->
+    ``320176\\`` at 0 degrees, otherwise ``176320\\`` at 90), and
+    ``catalog_spellings`` names those two catalogs by long/short rather than by
+    ``(w, h)`` order -- which matters here and nowhere else, because this is
+    the one family the C# stores (short, long).
 
-    This test pins the CURRENT answer so the gap is visible instead of
-    implied.  When 176x320 lands, this test fails and is replaced by a row in
-    ``_CSHARP_MODE3_REWRITES`` — that failure is the reminder.
+    Both catalogs already shipped: ``theme176320.7z`` and ``theme320176.7z``,
+    5 themes each, backgrounds measured at 176x320 and 320x176 straight from
+    the PNG headers.
+
+    NOT verified on glass: no reporter has ever presented this panel, so the
+    row is oracle- and artwork-grounded only.
     """
-    assert fbl_to_resolution(60, 100) == (320, 320), (
-        "fbl 60 now resolves somewhere — add it to _CSHARP_MODE3_REWRITES "
-        "and delete this test"
+    from trcc.core.geometry import catalog_spellings
+    from trcc.core.protocol import is_portrait_mounted
+
+    assert fbl_to_resolution(60, 100) == (176, 320)
+    # The SUB byte picks between the two shipped catalogs.
+    assert is_portrait_mounted((176, 320), 4) is False
+    assert is_portrait_mounted((176, 320), 5) is True
+    # And they are named long/short, NOT (w, h)/(h, w).
+    assert catalog_spellings((176, 320)) == ((320, 176), (176, 320))
+
+
+# ── The HID type-2 / mode-3 route, swept against the C# ────────────────────
+#
+# test_csharp_conformance sweeps `_BULK_VARIANTS` and nothing else, so no HID
+# type-2 fingerprint has ever been compared to the C#.  That blind spot is why
+# the mount transcription bug lived in the oracle for as long as it did.
+#
+# Two axes are compared and a third deliberately is not:
+#
+#   resolution -- ONLY where the C# set a resolution flag.  On a fingerprint it
+#     does not resolve, `st.resolution` falls back to the 20-byte header's
+#     hardcoded 240x320 (FormCZTV.cs:4205 writes `240, 0, 64, 1`), which is a
+#     WIRE CONSTANT, not a compose canvas.  Comparing it to profile.resolution
+#     manufactures a divergence out of two different quantities -- the same
+#     category error as widescreen vs isBiliPingmu.
+#   mount -- always; it is a pure function of the SUB byte.
+#   encode -- NOT compared.  The C# picks JPEG vs RGB565 on `myDeviceMode == 2`
+#     (all four call sites), and `get_profile` has no mode axis, so fbl 59
+#     ships jpeg=True for its mode-2 route while mode 3 would encode 565.
+#     That simplification is pinned deliberately by
+#     `test_fbl_59_is_the_same_panel_as_the_pm_15_route`; asserting it here
+#     would contradict that test rather than find anything.
+
+
+def _mode3_fingerprints() -> list[tuple[int, int]]:
+    """Every catalogued FBL against the SUB bytes a panel actually sends."""
+    from trcc.core.protocol import FBL_PROFILES
+
+    return [(fbl, sub) for fbl in sorted(FBL_PROFILES)
+            for sub in (0, 1, 2, 3, 5, 6)]
+
+
+@pytest.mark.parametrize(("fbl", "sub"), _mode3_fingerprints())
+def test_mode3_fingerprint_matches_the_csharp(fbl: int, sub: int) -> None:
+    """Our shipping profile answers what TRCC 2.1.6 answers on this route.
+
+    No allow-list: measured at 0 divergences over all 120 fingerprints, so a
+    failure here is a real disagreement, not a known gap to record.
+    """
+    import re
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "dev"
+                           / "decompiler"))
+    from formcztv_init import (  # pyright: ignore[reportMissingImports]
+        CztvState,
+        form_cztv_init,
+    )
+
+    from trcc.core.protocol import get_profile, is_portrait_mounted
+
+    state = form_cztv_init(fbl, m=3, pm=100, pmSub=sub)
+    resolved = any(getattr(state, name) for name in dir(CztvState)
+                   if re.fullmatch(r"is\d+x\d+", name))
+    profile = get_profile(fbl, fbl, sub)
+
+    if not resolved:
+        # The mode-3 route does not resolve this FBL -- 192 and 224 are the
+        # mode-2 PM-ladder families, reached by a PM byte and not by this one.
+        # `st.resolution` is then the 20-byte header's hardcoded 240x320
+        # (FormCZTV.cs:4205 writes `240, 0, 64, 1`), a WIRE CONSTANT rather
+        # than a panel size, and `themeDirection` never ran a mount test.
+        # Neither is comparable; what IS true is that the fallback is that
+        # constant, so pin it rather than skipping.
+        assert state.resolution == (240, 320), (
+            f"mode-3 fbl={fbl} resolves no panel, so the C# should fall back "
+            f"to the header constant 240x320, not {state.resolution}"
+        )
+        return
+
+    assert state.resolution == profile.resolution, (
+        f"mode-3 fbl={fbl} sub={sub}: the C# resolves "
+        f"{state.resolution}, we resolve {profile.resolution}"
+    )
+    theirs = state.themeDirection == 90
+    ours = is_portrait_mounted(profile.resolution, sub)
+    assert theirs == ours, (
+        f"mode-3 fbl={fbl} sub={sub} ({profile.resolution}): the C# mounts "
+        f"portrait={theirs}, we say {ours}"
     )

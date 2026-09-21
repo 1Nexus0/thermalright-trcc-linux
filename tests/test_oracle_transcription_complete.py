@@ -293,3 +293,91 @@ def test_every_declared_divergence_still_names_a_real_field() -> None:
         f"_DELIBERATE_DEFAULTS excuses field(s) {orphans} that no longer "
         f"exist in {_CS_FILE} — drop the entry or fix the name"
     )
+
+
+# ── SetThemeInfo_ThemeML: the MOUNT method, gated the same way ──────────────
+#
+# Everything above gates ``FormCZTVInit`` and only its ``pm ==`` branches.  The
+# mount lives in a different method (``SetThemeInfo_ThemeML``) and keys on a
+# different byte (``pmSub``), so it sat outside this file entirely -- which is
+# exactly how the transcription came to apply one hardcoded ``pmSub < 5`` to
+# ten blocks that do not share a shape.  It reported a portrait mount for
+# 1280x480 that the C# never performs, and put 1920x462's boundary one SUB byte
+# low; both reached test_csharp_conformance as divergences against our own
+# correct code.  Wrong method AND wrong axis: two reasons for one blind spot.
+
+_CS_MOUNT_METHOD = "SetThemeInfo_ThemeML"
+
+
+def _csharp_mount_thresholds() -> dict[str, int | None]:
+    """``isWxH`` flag -> lowest pmSub meaning PORTRAIT, read from the C#.
+
+    ``pmSub < N`` -> portrait from N.  ``pmSub <= N`` -> portrait from N+1.
+    A block with no pmSub guard maps to ``None``: landscape on first boot
+    whatever the SUB byte says.
+    """
+    data = json.loads(_CONTROL_FLOW.read_text(encoding="utf-8"))
+    method = next(m for m in data[_CS_FILE] if m["name"] == _CS_MOUNT_METHOD)
+
+    out: dict[str, int | None] = {}
+    flag: str | None = None
+    for branch in method["branches"]:
+        cond = branch["condition"]
+        if re.fullmatch(r"is\d+x\d+", cond):
+            if flag is not None:
+                out[flag] = None          # previous block had no pmSub guard
+            flag = cond
+            continue
+        if flag is None:
+            continue
+        match = re.fullmatch(r"pmSub\s*(<=?)\s*(\d+)", cond)
+        if match:
+            value = int(match.group(2))
+            out[flag] = value + 1 if match.group(1) == "<=" else value
+            flag = None
+        elif "pmSub" in cond:             # 1600x720's mySubMode switch
+            flag = None
+    if flag is not None:
+        out[flag] = None
+    return out
+
+
+def test_every_mount_threshold_matches_the_decompile() -> None:
+    """The transcription's per-block pmSub threshold IS the C#'s, row by row."""
+    from formcztv_init import (  # pyright: ignore[reportMissingImports]
+        _THEME_TOKENS,
+    )
+
+    theirs = _csharp_mount_thresholds()
+    ours = {flag: portrait_from for flag, _, _, portrait_from, _ in _THEME_TOKENS}
+
+    shared = ours.keys() & theirs.keys()
+    assert shared, (
+        f"no isWxH block matched between {_CS_MOUNT_METHOD} and _THEME_TOKENS "
+        f"-- the reader is broken, not the data"
+    )
+    wrong = {f: (theirs[f], ours[f]) for f in sorted(shared)
+             if theirs[f] != ours[f]}
+    assert not wrong, (
+        f"{_CS_MOUNT_METHOD} and the transcription disagree on the first "
+        f"pmSub meaning PORTRAIT -- {{flag: (C#, ours)}}: {wrong}"
+    )
+
+
+def test_the_transcription_covers_every_guarded_mount_block() -> None:
+    """No isWxH block the C# guards may be missing from the transcription."""
+    from formcztv_init import (  # pyright: ignore[reportMissingImports]
+        _SQUARE_TOKENS,
+        _THEME_TOKENS,
+    )
+
+    theirs = _csharp_mount_thresholds()
+    transcribed = ({flag for flag, *_ in _THEME_TOKENS}
+                   | {flag for flag, _ in _SQUARE_TOKENS}
+                   | {"is1600x720"})
+    missing = sorted(f for f, threshold in theirs.items()
+                     if threshold is not None and f not in transcribed)
+    assert not missing, (
+        f"{_CS_MOUNT_METHOD} applies a pmSub mount test to {missing}, which "
+        f"the transcription does not model at all"
+    )

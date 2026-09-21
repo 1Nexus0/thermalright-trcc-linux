@@ -42,9 +42,10 @@ Two things are reported but NOT counted toward the verdict:
     same failure as the widescreen/``isBiliPingmu`` semantic split below.  It
     is three now, and each carries its cause.
 
-    Still reported but NOT counted toward the verdict: the remaining rows are a
-    known modelling gap (``MOUNT_3_OF_9``), not a regression, and one of them
-    is not an orientation question at all.
+    Still reported but NOT counted toward the verdict: one of the remaining
+    rows is not an orientation question at all.  The old ``MOUNT_3_OF_9`` gap
+    is PAID — ``is_portrait_mounted`` now models all nine of the C#'s mount
+    families, each with its own pmSub threshold.
 
   * **oracle-gap** rows — fingerprints our port handles that ``FormCZTVInit``
     does not branch on (the FBL 224/192 by-PM sub-splits live in a *different*
@@ -391,9 +392,11 @@ def main() -> int:
                     else "mount rule")
             print(f"  - {r.fp.label}: C#={r.their_thememl} "
                   f"ours={r.our_thememl}  [{kind}]")
-        print("  Cause for the mount-rule rows: MOUNT_3_OF_9 — "
-              "`is_portrait_mounted` models 3 resolutions, the C# applies the "
-              "pmSub test to 9 (see tests/test_csharp_conformance.py).")
+        print("  A mount-rule row now means a RESOLUTION gap, not a mount "
+              "gap: `is_portrait_mounted` models all nine of the C#'s "
+              "families, so a mismatch means the profile resolved to a "
+              "resolution the panel does not have (see BULK_PM_GAP in "
+              "tests/test_csharp_conformance.py).")
     if gaps:
         print(f"oracle-gap: {len(gaps)} device(s) FormCZTVInit resolves no "
               "geometry for — they fell through to the 240x320 default.")

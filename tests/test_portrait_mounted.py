@@ -1,41 +1,94 @@
 """The SUB byte says how the panel is MOUNTED (#262, #203).
 
-Thermalright ships some 854x480 / 960x540 / 800x480 panels turned portrait in
-the cooler.  The C# reads that off the SUB byte and loads the transposed theme
-catalog for them (``FormCZTVInit``: ``854480\\`` becomes ``480854\\``).  Every
-other resolution assigns its catalog unconditionally, so the rule is scoped —
-it must not be generalised.
+Thermalright ships some panels turned portrait in the cooler.  The C# reads
+that off the SUB byte and loads the transposed theme catalog for them
+(``SetThemeInfo_ThemeML``: ``854480\\`` becomes ``480854\\``).  It does this
+for NINE resolutions, eight written ``pmSub < 5`` and ``is1920x462`` written
+``pmSub <= 5`` — so that one turns portrait at 6, not 5.  Resolutions with no
+pmSub guard at all (the four squares, and 1280x480) assign their catalog
+unconditionally and must never be added.
 
-We surface it in the handshake line rather than acting on it: an owner already
-compensates by rotating to 90°, so changing the geometry would double-correct
-the very people it is meant to help.  What was missing was being able to SEE
-it — #262 and #203 share ``PM=11 SUB=5`` and nobody spotted it for a month.
+It is surfaced in the handshake line AND acted on: ``Settings.
+seed_mount_orientation`` starts such a panel at 90° on first boot only, so an
+owner who already compensated by rotating by hand is never re-seeded.  What
+was missing originally was being able to SEE it — #262 and #203 share
+``PM=11 SUB=5`` and nobody spotted it for a month.
 """
 from __future__ import annotations
 
 import re
 
+import pytest
+
 from trcc.adapters.device.bulk_lcd import bulk_profile
-from trcc.core.protocol import is_portrait_mounted
+from trcc.core.protocol import (
+    _PORTRAIT_MOUNT_MIN_SUB,
+    is_portrait_mounted,
+)
 
 
-def test_the_rule_matches_the_csharp_for_the_three_scoped_resolutions() -> None:
-    """``pmSub < 5`` on 854x480, 960x540 and 800x480 — and nothing else.
+@pytest.mark.parametrize(("resolution", "floor"),
+                         sorted(_PORTRAIT_MOUNT_MIN_SUB.items()))
+def test_each_mounted_resolution_turns_at_its_own_threshold(
+    resolution: tuple[int, int], floor: int,
+) -> None:
+    """Parametrised over the table itself, so a new row is covered for free.
 
-    MUTATION CHECK: widen ``_PORTRAIT_MOUNT_RESOLUTIONS`` to include 480x480
-    or 1600x720 and this fails — those resolutions have no sub test in the C#.
+    The threshold is per row: eight families turn at 5, ``1920x462`` at 6
+    because the C# writes ``pmSub <= 5`` there alone.  Asserting a shared 5
+    would pass on a table that had lost that distinction.
     """
-    for resolution in ((854, 480), (960, 540), (800, 480)):
-        assert is_portrait_mounted(resolution, 5) is True
-        assert is_portrait_mounted(resolution, 9) is True
-        assert is_portrait_mounted(resolution, 4) is False
-        assert is_portrait_mounted(resolution, 0) is False
+    assert is_portrait_mounted(resolution, floor) is True
+    assert is_portrait_mounted(resolution, floor + 4) is True
+    assert is_portrait_mounted(resolution, floor - 1) is False
+    assert is_portrait_mounted(resolution, 0) is False
 
-    # Resolutions the C# assigns unconditionally — no sub test at all.
-    for resolution in ((480, 480), (320, 320), (1600, 720), (1280, 480),
-                       (1920, 462), (640, 480), (240, 240), (360, 360)):
-        assert is_portrait_mounted(resolution, 5) is False
-        assert is_portrait_mounted(resolution, 9) is False
+
+@pytest.mark.parametrize("resolution", [
+    (1280, 480),    # block has NO pmSub guard — FormCZTV.cs:1356-1371
+    (480, 480), (320, 320), (240, 240), (360, 360),   # the four squares
+    (1600, 720),    # keys on mySubMode, not a pmSub mount test
+])
+def test_a_resolution_the_csharp_never_mount_tests_is_never_mounted(
+    resolution: tuple[int, int],
+) -> None:
+    """The negative half, and the one that matters most.
+
+    1280x480 is the trap: it has both catalogs (``1280480\\`` and
+    ``4801280\\``) and a portrait sibling in every other family, so
+    "complete the nine" reads like it belongs.  Its block has no pmSub guard —
+    the portrait catalog is reached only once the USER turns the dial.
+    """
+    for sub in (0, 4, 5, 6, 9, 255):
+        assert is_portrait_mounted(resolution, sub) is False
+
+
+def test_the_table_is_exactly_what_the_csharp_guards() -> None:
+    """Row-for-row against the transcription, which is gated against the .cs.
+
+    Neither list is retyped here: ours comes from the table, theirs from
+    ``_THEME_TOKENS``, whose thresholds
+    ``tests/test_oracle_transcription_complete.py`` holds against
+    ``control-flow.json``.  So this closes the chain .cs -> transcription ->
+    shipping code.
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "dev"
+                           / "decompiler"))
+    from formcztv_init import (  # pyright: ignore[reportMissingImports]
+        _THEME_TOKENS,
+    )
+
+    theirs = {
+        tuple(int(n) for n in flag[2:].split("x")): portrait_from
+        for flag, _, _, portrait_from, _ in _THEME_TOKENS
+        if portrait_from is not None
+    }
+    assert theirs == _PORTRAIT_MOUNT_MIN_SUB, (
+        "the shipping mount table and the C# transcription disagree"
+    )
 
 
 def test_the_handshake_resolves_the_mount() -> None:

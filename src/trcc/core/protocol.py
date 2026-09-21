@@ -135,6 +135,24 @@ FBL_PROFILES: dict[int, DeviceProfile] = {
     53:  DeviceProfile(320,  240,  rotate=True),                    # HID Type 2 → SPIMode=1
     54:  DeviceProfile(360,  360,  jpeg=True),
     58:  DeviceProfile(320,  240,  rotate=True),                    # AussieMakerGeek's Frozen Warframe SE
+    # `mode == 3 && pm == 100 && fbl == 60` -> is176x320 (FormCZTV.cs:1041),
+    # the sibling of the fbl 59 rewrite directly above it in the C#.  The only
+    # family the vendor stores (short, long): its long axis is the HEIGHT,
+    # which `UCTouPingXianShi.cs:370` confirms independently with the aspect
+    # constant 0.55 == 176/320, where every landscape panel there uses
+    # short/long.  RGB565, because the mode-3 route never reaches ImageToJpg
+    # (all four encode sites are guarded `myDeviceMode == 2`), and
+    # little-endian, because the big-endian arm needs
+    # `is320x320 || mode == 10 || SPIMode == 2` and this panel is none of them
+    # (SPIMode is set only at mode1/fbl51 and mode3/fbl49).  Falling through to
+    # DEFAULT_PROFILE got the size AND the byte order wrong.
+    #
+    # NOTE, undetermined: `theme176320` ships 176x320 backgrounds with 172x320
+    # MASKS -- the ONLY catalog in the set where the two differ, and the same
+    # 172-in-176 pair as the `is640x172` stride repack (FormCZTV.cs:4190),
+    # which centres with a +2px offset.  Our compositor places masks top-left
+    # unscaled, so this panel's mask may sit 2px off.  Not guessed here.
+    60:  DeviceProfile(176,  320,  rotate=True),
     64:  DeviceProfile(640,  480,  rotate=True),
     72:  DeviceProfile(480,  480,
                        encode_pm_bases=((6, 180),)),                # FW360 Ultra PM=6 → 180° baseline (#137)
@@ -617,28 +635,52 @@ def resolve_encode_angle(profile: DeviceProfile, orientation: int) -> int:
     return angle
 
 
-# The three resolutions whose SUB byte encodes a portrait physical mount.
-# From FormCZTVInit: every OTHER resolution assigns its catalog
-# unconditionally, so this is a scoped rule and must not be generalised.
-_PORTRAIT_MOUNT_RESOLUTIONS = frozenset({(854, 480), (960, 540), (800, 480)})
-_PORTRAIT_MOUNT_MIN_SUB = 5
+# Resolution -> the lowest SUB byte that means a PORTRAIT physical mount.
+#
+# ``SetThemeInfo_ThemeML`` applies the pmSub mount test to NINE resolutions,
+# not three.  Eight are written ``pmSub < 5`` (portrait from 5); ``is1920x462``
+# alone is written ``pmSub <= 5`` (FormCZTV.cs:1376), so portrait starts at 6
+# there.  One table with a threshold per row is what lets both live here — a
+# set plus one shared constant cannot express two boundaries.
+#
+# 1280x480 is ABSENT ON PURPOSE.  Its block (FormCZTV.cs:1356-1371) has no
+# pmSub guard at all: first boot is unconditionally landscape and the
+# ``4801280\\`` catalog is reached only once the USER has turned the dial.
+# Adding it would invent a mount the vendor never performs.  The four squares
+# are absent for the same reason.  Verified against ``control-flow.json`` by
+# ``tests/test_oracle_transcription_complete.py``.
+#
+# 176x320 is reachable only once ``FBL_PROFILES[60]`` exists; the row is the
+# C#'s rule, and costs nothing while no panel resolves to it.
+_PORTRAIT_MOUNT_MIN_SUB: dict[tuple[int, int], int] = {
+    (176, 320): 5,
+    (640, 172): 5,
+    (640, 480): 5,
+    (800, 480): 5,
+    (854, 480): 5,
+    (960, 320): 5,
+    (960, 540): 5,
+    (1920, 440): 5,
+    (1920, 462): 6,      # `pmSub <= 5`, the one row that is not `< 5`
+}
 
 
 def is_portrait_mounted(resolution: tuple[int, int], sub: int) -> bool:
     """Whether a panel of *resolution* reporting *sub* is mounted portrait.
 
-    The C# asks ``pmSub < 5`` for exactly three resolutions and, when that
-    fails, loads the transposed theme catalog — ``854480\\`` becomes
-    ``480854\\``, and likewise for 960x540 and 800x480.  So a sub of 5 or
-    more on one of those panels means the screen is turned in its cooler and
-    its content is authored portrait from the start, at user-orientation 0.
+    The C# tests the SUB byte for nine resolutions and, when the test fails,
+    loads the transposed theme catalog — ``854480\\`` becomes ``480854\\``,
+    and likewise for the other eight.  So a SUB at or above that panel's
+    threshold means the screen is turned in its cooler and its content is
+    authored portrait from the start, at user-orientation 0.
 
     Pure function of the handshake bytes so an auditor can resolve it with no
     USB, exactly like ``bulk_profile`` around it.  (#262, #203)
     """
-    mounted = (resolution in _PORTRAIT_MOUNT_RESOLUTIONS
-               and sub >= _PORTRAIT_MOUNT_MIN_SUB)
-    log.debug("is_portrait_mounted: %s sub=%d → %s", resolution, sub, mounted)
+    floor = _PORTRAIT_MOUNT_MIN_SUB.get(resolution)
+    mounted = floor is not None and sub >= floor
+    log.debug("is_portrait_mounted: %s sub=%d floor=%s → %s",
+              resolution, sub, floor, mounted)
     return mounted
 
 

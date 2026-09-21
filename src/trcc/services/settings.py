@@ -260,8 +260,8 @@ class Settings:
         """First-boot only: start a portrait-MOUNTED panel at 90 degrees.
 
         Some coolers bolt a landscape panel in sideways, and the SUB byte says
-        so — ``pmSub >= 5`` on the three resolutions ``is_portrait_mounted``
-        covers.  The C# spends that byte immediately: ``SetThemeInfo_ThemeML``
+        so — a SUB at or above that panel's threshold, on the nine
+        resolutions ``is_portrait_mounted`` covers.  The C# spends that byte immediately: ``SetThemeInfo_ThemeML``
         seeds ``themeDirection = 90`` and the portrait catalog for such a
         device, so the owner's picture is upright the first time they plug it
         in.  We resolved the same fact at handshake and spent it on a log line,
