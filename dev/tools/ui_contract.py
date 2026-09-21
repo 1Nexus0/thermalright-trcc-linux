@@ -397,6 +397,145 @@ def mislocated(ui_root: Path | None = None,
     return sorted(out, key=lambda row: -row[1])
 
 
+# =========================================================================
+# The OBSERVE half — the other driving port
+# =========================================================================
+#
+# Everything above measures ``dispatch(cmd) -> Result``: 144 Commands and
+# Queries, request/response.  That is HALF the driving surface.  The other half
+# is the EventBus -- 44 Event types, push -- and it is equally universal: it
+# crosses the daemon boundary too (``AppProxy.events`` opens a stream and
+# reconstructs real typed Events, so ``BusBridge`` works untouched).
+#
+# Nothing counted it.  A UI that dispatches every Command and observes nothing
+# scored 100% here, and the two Qt skins diverge hardest on exactly this axis:
+# measured 2026-09-20, ``ui/gui`` touches the bus in ONE file and ``ui/qtgui``
+# in twenty.  Every parity number this tool has ever printed was half a
+# measurement -- ``project_a_measurement_that_names_its_own_universe`` again,
+# one port over.
+#
+# A UI reaches an Event TWO ways, and both must be followed or the answer is
+# wrong for one skin:
+#
+#   * by NAME  -- ``events.subscribe(FrameSent, ...)``, or a handler typed
+#     ``def _on(self, e: FrameSent)``.  qtgui does this.
+#   * by SIGNAL -- ``self._bus.frame_sent.connect(...)``, which reaches
+#     ``FrameSent`` without the identifier appearing anywhere.  gui does this,
+#     so a name-only collector reports gui as observing almost nothing.
+#
+# The signal->Event map is not a list here.  It is READ from ``BusBridge._wire``,
+# which pairs them in one literal tuple -- the same reason the rest of this file
+# derives rather than lists.
+
+_BUS_BRIDGE = _UI_ROOT / "bus_bridge.py"
+
+
+def event_types() -> set[str]:
+    """The observe contract, from the live classes — the ``Event`` subclasses."""
+    from trcc.core.events import Event
+
+    import trcc.core.events as events
+    found = {
+        name
+        for name in dir(events)
+        if isinstance(obj := getattr(events, name), type)
+        and issubclass(obj, Event)
+        and obj is not Event
+    }
+    if not found:
+        raise SystemExit(
+            "event collector returned nothing — trcc.core.events exported no "
+            "Event subclass.  Every UI would score as observing everything."
+        )
+    return found
+
+
+def signal_to_event(bridge: Path | None = None) -> dict[str, str]:
+    """``{qt_signal_name: EventTypeName}`` read from ``BusBridge._wire``.
+
+    Parsed from the pairing tuple rather than restated here: a second copy of
+    this map would drift from the bridge the day a signal is added, and the
+    drift would be silent -- the event would simply stop being counted.
+    """
+    tree = ast.parse((bridge or _BUS_BRIDGE).read_text(encoding="utf-8"))
+    out: dict[str, str] = {}
+    for node in ast.walk(tree):
+        # (SomeEvent, self.some_signal)
+        if (isinstance(node, ast.Tuple) and len(node.elts) == 2
+                and isinstance(node.elts[0], ast.Name)
+                and isinstance(node.elts[1], ast.Attribute)):
+            out[node.elts[1].attr] = node.elts[0].id
+    return out
+
+
+def event_reach(uis: dict[str, Path] | None = None,
+                bridge: Path | None = None) -> dict[str, set[str]]:
+    """Which UI trees observe each Event type, by AST — name OR bridge signal."""
+    known = event_types()
+    by_signal = signal_to_event(bridge)
+    reach: dict[str, set[str]] = {name: set() for name in known}
+    for ui, root in (uis or _UIS).items():
+        for path in root.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                seen: str | None = None
+                if isinstance(node, ast.Name) and node.id in known:
+                    seen = node.id
+                elif isinstance(node, ast.alias) and node.name in known:
+                    seen = node.name
+                elif isinstance(node, ast.Attribute) and node.attr in by_signal:
+                    # ``self._bus.frame_sent`` -> FrameSent
+                    seen = by_signal[node.attr]
+                if seen in reach:
+                    reach[seen].add(ui)
+    return reach
+
+
+def unheard_split(
+    reach: dict[str, set[str]], bridge: Path | None = None,
+) -> tuple[list[str], list[str]]:
+    """``(unbridged, declined)`` — two very different silences.
+
+    An **unbridged** Event cannot reach a Qt skin at all: ``BusBridge`` never
+    forwards it, so no widget could observe it however much it wanted to.  A
+    **declined** one IS offered on a signal and nobody connects.  Lumping them
+    together hides the useful half — the first is a missing wire, the second is
+    a choice.
+
+    A function rather than four lines inside the printer, so the split is a
+    claim a gate can break instead of presentation nobody checks.
+    """
+    bridged = set(signal_to_event(bridge).values())
+    unheard = {name for name, uis in reach.items() if not uis}
+    return sorted(unheard - bridged), sorted(unheard & bridged)
+
+
+def _print_observe(reach: dict[str, set[str]]) -> None:
+    total = len(reach)
+    print(f"{_B}Observe half{_RST}  "
+          f"{_GREY}({total} Event type(s) — the other driving port){_RST}")
+    for ui in _UIS:
+        seen = sum(1 for uis in reach.values() if ui in uis)
+        tone = _G if seen > total // 2 else (_Y if seen else _R)
+        print(f"  {ui:<8} observes {tone}{seen:>3}{_RST} of {total}")
+    # Two very different silences, and lumping them together hides the useful
+    # one.  An UNBRIDGED event cannot reach a Qt skin at all -- BusBridge never
+    # forwards it, so no widget could observe it however much it wanted to.  A
+    # bridged-but-unobserved event is a capability that IS offered and declined.
+    unbridged, declined = unheard_split(reach)
+    if unbridged:
+        print(f"  {_R}{len(unbridged)}{_RST} never reach a Qt skin — "
+              f"{_GREY}BusBridge does not forward them: "
+              f"{', '.join(unbridged[:5])}"
+              f"{'…' if len(unbridged) > 5 else ''}{_RST}")
+    if declined:
+        print(f"  {_Y}{len(declined)}{_RST} are bridged but nobody connects — "
+              f"{_GREY}{', '.join(declined[:5])}"
+              f"{'…' if len(declined) > 5 else ''}{_RST}")
+    print()
+
+
 def _print_cross(edges: list[CrossEdge], stranded: list[tuple[str, int, str]]) -> None:
     flagged = [e for e in edges if e.kind]
     print(f"{_B}UI -> UI reaches{_RST}  "
@@ -503,6 +642,43 @@ _FIXTURE_FACES: dict[str, str] = {
     "shared/solo/__init__.py": "def helper():\n    return 2\n",
     "shared/solo/impl.py": "VALUE = 3\n",
 }
+
+
+#: For the OBSERVE half.  Real Event names, because ``event_types()`` reads the
+#: live classes on purpose — but a fixture BRIDGE and fixture UIs, so the two
+#: reach paths can be told apart.  On the real tree they cannot: a name-only
+#: collector scores gui 3 and a signal-only collector scores qtgui low, and
+#: either wrong answer looks plausible.
+_FIXTURE_BRIDGE = '''
+class BusBridge:
+    def _wire(self):
+        pairs = (
+            (FrameSent, self.frame_sent),
+            (ThemeLoaded, self.theme_loaded),
+            (ErrorOccurred, self.error_occurred),
+        )
+'''
+
+#: Names ``FrameSent`` with **no import** — so the ``ast.Name`` arm is the only
+#: thing that can find it.  Importing it here instead would let the ``alias``
+#: arm cover for a deleted ``Name`` arm and the gate would pass with half the
+#: collector gone; ``reach_by_command`` records that exact hole one port over.
+_FIXTURE_BY_NAME = '''
+def on(event: FrameSent):
+    return event
+'''
+
+#: Reached by IMPORT alone — the other half, isolated the same way.
+_FIXTURE_BY_ALIAS = '''
+from trcc.core.events import SensorsUpdated
+'''
+
+#: Never names an Event at all — the gui shape.  Reaches ``ThemeLoaded`` ONLY
+#: through the bridge signal, which is invisible to a name-based collector.
+_FIXTURE_BY_SIGNAL = '''
+def wire(bridge):
+    bridge.theme_loaded.connect(print)
+'''
 
 
 def _write_faces(tmp: Path) -> Path:
@@ -640,6 +816,54 @@ def gate() -> int:
     checks.append(("the real tree yields cross-area edges at all",
                    len(real) > 20))
 
+    # --- the OBSERVE half: both reach paths, told apart ------------------
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        bridge = root / "bridge.py"
+        bridge.write_text(_FIXTURE_BRIDGE, encoding="utf-8")
+        named, signalled = root / "named", root / "signalled"
+        aliased = root / "aliased"
+        for d in (named, signalled, aliased):
+            d.mkdir()
+        (named / "m.py").write_text(_FIXTURE_BY_NAME, encoding="utf-8")
+        (signalled / "m.py").write_text(_FIXTURE_BY_SIGNAL, encoding="utf-8")
+        (aliased / "m.py").write_text(_FIXTURE_BY_ALIAS, encoding="utf-8")
+        pairs = signal_to_event(bridge)
+        heard = event_reach(
+            {"named": named, "signalled": signalled, "aliased": aliased},
+            bridge)
+        un, dec = unheard_split(heard, bridge)
+
+    checks.append(("the signal map is READ from the bridge, not listed",
+                   pairs == {"frame_sent": "FrameSent",
+                             "theme_loaded": "ThemeLoaded",
+                             "error_occurred": "ErrorOccurred"}))
+    checks.append(("an Event reached by NAME, never imported, is observed",
+                   heard.get("FrameSent") == {"named"}))
+    checks.append(("an Event reached by IMPORT alone is observed",
+                   heard.get("SensorsUpdated") == {"aliased"}))
+    # The arm gui depends on.  Deleting it scores gui 3 of 39 instead of 15,
+    # and the wrong number is entirely believable.
+    checks.append(("an Event reached ONLY by its bridge signal is observed",
+                   heard.get("ThemeLoaded") == {"signalled"}))
+    checks.append(("an Event reached by neither is NOT observed",
+                   heard.get("ErrorOccurred") == set()))
+    checks.append(("the observe contract clears its own floor",
+                   len(event_types()) >= 30))
+    # The two silences are different findings; a split that collapses them
+    # reports a missing wire as a deliberate choice.
+    # BrightnessChanged is not in the fixture bridge at all: no widget could
+    # observe it, so it is a missing WIRE.
+    checks.append(("an unforwarded Event reads as UNBRIDGED",
+                   "BrightnessChanged" in un and "BrightnessChanged" not in dec))
+    # ErrorOccurred IS forwarded and no fixture UI connects: a CHOICE, not a
+    # missing wire.  Collapsing the two empties this list, which is the whole
+    # point of asserting both directions.
+    checks.append(("a forwarded Event nobody connects reads as DECLINED",
+                   "ErrorOccurred" in dec and "ErrorOccurred" not in un))
+    checks.append(("an OBSERVED Event is in neither silence",
+                   "FrameSent" not in un + dec))
+
     for label, ok in checks:
         print(f"  {'PASS' if ok else 'FAIL'}  {label}")
     failed = [label for label, ok in checks if not ok]
@@ -697,9 +921,9 @@ def main() -> int:
     if not flagged:
         print(f"  {_G}none — every service/adapter a GUI reaches, cli/api reach too{_RST}")
 
+    _print_observe(event_reach())
     edges = cross_edges()
     stranded = mislocated()
-    print()
     _print_cross(edges, stranded)
 
     total = sum(len(s.service_imports) + len(s.adapter_imports)

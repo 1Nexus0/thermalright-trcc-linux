@@ -2131,3 +2131,73 @@ def test_linux_platform_module_has_no_linux_only_toplevel_imports() -> None:
         f"linux.py imports {offenders} at module scope; the registry imports "
         "this module on Windows too, so it must import there (#166).  Move it "
         "inside the function that needs it.")
+
+
+# =========================================================================
+# The OBSERVE half — the driving port nobody was counting
+# =========================================================================
+#
+# Everything above, and every parity number this project has quoted, measures
+# ``dispatch(cmd) -> Result``: 144 Commands and Queries.  That is HALF the
+# driving surface.  The other half is the EventBus — 39 Event types, push — and
+# it is equally universal, crossing the daemon boundary through
+# ``AppProxy.events``.  Nothing counted it, so a UI that dispatched everything
+# and observed nothing scored as complete.
+
+#: Events ``ui/gui`` observes and ``ui/qtgui`` does not.  **A real parity gap**,
+#: and invisible to the Command count: measured 2026-09-20 both skins observe
+#: exactly 15 of 39, which reads as parity and is not — they share only 11.
+#:
+#: Ratcheted as a SET, not a count, because the count is the thing that lied.
+MISSING_IN_QTGUI = {
+    "BrightnessChanged",
+    "ScreencastStarted",
+    "ScreencastStopped",
+    "SystemSuspending",
+}
+
+#: Event types ``BusBridge`` never forwards, so no Qt widget can observe them
+#: however much it wants to.  A missing WIRE, distinct from a capability that is
+#: offered and declined.  May not grow.
+MAX_UNBRIDGED_EVENTS = 17
+
+
+def test_qtgui_observes_what_gui_observes() -> None:
+    """Retiring ``ui/gui`` means qtgui must hear everything gui hears.
+
+    An Event is reached two ways and BOTH count: named outright (qtgui's
+    shape — imported, or a typed handler) or via its ``BusBridge`` Qt signal
+    (gui's shape, where the type name appears nowhere). Counting names alone
+    scores gui 3 of 39 instead of 15.
+    """
+    reach = ui_contract.event_reach()
+    gui = {n for n, uis in reach.items() if "gui" in uis}
+    qtgui = {n for n, uis in reach.items() if "qtgui" in uis}
+    gap = gui - qtgui
+    assert gap <= MISSING_IN_QTGUI, (
+        f"qtgui stopped observing {sorted(gap - MISSING_IN_QTGUI)} that gui "
+        f"still does — a new parity gap on the half the Command count cannot "
+        f"see"
+    )
+    assert gap == MISSING_IN_QTGUI, (
+        f"qtgui now observes {sorted(MISSING_IN_QTGUI - gap)} — remove it from "
+        f"MISSING_IN_QTGUI so the ground is not given back"
+    )
+
+
+def test_unbridged_events_do_not_grow() -> None:
+    """An Event no ``BusBridge`` signal carries is unreachable from any widget.
+
+    Not the same finding as "bridged and nobody connects": the first is a
+    missing wire, the second is a choice. The tool splits them for that reason.
+    """
+    unbridged, _declined = ui_contract.unheard_split(ui_contract.event_reach())
+    assert len(unbridged) <= MAX_UNBRIDGED_EVENTS, (
+        f"{len(unbridged)} Event type(s) reach no Qt skin, over the ceiling of "
+        f"{MAX_UNBRIDGED_EVENTS} — a new event was published with no bridge "
+        f"signal, so no widget can ever see it:\n  " + "\n  ".join(unbridged)
+    )
+    assert len(unbridged) >= MAX_UNBRIDGED_EVENTS, (
+        f"only {len(unbridged)} unbridged — lower MAX_UNBRIDGED_EVENTS to "
+        f"{len(unbridged)}"
+    )
