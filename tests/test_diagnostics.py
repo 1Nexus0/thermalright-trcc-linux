@@ -1791,10 +1791,6 @@ def _frame_path_rates(tmp_path: Path, *, starve_cache: bool,
     which is exactly how the first version of this test passed with a live
     flood in ``_resolve_background``.
     """
-    import os
-
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
     from trcc.adapters.render.qt import QtRenderer
     from trcc.adapters.theme.filesystem import FileContentStore
     from trcc.core.models import Kind, ProductInfo, Theme, Wire
@@ -1957,10 +1953,6 @@ def _tick_path_rates(tmp_path: Path, *, frames: int = 30) -> _TickRun:
     would then understate it ~50x and report a live flood as clean.  One write
     per tick is what makes records-per-frame mean anything here.
     """
-    import os
-
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
     from trcc.adapters.render.qt import QtRenderer
     from trcc.app import App
     from trcc.core.commands import ConnectDevice, TickDisplay

@@ -11,13 +11,8 @@ build on the same fixtures.
 from __future__ import annotations
 
 import os
-from pathlib import Path
-
-# Qt needs an offscreen platform plugin in headless CI.  Set before any
-# QtGui / QtWidgets import.
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
@@ -1023,9 +1018,20 @@ def test_gui_launch_is_callable() -> None:
 
 
 def test_offscreen_qpa_is_set() -> None:
-    """Pin the QT_QPA_PLATFORM env var so a future regression that
-    forgets to set offscreen mode fails loudly here instead of
-    hanging in CI on a missing X server."""
+    """The offscreen platform is a GUARANTEE the suite depends on, so prove it.
+
+    Five tests assert offscreen behaviour outright — this one, the three in
+    ``test_screencast_capture_chain`` that require Qt to DECLINE a grab rather
+    than hand the wire a black frame, and the video-cut close test, which needs
+    ``QWidget.close()`` to deliver ``closeEvent`` synchronously (an xcb window
+    does not).  Measured under ``QT_QPA_PLATFORM=xcb``: exactly those 5 of 5849
+    fail.
+
+    This gate existed before and passed anyway, because the six places that set
+    the variable all used ``os.environ.setdefault`` — a no-op when the
+    contributor's shell already exports it.  The guarantee is now one
+    assignment at the top of ``tests/conftest.py``; this asserts it held.
+    """
     assert os.environ.get("QT_QPA_PLATFORM") == "offscreen"
 
 

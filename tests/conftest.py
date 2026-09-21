@@ -6,6 +6,26 @@ touching USB / SG_IO / ioctl.
 """
 from __future__ import annotations
 
+import os
+
+# The suite runs OFFSCREEN, and that is a GUARANTEE — not a default.
+#
+# Five places used to write ``os.environ.setdefault("QT_QPA_PLATFORM",
+# "offscreen")``, which does NOTHING when a contributor's shell already
+# exports the variable.  Five tests assert offscreen behaviour outright
+# (``test_offscreen_qpa_is_set``, three in ``test_screencast_capture_chain``
+# asserting Qt declines to grab, and the video-cut close test, which needs
+# ``QWidget.close()`` to deliver ``closeEvent`` synchronously — an xcb window
+# does not).  Under a real plugin all five fail, which is what a contributor
+# reported on 2026-09-21 as an unexplained environment difference.
+#
+# Assignment, and here at import time: this module is imported before any test
+# module, so it lands before the first PySide6 import in any worker.  The
+# production ``adapters/render/qt.py`` keeps ``setdefault`` on purpose — a real
+# user needs their real plugin.
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+
 import inspect
 import ipaddress
 import logging
@@ -654,8 +674,6 @@ def _qapplication() -> Iterator[object]:
     dependency: every test shares one QApplication, which also satisfies
     offscreen rendering (QApplication is-a QGuiApplication).
     """
-    import os
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     yield app

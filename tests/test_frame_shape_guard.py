@@ -16,9 +16,6 @@ from trcc.adapters.device.bulk_lcd import jpeg_dimensions
 
 def _jpeg(width: int, height: int) -> bytes:
     """A real JPEG of exactly *width* x *height*, via the shipping renderer."""
-    import os
-
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QBuffer, QByteArray
     from PySide6.QtGui import QImage
 
