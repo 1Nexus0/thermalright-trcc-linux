@@ -63,10 +63,12 @@ from ._helpers import (
 from .device import (
     ApplyMask,
     PlayVideo,
+    SetBackground,
     SetMaskPosition,
     SetMediaPlayer,
     StartScreencast,
     StopVideo,
+    TickDisplay,
 )
 
 if TYPE_CHECKING:
@@ -1743,12 +1745,17 @@ class RestoreDeviceState(Command[ThemeResult]):
                          "or load a theme first"),
             )
 
-        # 4. Resume the persisted cloud / user video background over the theme.
+        # 4. Resume the persisted cloud / user background over the theme.  The
+        # file's KIND picks the path, not the caller: SetBackground plays a
+        # video and renders a still, where the unconditional PlayVideo this
+        # replaces rejected every image with "unsupported extension '.png'" —
+        # and the restore still reported ok, so an image override silently
+        # never came back after a restart.
         bg = app.settings.for_device(self.key).background_path
         if bg:
             log.info("RestoreDeviceState: %s replaying persisted background %s",
                      self.key, bg)
-            app.dispatch(PlayVideo(key=self.key, path=Path(bg)))
+            app.dispatch(SetBackground(key=self.key, path=Path(bg)))
 
         return ThemeResult(
             ok=True, key=self.key, theme_name=theme.name,
@@ -1838,6 +1845,27 @@ class EnsureDataDownload(Command[EnsureDataDownloadResult]):
                      f"web={result.web_ok} masks={result.masks_ok}"),
         )
 
+def _cloud_asset(store: ContentStore, mp4_path: Path, static: bool) -> Path:
+    """The file to install as the background for a cloud theme.
+
+    ``materialise`` always downloads the video and writes a first-frame PNG
+    beside it; ``static`` picks that still instead of the MP4.  A video
+    background re-decodes and re-encodes on every tick (~26 ms per frame at
+    1280×480, which pins the render loop to video rate), while the still one
+    lets the loop fall back to ``AppSettings.refresh_interval_s``.  A missing
+    still falls back to the video, loudly.
+    """
+    if static:
+        still = store.still_for(mp4_path)
+        if still is not None:
+            return still
+        log.warning(
+            "_cloud_asset: %s — no still frame beside it, using the video",
+            mp4_path.name,
+        )
+    return mp4_path
+
+
 @dataclass(frozen=True, slots=True)
 class DownloadCloudTheme(Command[CloudThemeLoadResult]):
     """Fetch a cloud background into the local cache WITHOUT applying it.
@@ -1915,14 +1943,20 @@ class LoadCloudTheme(Command[CloudThemeLoadResult]):
       2. ``CloudThemeService.materialise`` downloads the MP4 flat into
          ``paths.cloud_theme_dir(w, h)/<id>.mp4`` and generates the
          first-frame PNG + animated GIF previews for the GUI.
-      3. Persist the new background path on ``DeviceSettings.background_path``
-         so it survives an app restart.
-      4. Dispatch ``PlayVideo(key, path=<mp4>)`` — that's the path
-         MediaService + DisplayService already use to render a video
-         background on every tick.
+      3. Hand the chosen file to ``SetBackground``, which owns the two
+         branches: an animated file is persisted onto
+         ``DeviceSettings.background_path`` and handed to ``PlayVideo``; a
+         still image stops any running video, persists, and invalidates the
+         scene.  Either way it survives an app restart.
+
+    ``static=True`` installs the first-frame PNG instead of the video.  The
+    catalog is video-only and the port reproduces that, so this is an opt-in
+    for panels that only need the picture — the per-tick cost is the decode
+    plus JPEG encode, not the panel size.
     """
     key: str
     theme_id: str
+    static: bool = False
 
     def execute(self, app: App) -> CloudThemeLoadResult:
         log.info("LoadCloudTheme: key=%s theme_id=%s", self.key, self.theme_id)
@@ -1970,24 +2004,24 @@ class LoadCloudTheme(Command[CloudThemeLoadResult]):
                 message=f"Local IO failed: {e}",
             )
 
-        log.info(
-            "LoadCloudTheme: %s ready at %s — setting background override + "
-            "dispatching PlayVideo",
-            self.theme_id, mp4_path,
-        )
-        # Persist the new background on the device — survives restart.
-        app.settings.set_background_path(self.key, str(mp4_path))
-        # MediaService.load_video populates the playback; DisplayService's
-        # ``_resolve_background`` short-circuits to ``playback.current``
-        # when a playback exists, so this is the entire "play this video
-        # as the bg" wire (overlay + mask stay untouched).
-        play_result = app.dispatch(PlayVideo(key=self.key, path=mp4_path))
+        target = _cloud_asset(app.themes, mp4_path, self.static)
+        log.info("LoadCloudTheme: %s ready at %s — applying as background",
+                 self.theme_id, target)
+        # SetBackground owns the persistence and the animated/still split, so a
+        # cloud background behaves exactly like one set from the GUI or
+        # ``trcc display background``.
+        set_result = app.dispatch(SetBackground(key=self.key, path=target))
+        if set_result.ok and MEDIA.kind_of(target) is MediaKind.IMAGE:
+            # SetBackground publishes BackgroundChanged (the GUI re-renders off
+            # it) and sends nothing itself, so a standalone CLI call would leave
+            # the panel on its old frame until something else ticked.
+            app.dispatch(TickDisplay(key=self.key))
         return CloudThemeLoadResult(
-            ok=play_result.ok,
+            ok=set_result.ok,
             key=self.key,
             theme_id=self.theme_id,
-            theme_path=str(mp4_path),
-            message=play_result.message,
+            theme_path=str(target),
+            message=set_result.message,
         )
 
 @dataclass(frozen=True, slots=True)

@@ -1524,6 +1524,38 @@ class ContentStore(ABC):
         """
 
     @abstractmethod
+    def still_for(self, video: Path) -> Path | None:
+        """The still frame that stands in for *video*, or ``None`` if there is none.
+
+        Both sources of video already ship one beside it: ``materialise`` writes
+        the first-frame PNG next to every downloaded cloud video (ffmpeg), and
+        the vendor catalog ships the same ``<id>.png`` / ``.gif`` / ``.mp4`` trio.
+        Used by the ``static_background`` preference and by
+        ``LoadCloudTheme --static``.  Asking the filesystem which file is there
+        is the store's job, not the caller's.
+        """
+
+    @abstractmethod
+    def ensure_still(self, video: Path) -> Path | None:
+        """The still for *video* — the one beside it, or a first frame.
+
+        ``still_for`` only *finds* a still; a theme that ships a video without
+        one (nothing called ``materialise`` on it) would leave the
+        ``static_background`` preference with nothing to show, so the store
+        extracts the first frame instead.  ``None`` means neither worked and
+        the caller must keep the video.
+        """
+
+    @abstractmethod
+    def video_for(self, still: Path) -> Path | None:
+        """The video *still* stands in for, or ``None`` if there is none.
+
+        The inverse of ``still_for``.  A background that renders as a picture
+        may be the stand-in for a video the device should animate again once
+        the ``static_background`` preference is switched off.
+        """
+
+    @abstractmethod
     def mask_path(self, theme: Theme) -> Path | None:
         """*theme*'s mask overlay — referenced library unit or in-dir."""
 

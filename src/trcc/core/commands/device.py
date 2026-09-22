@@ -86,6 +86,7 @@ from ..results import (
     SeekVideoResult,
     SendResult,
     SplitModeResult,
+    StaticBackgroundResult,
     ThemeDirectoriesResult,
     VideoResult,
     VideoStatusResult,
@@ -1113,6 +1114,40 @@ class PlayVideo(Command[VideoResult]):
                         self.key, e)
             return VideoResult(ok=False, key=self.key, path=str(self.path),
                                 message=str(e))
+
+        # ``static_background``: this Command is the funnel every video
+        # background goes through — theme-bundled, cloud, explicit override or
+        # API — so one check here covers them all.  Substitute the still frame
+        # that sits beside the video and render it once: no playback, no
+        # animation timer, and the render loop keeps its metrics cadence
+        # (``refresh_interval_s``) instead of the video's frame rate.
+        if app.settings.for_device(self.key).static_background:
+            still = app.themes.ensure_still(self.path)
+            if still is None:
+                log.warning(
+                    "PlayVideo.execute: static_background is on for %s but %s "
+                    "has no still frame beside it and none could be extracted "
+                    "— playing the video",
+                    self.key, self.path.name,
+                )
+            else:
+                log.info(
+                    "PlayVideo.execute: static_background is on for %s — "
+                    "using %s instead of playing %s",
+                    self.key, still.name, self.path.name,
+                )
+                applied = app.dispatch(
+                    SetBackground(key=self.key, path=still))
+                if applied.ok:
+                    # SetBackground persists + invalidates + publishes, but
+                    # sends nothing; push the frame so a CLI one-shot shows it.
+                    app.dispatch(TickDisplay(key=self.key))
+                return VideoResult(
+                    ok=applied.ok, key=self.key, path=str(still),
+                    frame_count=1,
+                    message=(f"static background {still.name} "
+                             f"(not playing {self.path.name})"),
+                )
 
         if device.profile is not None:
             canvas_size = device.profile.resolution
@@ -2288,6 +2323,58 @@ class SetMaskVisible(Command[MaskVisibilityResult]):
         )
 
 @dataclass(frozen=True, slots=True)
+class SetStaticBackground(Command[StaticBackgroundResult]):
+    """Never wire a moving background for this device.
+
+    Replaces every video background with the still frame beside it (see
+    ``still_for``) — set once, and theme-bundled videos, cloud videos and
+    explicit overrides all render as a single picture.  The render loop then
+    keeps ``refresh_interval_s`` instead of the video's frame rate, which on a
+    1280×480 panel is the difference between ~30% and ~3% of one core.
+
+    Takes effect on the background that is already on screen: it is re-applied
+    through ``PlayVideo``, the funnel that substitutes the still, so the panel
+    flips between the video and its picture without the theme being reloaded.
+    """
+    key: str
+    enabled: bool
+
+    def execute(self, app: App) -> StaticBackgroundResult:
+        log.info("SetStaticBackground.execute: key=%s enabled=%s",
+                 self.key, self.enabled)
+        app.settings.set_static_background(self.key, self.enabled)
+        video = self._current_video(app)
+        # A loaded playback keeps its animation timer and outranks the still.
+        if video is None or self.enabled:
+            app.dispatch(StopVideo(key=self.key))
+        if video is not None:
+            app.dispatch(PlayVideo(key=self.key, path=video))
+        _invalidate_scene(app, self.key)
+        return StaticBackgroundResult(
+            ok=True, key=self.key, enabled=self.enabled,
+            message=(f"static background {'on' if self.enabled else 'off'} "
+                     f"for {self.key}"),
+        )
+
+    def _current_video(self, app: App) -> Path | None:
+        """The video this device's background is, or stands in for."""
+        stored = app.settings.for_device(self.key).background_path
+        if not stored:
+            log.debug("SetStaticBackground: %s has no background override",
+                      self.key)
+            return None
+        path = Path(stored)
+        if MEDIA.kind_of(path) is MediaKind.ANIMATED:
+            log.debug("SetStaticBackground: %s background is the video %s",
+                      self.key, path.name)
+            return path
+        video = app.themes.video_for(path)
+        log.debug("SetStaticBackground: %s still %s → video %s",
+                  self.key, path.name, video)
+        return video
+
+
+@dataclass(frozen=True, slots=True)
 class SetBackgroundMode(Command[BackgroundModeResult]):
     """Pick what fills the LCD behind overlays.
 
@@ -2924,6 +3011,7 @@ class LcdSnapshot(Query[LcdSnapshotResult]):
             slideshow_themes=tuple(s.slideshow_themes),
             background_mode=s.background_mode,
             overlay_background=s.overlay_background,
+            static_background=s.static_background,
             message=f"LCD snapshot for {self.key}",
         )
 

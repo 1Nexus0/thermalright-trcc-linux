@@ -24,8 +24,11 @@ from ..core.errors import ConfigError
 from ..core.led_models import LedDeviceSettings, LEDMode, LedZoneSettings
 from ..core.logs import per_frame
 from ..core.models import (
+    DEFAULT_KEEPALIVE_INTERVAL_S,
     DEFAULT_REFRESH_INTERVAL_S,
+    MAX_KEEPALIVE_INTERVAL_S,
     MAX_REFRESH_INTERVAL_S,
+    MIN_KEEPALIVE_INTERVAL_S,
     MIN_REFRESH_INTERVAL_S,
     DeviceSettings,
     FitMode,
@@ -48,6 +51,11 @@ class AppSettings:
     """Global user preferences."""
     language: str = "en"
     refresh_interval_s: float = DEFAULT_REFRESH_INTERVAL_S
+    # Resend cadence for "volatile" wires — firmware that shows its boot logo
+    # when frames stop (``DeviceQuirks.keepalive_stream``, this panel included).
+    # Only affects wires that need a stream at all; an animated background
+    # already supplies a frame per tick.  See the bounds in core.models.
+    keepalive_interval_s: float = DEFAULT_KEEPALIVE_INTERVAL_S
     autostart_configured: bool = False
     ui_theme: Literal["dark", "light", "system"] = "system"
     # Include HDD metrics (disk temp / activity / read / write) in sensor
@@ -154,6 +162,22 @@ class Settings:
             # metric poll can never run faster than the minimum.
             self._app.refresh_interval_s = max(
                 MIN_REFRESH_INTERVAL_S, min(MAX_REFRESH_INTERVAL_S, seconds),
+            )
+            self._save()
+
+    def set_keepalive_interval(self, seconds: float) -> None:
+        """Set the resend cadence for "volatile" wires, clamped to the window.
+
+        Those wires revert to their boot logo when the stream stops
+        (``DeviceQuirks.keepalive_stream``), so the ceiling stays inside the
+        ~2-3 s firmware-revert window; the floor stops a pathological
+        sub-frame-rate stream.
+        """
+        log.info("set_keepalive_interval: seconds=%s", seconds)
+        with self._lock:
+            self._app.keepalive_interval_s = max(
+                MIN_KEEPALIVE_INTERVAL_S,
+                min(MAX_KEEPALIVE_INTERVAL_S, seconds),
             )
             self._save()
 
@@ -385,6 +409,18 @@ class Settings:
             if path is not None:   # display-source toggles are mutually exclusive
                 dev.screencast_region = None
                 dev.media_player_uri = None
+            self._save()
+
+    def set_static_background(self, key: str, enabled: bool) -> None:
+        """Swap moving backgrounds for their still frame on this device.
+
+        Honoured by ``PlayVideo`` — the single funnel every video background
+        goes through — so one setting covers theme-bundled videos, cloud
+        videos and explicit overrides alike.
+        """
+        log.info("set_static_background: key=%s enabled=%s", key, enabled)
+        with self._lock:
+            self.for_device(key).static_background = enabled
             self._save()
 
     def set_screencast_region(

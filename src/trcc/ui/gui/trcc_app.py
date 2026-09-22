@@ -18,8 +18,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QRegularExpression as QRE
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QPalette, QRegularExpressionValidator
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import (
+    QColor,
+    QDesktopServices,
+    QIcon,
+    QPalette,
+    QRegularExpressionValidator,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -48,9 +54,11 @@ from ...core.commands import (
     SetBackground,
     SetGpuDevice,
     SetHddEnabled,
+    SetKeepaliveInterval,
     SetLanguage,
     SetMaskVisible,
     SetRefreshInterval,
+    SetStaticBackground,
     SetTempUnit,
     StartScreencast,
     StopScreencast,
@@ -1268,6 +1276,7 @@ class TRCCApp(QMainWindow):
             ABOUT_GPU_POS,
             ABOUT_HDD_POS,
             ABOUT_HDD_WARN_POS,
+            ABOUT_KEEPALIVE_POS,
             ABOUT_LANG_POS,
             ABOUT_MULTI_THREAD_POS,
             ABOUT_REFRESH_POS,
@@ -1278,6 +1287,7 @@ class TRCCApp(QMainWindow):
             ABOUT_VERSION_POS,
             BACKGROUND_LOAD_IMG_POS,
             BACKGROUND_LOAD_VIDEO_POS,
+            BACKGROUND_STATIC_POS,
             DISPLAY_ANGLE_POS,
             EXPORT_IMPORT_POS,
             GALLERY_TAB_FONT,
@@ -1371,7 +1381,8 @@ class TRCCApp(QMainWindow):
 
         bp = s.background_panel
         for key, pos in [('Load Image', BACKGROUND_LOAD_IMG_POS),
-                         ('Load Video', BACKGROUND_LOAD_VIDEO_POS)]:
+                         ('Load Video', BACKGROUND_LOAD_VIDEO_POS),
+                         ('Static', BACKGROUND_STATIC_POS)]:
             x, y, w, h, pt = pos
             _lbl(bp, tr(key, lang), x, y, w, h, pt, key)
 
@@ -1402,6 +1413,7 @@ class TRCCApp(QMainWindow):
             ('Reading hard disk information may cause some mechanical hard drives to read and write frequently. If you encounter this issue, please close the project.',
              ABOUT_HDD_WARN_POS),
             ('Data refresh time', ABOUT_REFRESH_POS),
+            ('Keepalive time', ABOUT_KEEPALIVE_POS),
             ('Running Mode', ABOUT_RUNNING_MODE_POS),
             ('Single-threaded (low resource usage)', ABOUT_SINGLE_THREAD_POS),
             ('Multi-threaded (high resource usage)', ABOUT_MULTI_THREAD_POS),
@@ -1588,6 +1600,7 @@ class TRCCApp(QMainWindow):
         self.uc_about.temp_unit_changed.connect(self._on_temp_unit_changed)
         self.uc_about.hdd_toggle_changed.connect(self._on_hdd_toggle_changed)
         self.uc_about.refresh_changed.connect(self._on_refresh_changed)
+        self.uc_about.keepalive_changed.connect(self._on_keepalive_changed)
         self.uc_about.gpu_changed.connect(self._on_gpu_changed)
 
     # ── Device Selection ────────────────────────────────────────────
@@ -1786,6 +1799,11 @@ class TRCCApp(QMainWindow):
                     # a render.  No direct ``_render_and_send`` needed.
                     self._app.dispatch(SetMaskVisible(
                         key=h.device_key, visible=bool(info),
+                    ))
+            case UCThemeSetting.CMD_STATIC_BACKGROUND:
+                if h:
+                    self._app.dispatch(SetStaticBackground(
+                        key=h.device_key, enabled=bool(info),
                     ))
             case UCThemeSetting.CMD_MASK_UPLOAD:
                 self._on_mask_upload_clicked()
@@ -2540,6 +2558,13 @@ class TRCCApp(QMainWindow):
                  result.ok, result.message)
         self.uc_preview.set_status(result.message)
 
+    def _on_keepalive_changed(self, seconds: float) -> None:
+        log.info("_on_keepalive_changed: seconds=%s", seconds)
+        result = self._app.dispatch(SetKeepaliveInterval(seconds=seconds))
+        log.info("_on_keepalive_changed: dispatch result ok=%s message=%r",
+                 result.ok, result.message)
+        self.uc_preview.set_status(result.message)
+
     def _on_gpu_changed(self, gpu_key: str) -> None:
         log.debug("_on_gpu_changed: gpu_key=%s", gpu_key)
         # SetGpuDevice persists the choice AND pushes it into the live
@@ -2560,10 +2585,9 @@ class TRCCApp(QMainWindow):
 
     def _on_help_clicked(self) -> None:
         log.info("_on_help_clicked")
-        import webbrowser
-        webbrowser.open(
+        QDesktopServices.openUrl(QUrl(
             'https://github.com/Lexonight1/thermalright-trcc-linux'
-            '/blob/main/doc/GUIDE_TROUBLESHOOTING.md')
+            '/blob/main/doc/GUIDE_TROUBLESHOOTING.md'))
 
     def _on_capture_requested(self) -> None:
         log.info("_on_capture_requested")

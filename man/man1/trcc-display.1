@@ -1005,6 +1005,28 @@ Options:
 \fB\-\-help\fR
 Show this command's help and exit.
 .RE
+.SS static\-background
+.PP
+\fBtrcc display static\-background\fR \fIKEY\fR \fISTATE\fR
+.PP
+Stop playing video backgrounds on this device. Every video background  \-  theme\-bundled, cloud, or an override  \-  renders as the still frame written beside it, so the render loop keeps refresh_interval_s instead of the video's frame rate. Same picture for a fraction of the CPU.
+.PP
+Arguments:
+.RS 4
+.TP
+\fBKEY\fR
+Device key, e.g. 0402:3922
+.TP
+\fBSTATE\fR
+\&'on' (stills only) / 'off'
+.RE
+.PP
+Options:
+.RS 4
+.TP
+\fB\-\-help\fR
+Show this command's help and exit.
+.RE
 .SS stop\-screencast
 .PP
 \fBtrcc display stop\-screencast\fR \fIKEY\fR

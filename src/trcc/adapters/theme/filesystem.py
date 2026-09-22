@@ -44,9 +44,17 @@ from typing import TYPE_CHECKING
 from ...core._safe import is_safe_zip_member
 from ...core.errors import ThemeError
 from ...core.logs import per_frame
-from ...core.models import DiscoveredMask, Theme, ThemeDir, WebPreviewInfo
+from ...core.models import (
+    MEDIA,
+    DiscoveredMask,
+    MediaKind,
+    Theme,
+    ThemeDir,
+    WebPreviewInfo,
+)
 from ...core.ports import ContentStore, SingleFileTheme
 from ...services import _dc as Dc
+from ...services.media import extract_first_frame_png
 
 if TYPE_CHECKING:
     from ...core.ports import Paths
@@ -80,6 +88,14 @@ _VIDEO_CANDIDATES = (
 # two never drift); the background allowlist is those plus the static PNG.
 _VIDEO_EXTS = frozenset(Path(c).suffix.lower() for c in _VIDEO_CANDIDATES)
 _BG_EXTS = _VIDEO_EXTS | {".png"}
+
+#: Extensions a video's still stand-in may carry, in preference order.  Not
+#: ``.gif`` — that one is ANIMATED (``core.models.MEDIA``) and would keep the
+#: loop busy.
+_STILL_EXTS: tuple[str, ...] = (".png", ".jpg", ".jpeg")
+
+#: Container extensions a still's video may carry, in preference order.
+_STILL_VIDEO_EXTS: tuple[str, ...] = (".mp4", ".mov", ".webm")
 
 
 @dataclass(frozen=True, slots=True)
@@ -744,6 +760,42 @@ class FileContentStore(ContentStore):
         any_png = next(theme_dir.glob("*.png"), None)
         log.debug("tile_path: %s → %s (fallback)", theme_dir, any_png)
         return any_png
+
+    def still_for(self, video: Path) -> Path | None:
+        """The still frame that stands in for *video* — see ContentStore.still_for."""
+        for ext in _STILL_EXTS:
+            candidate = video.with_suffix(ext)
+            if candidate.is_file():
+                log.debug("still_for: %s → %s", video.name, candidate.name)
+                return candidate
+        log.debug("still_for: %s → no still beside it", video.name)
+        return None
+
+    def ensure_still(self, video: Path) -> Path | None:
+        """The still for *video* — the one beside it, or a first frame."""
+        still = self.still_for(video)
+        if still is not None:
+            return still
+        target = video.with_suffix(".png")
+        if extract_first_frame_png(video, target) and target.is_file():
+            log.info("ensure_still: wrote %s for %s", target.name, video.name)
+            return target
+        log.warning(
+            "ensure_still: %s has no still beside it and no frame could be "
+            "extracted", video.name,
+        )
+        return None
+
+    def video_for(self, still: Path) -> Path | None:
+        """The video *still* stands in for — see ContentStore.video_for."""
+        for ext in _STILL_VIDEO_EXTS:
+            candidate = still.with_suffix(ext)
+            if (candidate.is_file()
+                    and MEDIA.kind_of(candidate) is MediaKind.ANIMATED):
+                log.debug("video_for: %s → %s", still.name, candidate.name)
+                return candidate
+        log.debug("video_for: %s → no video beside it", still.name)
+        return None
 
     def is_theme_dir(self, path: Path) -> bool:
         """True iff *path* is a directory carrying a theme config.

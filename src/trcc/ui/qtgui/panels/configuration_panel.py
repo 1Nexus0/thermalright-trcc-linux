@@ -20,6 +20,7 @@ import logging
 
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QCheckBox,
     QColorDialog,
     QComboBox,
     QDoubleSpinBox,
@@ -35,23 +36,32 @@ from PySide6.QtWidgets import (
 from ....core._colors import parse_hex
 from ....core.commands import (
     ConfigureSlideshow,
+    ControlCenterSnapshot,
     EnableOverlay,
     LcdSnapshot,
     ListLanguages,
     SetBackgroundMode,
     SetDateFormat,
     SetFitMode,
+    SetKeepaliveInterval,
     SetLanguage,
     SetOverlayBackground,
     SetRefreshInterval,
     SetSlideshow,
     SetSplitMode,
+    SetStaticBackground,
     SetTempUnit,
     SetTimeFormat,
     StartSlideshowDriver,
     StopSlideshowDriver,
 )
-from ....core.models import MAX_REFRESH_INTERVAL_S, MIN_REFRESH_INTERVAL_S
+from ....core.models import (
+    DEFAULT_KEEPALIVE_INTERVAL_S,
+    MAX_KEEPALIVE_INTERVAL_S,
+    MAX_REFRESH_INTERVAL_S,
+    MIN_KEEPALIVE_INTERVAL_S,
+    MIN_REFRESH_INTERVAL_S,
+)
 from ..base import BasePanel
 from ..device_picker import DevicePickerWidget
 
@@ -102,9 +112,12 @@ class ConfigurationPanel(BasePanel):
         self._overlay.addItem("On",  userData=True)
         self._overlay.addItem("Off", userData=False)
 
+        self._static = QCheckBox("Static background (no video)", display_box)
+
         display_form.addRow("Fit mode:", self._fit)
         display_form.addRow("Split mode:", self._split)
         display_form.addRow("Metric overlay:", self._overlay)
+        display_form.addRow("", self._static)
 
         # ── Background group ──
         bg_box = QGroupBox("Background", self)
@@ -162,6 +175,14 @@ class ConfigurationPanel(BasePanel):
         self._refresh.setValue(5.0)
         self._refresh.setSuffix(" s")
 
+        self._keepalive = QDoubleSpinBox(app_box)
+        self._keepalive.setRange(
+            MIN_KEEPALIVE_INTERVAL_S, MAX_KEEPALIVE_INTERVAL_S,
+        )
+        self._keepalive.setSingleStep(0.05)
+        self._keepalive.setValue(DEFAULT_KEEPALIVE_INTERVAL_S)
+        self._keepalive.setSuffix(" s")
+
         self._clock = QComboBox(app_box)
         self._clock.addItem("24-hour", userData="24h")
         self._clock.addItem("12-hour", userData="12h")
@@ -172,6 +193,7 @@ class ConfigurationPanel(BasePanel):
         app_form.addRow("Temperature unit:", self._temp_unit)
         app_form.addRow("Language:", self._language)
         app_form.addRow("Refresh interval:", self._refresh)
+        app_form.addRow("Keepalive interval:", self._keepalive)
         app_form.addRow("LCD clock format:", self._clock)
 
         # EDITABLE, because the pattern language is open: four tokens
@@ -188,6 +210,7 @@ class ConfigurationPanel(BasePanel):
         app_form.addRow("", self._app_apply_btn)
 
         self._populate_languages()
+        self._load_app_settings()
 
         # ── Apply ──
         self._apply_btn = QPushButton("Apply all settings", self)
@@ -231,19 +254,28 @@ class ConfigurationPanel(BasePanel):
                 f"{entry.name} ({entry.code})", userData=entry.code,
             )
 
+    def _load_app_settings(self) -> None:
+        snap = self.dispatch(ControlCenterSnapshot())
+        self._keepalive.setValue(float(snap.keepalive_interval_s))
+        log.debug("_load_app_settings: keepalive=%.2fs", snap.keepalive_interval_s)
+
     def _apply_app_settings(self) -> None:
         """Apply the device-independent app settings (no device key needed)."""
         lang = self._language.currentData()
         log.info(
-            "_apply_app_settings: temp=%s lang=%s refresh=%.1f clock=%s",
+            "_apply_app_settings: temp=%s lang=%s refresh=%.1f keepalive=%.2f "
+            "clock=%s",
             self._temp_unit.currentData(), lang,
-            self._refresh.value(), self._clock.currentData(),
+            self._refresh.value(), self._keepalive.value(),
+            self._clock.currentData(),
         )
         messages = [
             self.dispatch(SetTempUnit(
                 unit=str(self._temp_unit.currentData()))).message,
             self.dispatch(SetRefreshInterval(
                 seconds=float(self._refresh.value()))).message,
+            self.dispatch(SetKeepaliveInterval(
+                seconds=float(self._keepalive.value()))).message,
             self.dispatch(SetTimeFormat(
                 fmt=str(self._clock.currentData()))).message,
             # currentText, not currentData: the box is editable, so a pattern
@@ -279,6 +311,7 @@ class ConfigurationPanel(BasePanel):
         self._select_combo_by_data(self._split, snap.split_mode)
         self._select_combo_by_data(self._overlay, snap.overlay_enabled)
         self._select_combo_by_data(self._bg_mode, snap.background_mode)
+        self._static.setChecked(bool(snap.static_background))
         r, g, b = snap.overlay_background
         self._bg_color = f"#{r:02x}{g:02x}{b:02x}"
         self._bg_color_label.setText(self._bg_color)
@@ -330,6 +363,12 @@ class ConfigurationPanel(BasePanel):
             key=key, mode=str(self._bg_mode.currentData()),
         ))
         messages.append(r4.message)
+
+        # Static background
+        r8 = self.dispatch(SetStaticBackground(
+            key=key, enabled=self._static.isChecked(),
+        ))
+        messages.append(r8.message)
 
         # Background color
         rgb = _hex_to_rgb(self._bg_color)

@@ -4,7 +4,7 @@
 
 Every capability in TRCC, as the one surface all four UIs dispatch against. A new UI — a browser client, a VR panel, a TUI — needs only this page and an event subscription; it never imports a service or an adapter.
 
-**144 total: 106 Commands and 38 Queries.** A *Query* is a read and nothing else, which is why it is named separately — a missing read should be obvious rather than archaeological.
+**146 total: 108 Commands and 38 Queries.** A *Query* is a read and nothing else, which is why it is named separately — a missing read should be obvious rather than archaeological.
 
 ## Dispatching one
 
@@ -491,6 +491,17 @@ Set the Dynamic Island style for widescreen panels.
 | `key` | `str` | yes |
 | `mode` | `int` | yes |
 
+### `SetStaticBackground`
+
+Never wire a moving background for this device.
+
+*Command* → `StaticBackgroundResult`
+
+| Field | Type | Required |
+|---|---|---|
+| `key` | `str` | yes |
+| `enabled` | `bool` | yes |
+
 ### `SleepDevice`
 
 Blank a connected panel so it goes dark on shutdown / quit (#143).
@@ -798,6 +809,7 @@ Download a cloud video and apply it as the device's background.
 |---|---|---|
 | `key` | `str` | yes |
 | `theme_id` | `str` | yes |
+| `static` | `bool` | no |
 
 ### `LoadImage`
 
@@ -1471,6 +1483,16 @@ Pick the primary GPU by sensor key (e.g. 'nvidia:0', 'amd:0').
 | Field | Type | Required |
 |---|---|---|
 | `gpu_key` | `str` | yes |
+
+### `SetKeepaliveInterval`
+
+Set the resend cadence for "volatile" wires — firmware that falls back to its own boot logo when the frame stream stops (``DeviceQuirks.keepalive_stream``).
+
+*Command* → `KeepaliveIntervalResult`
+
+| Field | Type | Required |
+|---|---|---|
+| `seconds` | `float` | yes |
 
 ### `SetLanguage`
 

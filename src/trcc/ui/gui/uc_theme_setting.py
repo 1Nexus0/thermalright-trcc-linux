@@ -21,13 +21,15 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QStackedWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QPushButton, QStackedWidget
 
 from ...core.models import OverlayElementConfig, OverlayMode
+from .assets import Assets
 from .base import BasePanel
 from .color_and_add_panels import AddElementPanel, ColorPickerPanel
-from .constants import Layout, Sizes
+from .constants import Layout, Sizes, Styles
 from .display_mode_panels import (
     DataTablePanel,
     DisplayModePanel,
@@ -75,6 +77,7 @@ class UCThemeSetting(BasePanel):
     CMD_MASK_CLOUD = 99  # C# buttonYDMB_Click — navigate to cloud masks panel
     CMD_MASK_POSITION = 100
     CMD_MASK_VISIBILITY = 101
+    CMD_STATIC_BACKGROUND = 102
     CMD_VIDEO_LOAD = 10
     CMD_OVERLAY_CHANGED = 128
     CMD_EYEDROPPER = 112  # Matches Windows cmd for FormGetColor
@@ -148,6 +151,22 @@ class UCThemeSetting(BasePanel):
         self.background_panel.move(*Layout.BG_PANEL)
         self.background_panel.mode_changed.connect(self._on_mode_changed)
         self.background_panel.action_requested.connect(self._on_action_requested)
+
+        self.static_bg_btn = QPushButton(self.background_panel)
+        self.static_bg_btn.setGeometry(*Layout.BG_STATIC_CHECKBOX)
+        self.static_bg_btn.setFlat(True)
+        self.static_bg_btn.setCheckable(True)
+        self.static_bg_btn.setStyleSheet(Styles.FLAT_BUTTON)
+        self.static_bg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.static_bg_btn.setToolTip("Static background (still frame instead of video)")
+        cb_off = Assets.load_pixmap(Assets.CHECKBOX_OFF, *Layout.BG_STATIC_CHECKBOX[2:])
+        cb_on = Assets.load_pixmap(Assets.CHECKBOX_ON, *Layout.BG_STATIC_CHECKBOX[2:])
+        if not cb_off.isNull() and not cb_on.isNull():
+            icon = QIcon(cb_off)
+            icon.addPixmap(cb_on, QIcon.Mode.Normal, QIcon.State.On)
+            self.static_bg_btn.setIcon(icon)
+            self.static_bg_btn.setIconSize(self.static_bg_btn.size())
+        self.static_bg_btn.clicked.connect(self._on_static_background)
 
         self.screencast_panel = ScreenCastPanel(self)
         self.screencast_panel.move(*Layout.SCREENCAST_PANEL)
@@ -317,6 +336,10 @@ class UCThemeSetting(BasePanel):
         log.info("_on_mask_visibility: visible=%s", visible)
         self.invoke_delegate(self.CMD_MASK_VISIBILITY, visible)
 
+    def _on_static_background(self, checked):
+        log.info("_on_static_background: enabled=%s", checked)
+        self.invoke_delegate(self.CMD_STATIC_BACKGROUND, checked)
+
     def _on_action_requested(self, action_name):
         log.info("_on_action_requested: action_name=%s", action_name)
         action_map = {
@@ -354,6 +377,12 @@ class UCThemeSetting(BasePanel):
     def set_mask_visible(self, visible: bool):
         """Update mask panel eye toggle state."""
         self.mask_panel.set_mask_visible(visible)
+
+    def set_static_background(self, enabled: bool):
+        log.debug("set_static_background: %s", enabled)
+        self.static_bg_btn.blockSignals(True)
+        self.static_bg_btn.setChecked(enabled)
+        self.static_bg_btn.blockSignals(False)
 
     def set_resolution(self, width: int, height: int):
         """Delegate resolution to screencast panel."""

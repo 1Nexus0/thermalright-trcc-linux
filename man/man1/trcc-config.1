@@ -63,6 +63,25 @@ Options:
 \fB\-\-help\fR
 Show this command's help and exit.
 .RE
+.SS keepalive\-interval
+.PP
+\fBtrcc config keepalive\-interval\fR \fISECONDS\fR
+.PP
+Set how often an unchanged frame is resent to firmware that blanks. Only "volatile" wires resend an unchanged frame at all  \-  firmware that falls back to its own boot logo when the stream stops (this panel's fingerprint included). Raising the cadence cuts idle CPU and USB traffic proportionally; lower it again if the panel flickers. Applies when a device is next attached.
+.PP
+Arguments:
+.RS 4
+.TP
+\fBSECONDS\fR
+Seconds between keepalive resends (0.05 to 2)
+.RE
+.PP
+Options:
+.RS 4
+.TP
+\fB\-\-help\fR
+Show this command's help and exit.
+.RE
 .SS language
 .PP
 \fBtrcc config language\fR \fILANG\fR

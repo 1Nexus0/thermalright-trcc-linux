@@ -47,6 +47,7 @@ from ...core.commands import (
     SetOverlayBackground,
     SetSlideshow,
     SetSplitMode,
+    SetStaticBackground,
     SleepDevice,
     StartScreencast,
     StartScreencastDriver,
@@ -1000,6 +1001,27 @@ def background_mode(
     """Pick what fills the LCD behind overlays."""
     log.info("cli display background-mode: key=%s mode=%s", key, mode)
     dispatch_echo(SetBackgroundMode(key=key, mode=mode.lower()))
+
+
+@app.command("static-background")
+def static_background(
+    key: str = typer.Argument(..., help="Device key, e.g. 0402:3922"),
+    state: str = typer.Argument(..., help="'on' (stills only) / 'off'"),
+) -> None:
+    """Stop playing video backgrounds on this device.
+
+    Every video background — theme-bundled, cloud, or an override — renders as
+    the still frame written beside it, so the render loop keeps
+    ``refresh_interval_s`` instead of the video's frame rate.  Same picture for
+    a fraction of the CPU.
+    """
+    log.info("cli display static-background: key=%s state=%s", key, state)
+    if state.lower() not in ("on", "off"):
+        raise typer.BadParameter(f"state must be 'on' or 'off', got {state!r}")
+    # Turning it on stops the playback and clears a video override, so it
+    # touches the wire — attach first (idempotent when a daemon/GUI holds it).
+    ensure_connected(get_app(), key)
+    dispatch_echo(SetStaticBackground(key=key, enabled=state.lower() == "on"))
 
 
 @app.command("overlay-background")

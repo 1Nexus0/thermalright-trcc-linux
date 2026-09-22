@@ -127,6 +127,18 @@ MAX_REFRESH_INTERVAL_S: float = 100.0
 #: exception.
 DEFAULT_REFRESH_INTERVAL_S: float = 2.0
 
+# Resend bounds for "volatile" wires — firmware that falls back to its own boot
+# logo when the frame stream stops (``DeviceQuirks.keepalive_stream``; this
+# panel's 0416:5302/fw-4.07 fingerprint included).  The default is the
+# vendor-parity cadence, an order of magnitude below the ~2-3 s revert window;
+# the ceiling keeps a user-set value inside that window.  Raising it towards the
+# ceiling cuts idle CPU and USB traffic proportionally — 1.0 s measured clean on
+# the HID unit (#228 fingerprints), and a panel that flickers at a slower
+# cadence is simply one whose window is shorter.
+DEFAULT_KEEPALIVE_INTERVAL_S: float = 0.150
+MIN_KEEPALIVE_INTERVAL_S: float = 0.05
+MAX_KEEPALIVE_INTERVAL_S: float = 2.0
+
 
 def parse_resolution(resolution: str) -> tuple[int, int]:
     """Parse a ``"320x320"`` resolution string into ``(width, height)``.
@@ -676,6 +688,13 @@ class DeviceSettings:
     # Set by LoadCloudTheme, cleared by LoadTheme (picking a local
     # theme reverts to its own background).  Survives app restart.
     background_path: str | None = None
+    # Never wire a moving background: every video (theme-bundled, cloud, or an
+    # explicit override) is replaced by the still frame written beside it, so
+    # the render loop stays at ``refresh_interval_s`` instead of video rate —
+    # a 1280×480 video background costs a decode + JPEG encode per tick (~24 ms
+    # at 12 fps ≈ 30% of one core; the still is ~3%).  Off by default: the
+    # vendor catalog is video-first and the port mirrors that.
+    static_background: bool = False
     # Active screencast region (x, y, w, h, audio) — the display source when the
     # screencast toggle is on.  ``None`` = not screencasting.  Persisted like
     # ``background_path`` so SaveTheme can bake it into a theme's ``screencast``

@@ -269,6 +269,18 @@ trcc config gpu [KEY]
 |---|---|
 | `KEY` | GPU sensor key (e.g. 'nvidia:0') or '' to clear *(optional)* |
 
+### `trcc config keepalive-interval`
+
+Set how often an unchanged frame is resent to firmware that blanks. Only "volatile" wires resend an unchanged frame at all — firmware that falls back to its own boot logo when the stream stops (this panel's fingerprint included). Raising the cadence cuts idle CPU and USB traffic proportionally; lower it again if the panel flickers. Applies when a device is next attached.
+
+```bash
+trcc config keepalive-interval SECONDS
+```
+
+| Argument | Description |
+|---|---|
+| `SECONDS` | Seconds between keepalive resends (0.05 to 2) |
+
 ### `trcc config language`
 
 Set the UI language.
@@ -997,6 +1009,19 @@ trcc display split-mode KEY MODE
 |---|---|
 | `KEY` | Device key, e.g. 0402:3922 |
 | `MODE` | 0 (off), 1 (style A), 2 (B), 3 (C) |
+
+### `trcc display static-background`
+
+Stop playing video backgrounds on this device. Every video background — theme-bundled, cloud, or an override — renders as the still frame written beside it, so the render loop keeps `refresh_interval_s` instead of the video's frame rate. Same picture for a fraction of the CPU.
+
+```bash
+trcc display static-background KEY STATE
+```
+
+| Argument | Description |
+|---|---|
+| `KEY` | Device key, e.g. 0402:3922 |
+| `STATE` | 'on' (stills only) / 'off' |
 
 ### `trcc display stop-screencast`
 
@@ -1821,13 +1846,17 @@ trcc theme cloud-list [OPTIONS]
 Download a cloud theme and load it on a device.
 
 ```bash
-trcc theme cloud-load KEY THEME_ID
+trcc theme cloud-load [OPTIONS] KEY THEME_ID
 ```
 
 | Argument | Description |
 |---|---|
 | `KEY` | Device key, e.g. 0402:3922 |
 | `THEME_ID` | Cloud theme id, e.g. a001 |
+
+| Option | Description |
+|---|---|
+| `--static` | Install the theme's first-frame PNG instead of playing the video: same picture, no per-tick decode+encode. |
 
 ### `trcc theme create`
 

@@ -847,6 +847,7 @@ class App:
             self.stop_sender(key)
         sender = DeviceSender(
             device, volatile=device.needs_keepalive,
+            keepalive_interval=self.settings.app.keepalive_interval_s,
             on_failure=self._on_sender_failure,
         )
         self.senders[key] = sender

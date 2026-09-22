@@ -662,6 +662,20 @@ def test_display_snapshot(api_client: TestClient) -> None:
     body = resp.json()
     assert body["ok"] is True
     assert body["key"] == "0402:3922"
+    assert body["static_background"] is False
+
+
+def test_display_set_static_background(api_client: TestClient) -> None:
+    """A UI checkbox needs the flag to read back, not just to be writable."""
+    resp = api_client.post(
+        "/devices/0402:3922/display/static-background", json={"enabled": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["enabled"] is True
+    snapshot = api_client.get("/devices/0402:3922/display/snapshot").json()
+    assert snapshot["static_background"] is True
 
 
 def test_display_restore_theme_no_persisted(api_client: TestClient) -> None:
@@ -716,6 +730,7 @@ def test_system_snapshot(api_client: TestClient) -> None:
     assert body["ok"] is True
     assert "language" in body
     assert "refresh_interval_s" in body
+    assert "keepalive_interval_s" in body
 
 
 # --- Tier 2 -----------------------------------------------------------------
@@ -1197,6 +1212,26 @@ def test_config_set_refresh_interval_round_trips(api_client: TestClient) -> None
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
+
+
+def test_config_set_keepalive_interval_round_trips(api_client: TestClient) -> None:
+    resp = api_client.post(
+        "/config/keepalive-interval", json={"seconds": 1.0},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["seconds"] == 1.0
+
+
+def test_config_set_keepalive_interval_rejects_out_of_range(
+    api_client: TestClient,
+) -> None:
+    """The ceiling is the firmware-revert window, not a taste call."""
+    resp = api_client.post(
+        "/config/keepalive-interval", json={"seconds": 9.0},
+    )
+    assert resp.status_code == 422  # Pydantic bound validation
 
 
 def test_config_set_time_format_round_trips(api_client: TestClient) -> None:
