@@ -270,6 +270,19 @@ def _invalidate_scene(app: App, key: str) -> None:
         app.display.invalidate(key)
 
 
+def _rendered_surface(app: App, key: str) -> Any | None:
+    """The surface the display last parked for *key*; None with no renderer.
+
+    ``_invalidate_scene``'s sibling, and the same seam for the same reason:
+    with no Renderer attached nothing was ever rendered, and ``app.display``
+    would raise rather than answer.
+    """
+    log.debug("_rendered_surface: key=%s", key)
+    if app._renderer is None:  # pyright: ignore[reportPrivateUsage]
+        return None
+    return app.display.rendered_surface(key)
+
+
 def _resolve_resolution(app: App, key: str) -> tuple[int, int] | None:
     """Best-effort resolution lookup from a device key.
 

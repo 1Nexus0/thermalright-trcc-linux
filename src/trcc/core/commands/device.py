@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
@@ -99,6 +101,7 @@ from ._helpers import (
     _element_to_entry,
     _invalidate_scene,
     _publish_if_disconnect,
+    _rendered_surface,
     _require_connected_device,
     _resolve_mask_path,
     native_canvas,
@@ -646,10 +649,17 @@ class SendImage(Command[SendResult]):
     Distinct from :class:`LoadImage` — that materialises a single-image
     theme directory under ``user_content_dir/single-image/`` and
     updates ``DeviceSettings.current_theme``.  ``SendImage`` is the
-    no-persist variant: open, resize, encode, send — once, no theme,
-    no settings mutation.  Used by API/CLI ``send-image`` uploads where
-    the caller wants ephemeral display (boot logos, splash screens,
-    quick previews).
+    no-persist variant: nothing written to disk, no settings mutation.
+    Dispatched by CLI ``display send-image`` and API ``/send-image``.
+
+    **The push takes the panel over until the next theme load.**  Sending
+    once was not enough: the active theme re-rendered on the next sensor
+    tick (~2 s) and painted over the pushed frame (#306).  So the device's
+    active theme is dropped and any video stopped — both IN MEMORY; the
+    saved theme and background stay, and a restart, ``LoadTheme`` or
+    ``RestoreDeviceState`` brings them back.  Keepalive resends the pushed
+    frame, and :class:`BuildPreview` shows it.  A screencast is refused
+    rather than stopped: stopping one clears its saved region.
 
     Acceptable extensions: PNG / JPG / JPEG / BMP / WEBP.  Honors
     per-device brightness + orientation + device-side rotation via
@@ -678,6 +688,22 @@ class SendImage(Command[SendResult]):
         except (DeviceNotFoundError, DeviceNotConnectedError) as e:
             return SendResult(ok=False, key=self.key, bytes_sent=0,
                               connected=False, message=str(e))
+        if app.settings.for_device(self.key).screencast_region is not None:
+            log.warning("SendImage: %s is screencasting — push refused",
+                        self.key)
+            return SendResult(
+                ok=False, key=self.key, bytes_sent=0, connected=True,
+                message=f"A screencast owns {self.key} — stop it first",
+            )
+
+        # Take the panel over BEFORE building: StopVideo wipes the scene cache
+        # the build remembers its preview in.  And theme before video:
+        # StopVideo publishes VideoStopped, which the render observer turns
+        # into a theme render — one wasted frame flashed ahead of this push.
+        paused = app.active_themes.pop(self.key, None)
+        app.dispatch(StopVideo(key=self.key, keep_override=True))
+        log.info("SendImage: %s taken over (theme paused: %s)", self.key,
+                 paused.name if paused is not None else "none active")
 
         try:
             frame = app.display.build_image_frame(
@@ -697,7 +723,10 @@ class SendImage(Command[SendResult]):
 
         bytes_sent = len(frame) if ok else 0
         if ok:
-            app.events.publish(FrameSent(key=self.key, bytes_sent=bytes_sent))
+            app.events.publish(FrameSent(
+                key=self.key, bytes_sent=bytes_sent,
+                surface=app.display.rendered_surface(self.key),
+            ))
         return SendResult(
             ok=ok, key=self.key, bytes_sent=bytes_sent, connected=True,
             message=(f"Sent {bytes_sent} bytes from {self.path.name}"
@@ -931,11 +960,19 @@ class BuildPreview(Query[PreviewResult]):
 
         theme = app.active_themes.get(self.key)
         if theme is None:
-            log.debug("BuildPreview: %s has no active theme", self.key)
-            return PreviewResult(
-                ok=True, key=self.key,
-                message="No active theme — nothing to preview",
-            )
+            # No theme renders here — but a SendImage push may own the panel,
+            # and then its frame IS the preview (#306).
+            pushed = _rendered_surface(app, self.key)
+            if pushed is None:
+                log.debug("BuildPreview: %s has no active theme", self.key)
+                return PreviewResult(
+                    ok=True, key=self.key,
+                    message="No active theme — nothing to preview",
+                )
+            log.debug("BuildPreview: %s has no active theme — previewing "
+                      "the pushed image", self.key)
+            return self._finish(app, partial(_rendered_surface, app, self.key),
+                                "")
 
         # Same personalization the wire path applies (RenderAndSend, and
         # SaveTheme when it snapshots the thumbnail): sources deliver °C and
@@ -947,12 +984,24 @@ class BuildPreview(Query[PreviewResult]):
             temp_unit=s.temp_unit,
             hdd_enabled=s.hdd_enabled,
         )
+        return self._finish(app, partial(
+            app.display.build_preview_surface,
+            info=device.info, theme=theme, sensors=sensors,
+            profile=device.profile,
+        ), theme.name)
 
+    def _finish(self, app: App, build: Callable[[], Any],
+                theme_name: str) -> PreviewResult:
+        """Build the surface, then encode + sample it into the Result.
+
+        One tail for both sources — the active theme's render and a pushed
+        image — so they cannot answer in different shapes.  An empty
+        *theme_name* is the pushed image.
+        """
+        label = theme_name or "the pushed image"
+        log.debug("BuildPreview %s: finishing a preview of %s", self.key, label)
         try:
-            surface = app.display.build_preview_surface(
-                info=device.info, theme=theme, sensors=sensors,
-                profile=device.profile,
-            )
+            surface = build()
             width, height = app.renderer.surface_size(surface)
             image, media_type = self._encode(app, surface)
             pixels = self._sample(app, surface, width, height)
@@ -965,22 +1014,22 @@ class BuildPreview(Query[PreviewResult]):
             log.warning("BuildPreview %s: render raised — %s: %s",
                         self.key, type(e).__name__, e)
             return PreviewResult(
-                ok=False, key=self.key, theme_name=theme.name,
+                ok=False, key=self.key, theme_name=theme_name,
                 message=f"Preview render failed — {type(e).__name__}: {e}",
             )
 
         log.debug(
             "BuildPreview %s: theme=%s %dx%d encode=%s bytes=%d grid=%s",
-            self.key, theme.name, width, height,
+            self.key, label, width, height,
             self.encode or "none", len(image),
             f"{self.sample_cols}x{len(pixels)}" if pixels else "none",
         )
         return PreviewResult(
             ok=True, key=self.key, surface=surface,
             image=image, media_type=media_type,
-            width=width, height=height, theme_name=theme.name,
+            width=width, height=height, theme_name=theme_name,
             pixels=pixels,
-            message=f"Preview {width}x{height} of {theme.name}",
+            message=f"Preview {width}x{height} of {label}",
         )
 
     def _encode(self, app: App, surface: Any) -> tuple[bytes, str]:

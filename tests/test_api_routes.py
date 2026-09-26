@@ -1543,17 +1543,37 @@ def test_device_reset_route_exists(api_client: TestClient) -> None:
     assert "Not Found" not in resp.text or resp.status_code == 404
 
 
-def test_push_image_is_distinct_from_send_image(api_client: TestClient) -> None:
-    """``/push-image`` (ephemeral) must not have replaced ``/send-image``.
+def test_send_image_keeps_nothing_on_disk(tmp_path: Path) -> None:
+    """#306: every upload became a saved theme and left two files behind —
+    ``uploads/<uuid>.png`` and ``single-image/<uuid>/`` — forever.  A status
+    dashboard pushing on every change wrote 305,810 pairs (26 GB) in 11 days.
 
-    ``/send-image`` takes a multipart upload and dispatches ``LoadImage``,
-    which STAGES a theme; ``/push-image`` dispatches ``SendImage``, which does
-    not.  Both must exist — collapsing them would silently change what a
-    client's existing call does.
+    Driven through the real route against a real panel, three times, because
+    a leak only shows across calls.  ``/push-image`` went in the same change:
+    the same job from a server path nothing confined.
     """
-    schema = api_client.get("/openapi.json").json()["paths"]
-    assert "/devices/{key}/display/send-image" in schema
-    assert "/devices/{key}/display/push-image" in schema
+    from trcc.adapters.render.qt import QtRenderer
+    from trcc.ui.api.main import build_app
+
+    from .mock_platform import MockPlatform
+
+    renderer = QtRenderer()
+    png = renderer.encode_png(renderer.create_surface(64, 64, color=(0, 0, 255, 255)))
+    trcc = App(MockPlatform([{"vid": "0402", "pid": "3922"}], tmp_path),
+               renderer=renderer)
+    with TestClient(build_app(trcc=trcc)) as client:
+        for _ in range(3):
+            resp = client.post("/devices/0402:3922/display/send-image",
+                               files={"image": ("frame.png", png, "image/png")})
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["ok"] is True
+        schema = client.get("/openapi.json").json()["paths"]
+
+    content = trcc.platform.paths().user_content_dir()
+    assert list((content / "uploads").iterdir()) == []
+    assert not (content / "single-image").exists()
+    assert trcc.settings.for_device("0402:3922").current_theme is None
+    assert "/devices/{key}/display/push-image" not in schema
 
 
 def test_new_capability_routes_are_registered(api_client: TestClient) -> None:
@@ -1561,7 +1581,6 @@ def test_new_capability_routes_are_registered(api_client: TestClient) -> None:
     schema = api_client.get("/openapi.json").json()["paths"]
     for route in (
         "/devices/{key}/display/background",        # SetBackground
-        "/devices/{key}/display/push-image",        # SendImage
         "/devices/{key}/display/render-dc",         # RenderDcStandalone
         "/devices/{key}/display/slideshow/drive",   # Start/StopSlideshowDriver
         "/devices/{key}/led/zone-sync-zones",       # SetLedZoneSyncZones

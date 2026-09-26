@@ -14,9 +14,11 @@ import pytest
 
 from trcc.adapters.render.qt import QtRenderer
 from trcc.app import App
-from trcc.core.commands import BuildPreview, ConnectDevice
+from trcc.core.commands import BuildPreview, ConnectDevice, LoadImage, SendImage
+from trcc.core.events import SensorsUpdated
 from trcc.core.models import Theme
 from trcc.services.display import DisplayService
+from trcc.services.media import Playback
 
 from .mock_platform import MockPlatform
 
@@ -198,3 +200,110 @@ def test_result_survives_the_ipc_boundary_with_bytes_intact(
     assert back.image == r.image           # bytes round-trip base64
     assert back.pixels == r.pixels         # grid round-trips as tuples
     assert (back.width, back.height) == (854, 480)
+
+
+# ── A pushed image owns the panel until the next theme load (#306) ──────
+
+_RED, _BLUE = (255, 0, 0), (0, 0, 255)
+
+
+def _png(tmp_path: Path, name: str, rgb: tuple[int, int, int]) -> Path:
+    renderer = QtRenderer()
+    path = tmp_path / name
+    path.write_bytes(renderer.encode_png(
+        renderer.create_surface(64, 64, color=(*rgb, 255))))
+    return path
+
+
+def _wire(app: App, monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
+    """Every frame the app writes from here on."""
+    sent: list[bytes] = []
+    real = app.send
+
+    def spy(key: str, payload: Any, **kw: Any) -> bool:
+        sent.append(bytes(payload))
+        return real(key, payload, **kw)
+
+    monkeypatch.setattr(app, "send", spy)
+    return sent
+
+
+def _push(app: App, tmp_path: Path) -> None:
+    """A real theme on the panel, then a blue push over it."""
+    assert app.dispatch(LoadImage(key=_KEY, path=_png(tmp_path, "r.png", _RED))).ok
+    assert app.dispatch(SendImage(key=_KEY, path=_png(tmp_path, "b.png", _BLUE))).ok
+
+
+def test_a_push_survives_the_next_sensor_tick(
+    app: App, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The theme re-rendered on the next ``SensorsUpdated`` and painted over the
+    push within ~2 s, so the "ephemeral" send lasted one sensor interval."""
+    _push(app, tmp_path)
+    sent = _wire(app, monkeypatch)
+
+    app.events.publish(SensorsUpdated(readings={}))
+
+    assert sent == []
+    assert _KEY not in app.active_themes
+
+
+def test_the_preview_shows_the_pushed_image(app: App, tmp_path: Path) -> None:
+    _push(app, tmp_path)
+
+    r = app.dispatch(BuildPreview(key=_KEY, encode="png", sample_cols=8))
+
+    assert r.ok is True
+    assert r.image
+    assert r.theme_name == ""
+    assert r.message == "Preview 854x480 of the pushed image"
+    assert {px for row in r.pixels for px in row} == {_BLUE}
+
+
+def test_the_next_theme_load_takes_the_panel_back(
+    app: App, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _push(app, tmp_path)
+    assert app.dispatch(LoadImage(key=_KEY, path=_png(tmp_path, "r.png", _RED))).ok
+    sent = _wire(app, monkeypatch)
+
+    app.events.publish(SensorsUpdated(readings={}))
+
+    assert len(sent) == 1
+
+
+def test_a_push_is_refused_while_a_screencast_owns_the_panel(
+    app: App, tmp_path: Path,
+) -> None:
+    """Refused, not stopped: stopping a screencast clears its SAVED region."""
+    assert app.dispatch(LoadImage(key=_KEY, path=_png(tmp_path, "r.png", _RED))).ok
+    region = (0, 0, 100, 100, False)
+    app.settings.set_screencast_region(_KEY, region)
+
+    r = app.dispatch(SendImage(key=_KEY, path=_png(tmp_path, "b.png", _BLUE)))
+
+    assert r.ok is False
+    assert r.message == f"A screencast owns {_KEY} — stop it first"
+    assert app.settings.for_device(_KEY).screencast_region == region
+    assert _KEY in app.active_themes
+
+
+def test_a_push_stops_a_video_and_keeps_the_saved_background(
+    app: App, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The video would paint over the push at its own fps; the saved
+    background stays, so a restart brings it back.  And the push writes ONE
+    frame: stopping the video first, with the theme still active, would flash
+    a theme render ahead of it."""
+    assert app.dispatch(LoadImage(key=_KEY, path=_png(tmp_path, "r.png", _RED))).ok
+    saved = str(tmp_path / "bg.mp4")
+    frame = QtRenderer().encode_png(QtRenderer().create_surface(8, 8))
+    app.media._playbacks[_KEY] = Playback(frames=[frame], fps=15)
+    app.settings.set_background_path(_KEY, saved)
+    sent = _wire(app, monkeypatch)
+
+    assert app.dispatch(SendImage(key=_KEY, path=_png(tmp_path, "b.png", _BLUE))).ok
+
+    assert len(sent) == 1
+    assert app.media.playback(_KEY) is None
+    assert app.settings.for_device(_KEY).background_path == saved

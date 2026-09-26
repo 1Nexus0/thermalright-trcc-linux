@@ -746,6 +746,10 @@ class DisplayService:
         surface = self._r.open_image(path)
         if self._r.surface_size(surface) != (target_w, target_h):
             surface = self._r.resize(surface, target_w, target_h)
+        # The pushed image IS the panel now (SendImage drops the active theme),
+        # so the preview is this surface — parked where the screencast frame
+        # parks its own, before the wire-only brightness and rotation.
+        self._remember_preview(info.key, surface)
 
         s = self._settings.for_device(info.key)
         surface = self._apply_post_processing(surface, s, resolved)

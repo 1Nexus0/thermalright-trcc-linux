@@ -145,7 +145,6 @@ from .schemas import (
     RenderDcRequest,
     ScreencastStartRequest,
     SeekVideoRequest,
-    SendImageRequest,
     SlideshowConfigureRequest,
     SlideshowDriveRequest,
     SlideshowToggleRequest,
@@ -449,22 +448,25 @@ def video_status(key: str, request: Request) -> VideoStatusResponse:
     )
 
 
-@router.post("/send-image", response_model=ThemeResponse)
+@router.post("/send-image", response_model=ThemeResponse,
+             dependencies=[Depends(ensure_connected)])
 async def send_image(
     key: str,
     request: Request,
     image: UploadFile = File(...),
 ) -> ThemeResponse:
-    """One-shot image-to-LCD via multipart upload.
+    """Show an uploaded image on the LCD until the next theme load.
 
-    Remote clients (web dashboard, mobile app) that have an image in
-    memory rather than on the server's filesystem can use this instead
-    of ``POST /devices/{key}/display/theme`` (which requires the file
-    to already exist server-side).  Stages the upload to
-    ``user_content_dir/uploads/`` then dispatches ``LoadImage``.
+    The client sends the bytes, so no server path is ever named.  Stages the
+    upload, dispatches ``SendImage`` — the same Command as CLI ``display
+    send-image`` — and deletes the staged file: nothing is kept.
 
-    Supported formats: PNG / JPG / JPEG / BMP / WEBP — matches
-    :class:`LoadImage`.
+    It dispatched ``LoadImage`` until #306, which made every upload a saved
+    theme and left two files per call on disk forever; a dashboard pushing
+    on every change filled a partition.  ``/push-image`` went at the same
+    time: it did the same job from a server path that nothing confined.
+
+    Supported formats: PNG / JPG / JPEG / BMP / WEBP.
     """
     log.info(
         "api POST /devices/{key}/display/send-image: key=%s filename=%s",
@@ -479,13 +481,17 @@ async def send_image(
             f"{sorted(_CREATE_THEME_IMG_EXTS)}",
         )
     staged = uploads_dir / f"{uuid.uuid4().hex}{suffix}"
-    with staged.open("wb") as f:
-        shutil.copyfileobj(image.file, f)
-    result = request.app.state.trcc.dispatch(
-        LoadImage(key=key, path=staged),
-    )
+    try:
+        with staged.open("wb") as f:
+            shutil.copyfileobj(image.file, f)
+        result = request.app.state.trcc.dispatch(
+            SendImage(key=key, path=staged),
+        )
+    finally:
+        staged.unlink(missing_ok=True)
+        log.debug("send-image: removed staged %s", staged.name)
     http_error_if_failed(result)
-    return to_theme_response(result)
+    return ThemeResponse(ok=result.ok, message=result.message, key=result.key)
 
 
 @router.websocket("/preview/stream")
@@ -957,27 +963,6 @@ def background(key: str, body: BackgroundFileRequest,
              key, body.path)
     result = request.app.state.trcc.dispatch(
         SetBackground(key=key, path=Path(body.path)),
-    )
-    http_error_if_failed(result)
-    return result
-
-
-@router.post("/push-image", dependencies=[Depends(ensure_connected)])
-def push_image(key: str, body: SendImageRequest,
-               request: Request) -> SendResult:
-    """Push a server-side image to the panel ONCE — nothing staged or persisted.
-
-    **Not** ``/send-image``, despite the names.  That route takes a multipart
-    upload and dispatches ``LoadImage``, which materialises a single-image theme
-    and updates ``DeviceSettings.current_theme``; its name predates the
-    distinction and is kept because renaming it would break clients.  This
-    dispatches ``SendImage``: open, resize, encode, send, once — the ephemeral
-    path the CLI has had all along and REST did not.
-    """
-    log.info("api POST /devices/{key}/display/push-image: key=%s path=%s",
-             key, body.path)
-    result = request.app.state.trcc.dispatch(
-        SendImage(key=key, path=Path(body.path)),
     )
     http_error_if_failed(result)
     return result

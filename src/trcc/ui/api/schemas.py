@@ -254,11 +254,6 @@ class BackgroundFileRequest(BaseModel):
     path: str
 
 
-class SendImageRequest(BaseModel):
-    """An image to show once, without staging it as a theme."""
-    path: str
-
-
 class RenderDcRequest(BaseModel):
     """Render a .dc standalone — no device, so the size is explicit."""
     dc_path: str

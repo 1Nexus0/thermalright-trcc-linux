@@ -4,7 +4,7 @@
 
 A REST interface to the same command bus every other UI uses. Each endpoint builds a Command, dispatches it, and returns the Result as JSON — so anything here is also reachable from the CLI, the GUI, or your own client. The Commands themselves are documented in [`REFERENCE_COMMANDS.md`](REFERENCE_COMMANDS.md).
 
-**138 endpoints.**
+**137 endpoints.**
 
 ## Running it
 
@@ -65,14 +65,13 @@ Interactive docs are served at `/docs` while the API is running.
 | `POST /devices/{key}/display/play-video` | `VideoResult` | Start a video playback override on the device. |
 | `GET /devices/{key}/display/preview` | — | Return the device's current rendered frame as a PNG image. |
 | `WS /devices/{key}/display/preview/stream` | — | Stream JPEG-encoded preview frames over a WebSocket at ~5 fps. |
-| `POST /devices/{key}/display/push-image` | `SendResult` | Push a server-side image to the panel ONCE — nothing staged or persisted. |
 | `POST /devices/{key}/display/render-dc` | `RenderDcResult` | Render a legacy DC config to an image with no device and no theme load. |
 | `POST /devices/{key}/display/reset` | `SendResult` | Reset the display — stop any active video, then send a solid red frame. |
 | `POST /devices/{key}/display/restore-theme` | `ThemeResponse` | Restore the device's display state (persisted theme + background). |
 | `POST /devices/{key}/display/screencast/start` | `ScreencastResult` | Begin a screen-capture session for *key*. |
 | `POST /devices/{key}/display/screencast/stop` | `ScreencastResult` | End the screen-capture session for *key*. |
 | `POST /devices/{key}/display/seek-video` | `SeekVideoResult` | Jump to a specific frame. |
-| `POST /devices/{key}/display/send-image` | `ThemeResponse` | One-shot image-to-LCD via multipart upload. |
+| `POST /devices/{key}/display/send-image` | `ThemeResponse` | Show an uploaded image on the LCD until the next theme load. |
 | `POST /devices/{key}/display/sleep` | `SendResult` | Blank the panel so it goes dark — the shutdown / turn-off action. |
 | `POST /devices/{key}/display/slideshow` | `SlideshowResult` | Turn the device's slideshow on / off. |
 | `PUT /devices/{key}/display/slideshow` | `SlideshowResult` | Set the theme list + interval for a device's slideshow. |
