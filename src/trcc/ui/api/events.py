@@ -24,7 +24,6 @@ drains it.
 from __future__ import annotations
 
 import asyncio
-import hmac
 import logging
 import queue
 
@@ -33,6 +32,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from ...core.events import Event
 from ...core.logs import per_frame
 from ...ipc import EVENT_QUEUE_MAX, EVENT_TYPES, encode_event
+from ._shared import admit_ws
 
 log = logging.getLogger(__name__)
 #: The drain runs 20x/s per client — the ``trcc.frame`` family, whose
@@ -148,16 +148,9 @@ async def events_stream(ws: WebSocket, types: str = "*") -> None:
     surfaces, and a client that wants pixels asks ``/preview/stream``.
     """
     log.info("api WS /events: types=%s", types)
-    from .main import _api_token
-
-    # Token FIRST, and refuse by declining the handshake — the conventional
-    # way to close 1008 without revealing which half was wrong.
-    if _api_token is not None:
-        token = ws.query_params.get("token", "")
-        if not hmac.compare_digest(token, _api_token):
-            log.warning("api WS /events: rejected — bad token")
-            await ws.close(code=1008)
-            return
+    # Admission FIRST — token, or loopback-only when there is none.
+    if not await admit_ws(ws):
+        return
 
     wanted = _resolve_types(types)
     if wanted is None:

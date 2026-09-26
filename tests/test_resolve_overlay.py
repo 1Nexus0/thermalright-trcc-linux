@@ -351,14 +351,14 @@ def test_the_cli_can_list_what_is_on_screen(
 
 
 def test_the_api_can_read_back_the_layout_it_writes(app: App) -> None:
-    from fastapi.testclient import TestClient
-
     from trcc.ui.api.main import build_app
+
+    from .conftest import loopback_client
 
     ids = _two_user_elements(app)
     assert app.dispatch(EnableOverlay(key=_KEY, enabled=True)).ok
 
-    with TestClient(build_app(trcc=app)) as client:
+    with loopback_client(build_app(trcc=app)) as client:
         response = client.get(f"/devices/{_KEY}/display/overlay-elements")
 
     assert response.status_code == 200, response.text

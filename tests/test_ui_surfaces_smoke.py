@@ -105,12 +105,12 @@ def test_cli_lists_and_connects_device(tmp_path: Path) -> None:
 
 
 def test_api_lists_and_connects_device(tmp_path: Path) -> None:
-    from fastapi.testclient import TestClient
-
     from trcc.ui.api.main import build_app
 
+    from .conftest import loopback_client
+
     api = build_app(trcc=_app(tmp_path))
-    with TestClient(api) as client:
+    with loopback_client(api) as client:
         listed = client.get("/devices")
         assert listed.status_code == 200, listed.text
         keys = [p["key"] for p in listed.json()["products"]]

@@ -45,7 +45,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from trcc.adapters.render.qt import QtRenderer
@@ -56,6 +55,7 @@ from trcc.core.commands import (
     LoadTheme,
 )
 
+from .conftest import loopback_client
 from .mock_platform import MockPlatform
 
 _KEY = "87ad:70db"
@@ -186,7 +186,7 @@ def test_cli_rotation_is_one_reload(
 def test_api_rotation_is_one_reload(rotatable: App) -> None:
     from trcc.ui.api.main import build_app
 
-    with TestClient(build_app(trcc=rotatable)) as client, \
+    with loopback_client(build_app(trcc=rotatable)) as client, \
             _Rotation(rotatable) as rotation:
         response = client.post(
             f"/devices/{_KEY}/display/orientation", json={"degrees": 90},

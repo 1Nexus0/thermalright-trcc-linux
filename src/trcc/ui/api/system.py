@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from pathlib import Path
 
 from fastapi import APIRouter, Request
 
@@ -452,19 +451,16 @@ def quickstart(request: Request) -> QuickstartResult:
 @router.post("/debug-report")
 def debug_report(body: DebugReportRequest,
                  request: Request) -> DebugReportPayload:
-    """Generate a debug report bundle.
+    """Generate a debug report; the rendered text comes back in the body.
 
-    With ``output_path`` set, the report is also written to that
-    server-side path; without it, the rendered text comes back in the
-    response body only.
+    It took an ``output_path`` too, and wrote there — anywhere the process
+    could, over an existing file included — until the trust-boundary pass.
+    ``trcc report -o`` still writes a file, locally.
     """
-    log.info(
-        "api POST /system/debug-report: output_path=%s log_tail_lines=%s",
-        body.output_path, body.log_tail_lines,
-    )
-    out = Path(body.output_path) if body.output_path else None
+    log.info("api POST /system/debug-report: log_tail_lines=%s",
+             body.log_tail_lines)
     result = request.app.state.trcc.dispatch(GenerateDebugReport(
-        output_path=out, log_tail_lines=body.log_tail_lines,
+        log_tail_lines=body.log_tail_lines,
     ))
     http_error_if_failed(result)
     return result

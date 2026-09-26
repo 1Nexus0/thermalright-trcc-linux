@@ -1,26 +1,23 @@
 """``/theme/*`` router — save / export / import.
 
-Most endpoints take server-side paths so an automation script can
-reference archives that already live on the same host.  Remote
-clients without filesystem access use the multipart variants
-(``-upload`` / ``-download`` suffixes) which stage to a tempfile
-before / after the Command dispatch.
+Files cross the API as bytes, never as server paths: an archive comes in
+through ``-upload`` and goes out through ``-download`` (or an export route's
+response), each staged in a tempfile around the Command dispatch.  The routes
+that took a server-side path — ``/export`` and ``/import`` — wrote and read
+anywhere the process could, and were removed in the trust-boundary pass.
 
-Path sanitization (basename whitelist within ``user_content_dir``) is
-applied at the router edge so a malicious ``name`` can't escape into
-arbitrary filesystem locations.
+A theme ``name`` is reduced to its basename at the router edge, and a
+``?directory=`` must lie inside TRCC's own data (``owned_path``).
 """
 from __future__ import annotations
 
 import logging
 import shutil
-import tempfile
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
-from starlette.background import BackgroundTask
+from fastapi.responses import JSONResponse, Response
 
 from ...core.commands import (
     DeleteTheme,
@@ -39,20 +36,21 @@ from ...core.commands import (
     LoadCloudTheme,
     SaveTheme,
 )
-from ...core.models import parse_resolution
+from ...core.models import ThemeDir, parse_resolution
 from ...core.results import (
     CloudThemeLoadResult,
     CloudThemesListResult,
     DeleteThemeResult,
     EnsureDataDownloadResult,
-    ThemeDcExportResult,
-    ThemeExportResult,
     ThemeImportResult,
     ThemesListResult,
 )
 from ._shared import (
+    file_response,
     http_error_if_failed,
+    owned_path,
     staging_dir,
+    temp_output,
     to_import_config_response,
     to_theme_response,
 )
@@ -63,8 +61,6 @@ from .schemas import (
     ExportOverlayRequest,
     ImportConfigResponse,
     ThemeDcExportRequest,
-    ThemeExportRequest,
-    ThemeImportRequest,
     ThemeResponse,
     ThemeSaveRequest,
     WebThemeSchema,
@@ -136,62 +132,25 @@ def save(body: ThemeSaveRequest,
 
 
 @router.post("/export-overlay")
-def export_overlay(body: ExportOverlayRequest,
-                   request: Request) -> ThemeExportResult:
-    """Copy a theme's overlay config file out to *output_path*.
+def export_overlay(body: ExportOverlayRequest, request: Request) -> Response:
+    """Download a theme's overlay config — ``config1.dc`` or ``trcc.json``.
 
     The CLI has had ``theme export-overlay`` all along; REST could export the
-    theme archive and the DC, but not the overlay config on its own.
+    theme archive and the DC, but not the overlay config on its own.  The file
+    comes back in the response: this wrote to any server path the client
+    named until the trust-boundary pass.
     """
-    log.info("api POST /theme/export-overlay: key=%s theme=%s out=%s",
-             body.key, body.theme_name, body.output_path)
-    result = request.app.state.trcc.dispatch(ExportOverlay(
-        key=body.key, theme_name=body.theme_name,
-        output_path=Path(body.output_path),
-    ))
-    http_error_if_failed(result)
-    return result
-
-
-@router.post("/export")
-def export(body: ThemeExportRequest,
-           request: Request) -> ThemeExportResult:
-    log.info(
-        "api POST /theme/export: key=%s theme_name=%s archive_path=%s",
-        body.key, body.theme_name, body.archive_path,
-    )
-    theme_name = _safe_basename(body.theme_name)
-    # Archive path is server-controlled — clients pass an absolute path;
-    # we accept any writable filesystem location.  CLI users are
-    # responsible for choosing where to put the .tr file.
-    result = request.app.state.trcc.dispatch(
-        ExportTheme(
-            key=body.key,
-            theme_name=theme_name,
-            archive_path=Path(body.archive_path),
-        ),
-    )
-    http_error_if_failed(result)
-    return result
-
-
-@router.post("/import")
-def import_(body: ThemeImportRequest,
-            request: Request) -> ThemeImportResult:
-    """Import a theme archive from a server-side path."""
-    log.info(
-        "api POST /theme/import: key=%s archive_path=%s name=%s",
-        body.key, body.archive_path, body.name,
-    )
-    archive = Path(body.archive_path)
-    name = body.name.strip()
-    if name:
-        name = _safe_basename(name)
-    result = request.app.state.trcc.dispatch(
-        ImportTheme(key=body.key, archive_path=archive, name=name),
-    )
-    http_error_if_failed(result)
-    return result
+    log.info("api POST /theme/export-overlay: key=%s theme=%s",
+             body.key, body.theme_name)
+    safe_name = _safe_basename(body.theme_name)
+    with temp_output(".overlay") as out:
+        http_error_if_failed(request.app.state.trcc.dispatch(ExportOverlay(
+            key=body.key, theme_name=safe_name, output_path=out,
+        )))
+        # Whichever source the theme had: JSON opens with a brace.
+        ext = ".json" if out.read_bytes()[:1] == b"{" else ".dc"
+        return file_response(out, "application/octet-stream",
+                             f"{safe_name}-overlay{ext}")
 
 
 @router.post("/import-upload")
@@ -234,64 +193,44 @@ async def import_upload(
 
 
 @router.get("/{key}/{theme_name}/download")
-def download(key: str, theme_name: str, request: Request) -> FileResponse:
+def download(key: str, theme_name: str, request: Request) -> Response:
     """Stream a theme archive as a multipart download.
 
     Server-side equivalent of ``POST /export`` but bytes flow back over
     the HTTP response instead of landing on the server filesystem.
-    The archive is built in a tempfile and ``FileResponse`` cleans it
-    up after the connection closes via a ``BackgroundTask``.
+    The archive is built in a tempfile that ``temp_output`` deletes however
+    the route exits.  ``FileResponse``'s cleanup task never ran on a malformed
+    ``Range`` header, so every such request leaked the archive.
     """
     log.info(
         "api GET /theme/{key}/{theme_name}/download: key=%s theme_name=%s",
         key, theme_name,
     )
     safe_name = _safe_basename(theme_name)
-    tmp = Path(tempfile.mkstemp(suffix=".tr", prefix="trcc-export-")[1])
-    result = request.app.state.trcc.dispatch(
-        ExportTheme(key=key, theme_name=safe_name, archive_path=tmp),
-    )
-    if not result.ok:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        raise HTTPException(400, result.message)
-    return FileResponse(
-        path=tmp,
-        media_type="application/octet-stream",
-        filename=f"{safe_name}.tr",
-        background=BackgroundTask(_unlink_quietly, tmp),
-    )
+    with temp_output(".tr") as tmp:
+        http_error_if_failed(request.app.state.trcc.dispatch(
+            ExportTheme(key=key, theme_name=safe_name, archive_path=tmp),
+        ))
+        return file_response(tmp, "application/octet-stream",
+                             f"{safe_name}.tr")
 
 
 @router.get("/{key}/config-download")
-def config_download(key: str, request: Request) -> FileResponse:
+def config_download(key: str, request: Request) -> Response:
     """Stream a device's settings snapshot as a JSON download.
 
     REST equivalent of the cli ``theme export-config``: bytes flow back
     over the response instead of landing on the server filesystem.  The
-    snapshot is written to a tempfile that ``FileResponse`` cleans up
-    after the connection closes.
+    snapshot is written to a tempfile that ``temp_output`` deletes however
+    the route exits.
     """
     log.info("api GET /theme/{key}/config-download: key=%s", key)
-    tmp = Path(tempfile.mkstemp(suffix=".json", prefix="trcc-config-")[1])
-    result = request.app.state.trcc.dispatch(
-        ExportConfig(key=key, output_path=tmp),
-    )
-    if not result.ok:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        raise HTTPException(400, result.message)
-    safe_key = _safe_basename(key)
-    return FileResponse(
-        path=tmp,
-        media_type="application/json",
-        filename=f"{safe_key}-config.json",
-        background=BackgroundTask(_unlink_quietly, tmp),
-    )
+    with temp_output(".json") as tmp:
+        http_error_if_failed(request.app.state.trcc.dispatch(
+            ExportConfig(key=key, output_path=tmp),
+        ))
+        return file_response(tmp, "application/json",
+                             f"{_safe_basename(key)}-config.json")
 
 
 @router.post("/config/import-upload", response_model=ImportConfigResponse)
@@ -327,14 +266,6 @@ async def config_import_upload(
     return to_import_config_response(result)
 
 
-def _unlink_quietly(path: Path) -> None:
-    log.debug("_unlink_quietly: path=%s", path)
-    try:
-        path.unlink()
-    except OSError:
-        pass
-
-
 @router.get("/list")
 def list_(
     request: Request,
@@ -355,7 +286,7 @@ def list_(
     )
     if directory:
         result = request.app.state.trcc.dispatch(
-            ListThemes(directory=Path(directory)),
+            ListThemes(directory=owned_path(request, directory)),
         )
     else:
         resolution: tuple[int, int] | None = None
@@ -495,20 +426,20 @@ def cloud_load(key: str, body: CloudThemeLoadRequest,
 
 @router.post("/{name}/export-dc")
 def export_dc(name: str, body: ThemeDcExportRequest,
-              request: Request) -> ThemeDcExportResult:
-    """Write a theme out as legacy ``config1.dc``."""
-    log.info(
-        "api POST /theme/{name}/export-dc: name=%s key=%s output_path=%s",
-        name, body.key, body.output_path,
-    )
+              request: Request) -> Response:
+    """Download a theme as legacy ``config1.dc``.
+
+    The file comes back in the response: this wrote to any server path the
+    client named until the trust-boundary pass.
+    """
+    log.info("api POST /theme/{name}/export-dc: name=%s key=%s",
+             name, body.key)
     safe_name = _safe_basename(name)
-    result = request.app.state.trcc.dispatch(ExportDcTheme(
-        key=body.key,
-        theme_name=safe_name,
-        output_path=Path(body.output_path),
-    ))
-    http_error_if_failed(result)
-    return result
+    with temp_output(".dc") as out:
+        http_error_if_failed(request.app.state.trcc.dispatch(ExportDcTheme(
+            key=body.key, theme_name=safe_name, output_path=out,
+        )))
+        return file_response(out, "application/octet-stream", ThemeDir.DC)
 
 
 @router.delete("")

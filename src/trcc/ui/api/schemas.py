@@ -257,7 +257,6 @@ class BackgroundFileRequest(BaseModel):
 class RenderDcRequest(BaseModel):
     """Render a .dc standalone — no device, so the size is explicit."""
     dc_path: str
-    output_path: str
     width: int = Field(..., gt=0)
     height: int = Field(..., gt=0)
 
@@ -266,7 +265,6 @@ class ExportOverlayRequest(BaseModel):
     """Copy a theme's overlay config file out."""
     key: str
     theme_name: str
-    output_path: str
 
 
 class ZoneSyncZonesRequest(BaseModel):
@@ -399,19 +397,17 @@ class CloudThemeDownloadRequest(BaseModel):
 
 
 class ThemeDcExportRequest(BaseModel):
-    """Server-side path to write the legacy DC file to.
+    """Which device's copy of the theme to export; the DC comes back as bytes.
 
     ``key`` is required — the device's resolution scopes the source
     lookup and the device's user-overlay elements are layered into the
     exported DC.
     """
     key: str = Field(..., min_length=1)
-    output_path: str
 
 
 # Diagnostics
 class DebugReportRequest(BaseModel):
-    output_path: str | None = None
     log_tail_lines: int = Field(1000, ge=0, le=100_000)
 
 
@@ -433,14 +429,15 @@ class SlideshowConfigureRequest(BaseModel):
 class KeepaliveRequest(BaseModel):
     """Keepalive-loop parameters.
 
-    * ``count`` — ``0`` means run until interrupted (legacy parity);
-      ``>=1`` runs that many iterations.
+    * ``count`` — how many iterations, at least 1.  The CLI's ``0`` (run until
+      Ctrl-C) cannot exist here: nothing interrupts an HTTP request, so it
+      held a server worker forever.
     * ``interval_s`` — fast-resend cadence.  Default 0.150 s is below
       the 2-3 s firmware-revert threshold on Bulk/LY devices.
     * ``metric_interval_s`` — how often to re-render the overlay so
       sensor values stay current.  Set to 0 to disable refresh.
     """
-    count: int = Field(0, ge=0)
+    count: int = Field(1, ge=1)
     interval_s: float = Field(0.150, ge=0.05)
     metric_interval_s: float = Field(1.0, ge=0.0)
 
@@ -489,27 +486,6 @@ class ThemeSaveRequest(BaseModel):
     #: delete-then-save, the only workaround a client had before this field,
     #: does not.
     overwrite: bool = False
-
-
-class ThemeExportRequest(BaseModel):
-    """Export an existing theme by name to a server-side archive path.
-
-    ``key`` scopes the lookup to the device's resolution dir.
-    """
-    key: str = Field(..., min_length=1)
-    theme_name: str = Field(..., min_length=1)
-    archive_path: str = Field(..., min_length=1)
-
-
-class ThemeImportRequest(BaseModel):
-    """Import a theme from a server-side archive path.
-
-    ``key`` scopes the target to the device's resolution dir.
-    ``name`` defaults to the archive filename stem when blank.
-    """
-    key: str = Field(..., min_length=1)
-    archive_path: str = Field(..., min_length=1)
-    name: str = ""
 
 
 class DeleteThemeRequest(BaseModel):

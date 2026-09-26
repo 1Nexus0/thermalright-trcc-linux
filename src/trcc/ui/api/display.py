@@ -1,7 +1,6 @@
 """/devices/{key}/display router — orientation, brightness, theme."""
 from __future__ import annotations
 
-import hmac
 import json
 import logging
 import shutil
@@ -98,7 +97,6 @@ from ...core.results import (
     OverlayLayoutResult,
     OverlayResult,
     PauseVideoResult,
-    RenderDcResult,
     RenderResult,
     ScreencastResult,
     SeekVideoResult,
@@ -111,9 +109,12 @@ from ...core.results import (
     VideoResult,
 )
 from ._shared import (
+    admit_ws,
     ensure_connected,
     http_error_if_failed,
+    owned_path,
     staging_dir,
+    temp_output,
     to_theme_response,
 )
 from .schemas import (
@@ -351,7 +352,7 @@ def play_video(key: str, body: PlayVideoRequest,
     )
     # PlayVideo persists the background path itself (#249).
     result = request.app.state.trcc.dispatch(
-        PlayVideo(key=key, path=Path(body.path), fps=body.fps),
+        PlayVideo(key=key, path=owned_path(request, body.path), fps=body.fps),
     )
     http_error_if_failed(result)
     return result
@@ -378,7 +379,7 @@ def load_video(key: str, body: LoadVideoRequest,
         key, body.path, body.start_ms, body.end_ms, body.rotation,
     )
     result = request.app.state.trcc.dispatch(LoadVideo(
-        key=key, path=Path(body.path), start_ms=body.start_ms,
+        key=key, path=owned_path(request, body.path), start_ms=body.start_ms,
         end_ms=body.end_ms, rotation=body.rotation,
     ))
     http_error_if_failed(result)
@@ -407,7 +408,7 @@ def export_video(key: str, body: ExportVideoRequest,
         body.fit_mode or "auto",
     )
     result = request.app.state.trcc.dispatch(ExportVideoClip(
-        key=key, path=Path(body.path), start_ms=body.start_ms,
+        key=key, path=owned_path(request, body.path), start_ms=body.start_ms,
         end_ms=body.end_ms, rotation=body.rotation,
         fit_mode=body.fit_mode,
     ))
@@ -514,16 +515,9 @@ async def preview_stream(ws: WebSocket, key: str) -> None:
     """
     import asyncio
 
-    from .main import _api_token
-
-    # Token check FIRST — accept the WS handshake only when auth
-    # passes.  Skipping the accept on auth failure is the conventional
-    # way to send a 1008 close without exposing why.
-    if _api_token is not None:
-        token = ws.query_params.get("token", "")
-        if not hmac.compare_digest(token, _api_token):
-            await ws.close(code=1008)
-            return
+    # Admission FIRST — token, or loopback-only when there is none.
+    if not await admit_ws(ws):
+        return
 
     trcc = ws.app.state.trcc
     if not trcc.dispatch(DeviceState(key=key)).ok:
@@ -626,8 +620,11 @@ def media_player(key: str, body: MediaPlayerRequest,
     """
     log.info("api POST /devices/{key}/display/media-player: key=%s uri=%s",
              key, body.uri)
+    uri = body.uri.strip()
+    if uri and "://" not in uri:   # a local file: confined like every read
+        uri = str(owned_path(request, uri))
     result = request.app.state.trcc.dispatch(
-        SetMediaPlayer(key=key, uri=body.uri),
+        SetMediaPlayer(key=key, uri=uri),
     )
     http_error_if_failed(result)
     return result
@@ -962,27 +959,30 @@ def background(key: str, body: BackgroundFileRequest,
     log.info("api POST /devices/{key}/display/background: key=%s path=%s",
              key, body.path)
     result = request.app.state.trcc.dispatch(
-        SetBackground(key=key, path=Path(body.path)),
+        SetBackground(key=key, path=owned_path(request, body.path)),
     )
     http_error_if_failed(result)
     return result
 
 
 @router.post("/render-dc")
-def render_dc(body: RenderDcRequest, request: Request) -> RenderDcResult:
-    """Render a legacy DC config to an image with no device and no theme load.
+def render_dc(body: RenderDcRequest, request: Request) -> Response:
+    """Render a legacy DC config to a PNG with no device and no theme load.
 
     A diagnostic: it answers "what does this .dc actually draw?" without
     touching hardware, which is why it takes a size rather than a device key.
+    The PNG comes back in the response — the route wrote it to any server
+    path the client named until the trust-boundary pass.
     """
-    log.info("api POST /display/render-dc: dc=%s out=%s %dx%d",
-             body.dc_path, body.output_path, body.width, body.height)
-    result = request.app.state.trcc.dispatch(RenderDcStandalone(
-        dc_path=Path(body.dc_path), output_path=Path(body.output_path),
-        width=body.width, height=body.height,
-    ))
-    http_error_if_failed(result)
-    return result
+    log.info("api POST /display/render-dc: dc=%s %dx%d",
+             body.dc_path, body.width, body.height)
+    with temp_output(".png") as out:
+        result = request.app.state.trcc.dispatch(RenderDcStandalone(
+            dc_path=owned_path(request, body.dc_path), output_path=out,
+            width=body.width, height=body.height,
+        ))
+        http_error_if_failed(result)
+        return Response(out.read_bytes(), media_type="image/png")
 
 
 @router.post("/slideshow/drive")
@@ -1236,7 +1236,7 @@ def upload_mask(key: str, body: MaskUploadRequest,
         key, body.source,
     )
     result = request.app.state.trcc.dispatch(
-        UploadCustomMask(key=key, source=Path(body.source)),
+        UploadCustomMask(key=key, source=owned_path(request, body.source)),
     )
     http_error_if_failed(result)
     return result
@@ -1257,7 +1257,8 @@ def video_duration(path: str, request: Request) -> VideoDurationResult:
     defaults its range rather than refusing to open.
     """
     log.info("api GET /display/video-duration: path=%s", path)
-    return request.app.state.trcc.dispatch(ProbeVideoDuration(path=Path(path)))
+    return request.app.state.trcc.dispatch(
+        ProbeVideoDuration(path=owned_path(request, path)))
 
 
 @meta_router.get("/masks")

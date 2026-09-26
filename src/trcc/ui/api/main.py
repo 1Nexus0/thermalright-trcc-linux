@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from ...core.ports import Platform
 from . import config, devices, display, events, led, system, theme
 from . import trcc as _trcc_router
+from ._shared import is_loopback_client
 
 if TYPE_CHECKING:
     from starlette.routing import BaseRoute
@@ -143,11 +144,12 @@ def build_app(trcc: App | None = None) -> FastAPI:
         return response
 
     # ── Token-auth middleware ───────────────────────────────────────
-    # When ``_api_token`` is None the API is unauth'd (loopback dev
-    # mode default).  When set, every non-exempt path requires a
-    # matching ``X-API-Token`` header.  Port of legacy
-    # ``ui/api/__init__.py:check_token`` byte-for-byte (hmac compare
-    # so a wrong-length token doesn't time-leak).
+    # When ``_api_token`` is set, every non-exempt path requires a
+    # matching ``X-API-Token`` header (hmac compare so a wrong-length token
+    # doesn't time-leak).  When it is None the API is unauth'd loopback —
+    # which a web page in the user's own browser can reach, so only a
+    # loopback Host with no foreign Origin gets through (``is_loopback_client``).
+    # WebSockets bypass HTTP middleware; ``admit_ws`` applies the same rule.
     @api.middleware("http")
     async def check_token(request: Request, call_next):  # type: ignore[no-untyped-def]
         if _api_token and request.url.path not in _AUTH_EXEMPT:
@@ -161,6 +163,17 @@ def build_app(trcc: App | None = None) -> FastAPI:
                     status_code=401,
                     content={"detail": "Invalid token"},
                 )
+        elif not _api_token and not is_loopback_client(
+                request.url.hostname, request.headers.get("origin")):
+            log.warning("API auth: refused %s %s from host=%s origin=%s "
+                        "(token-less server, not a loopback client)",
+                        request.method, request.url.path,
+                        request.headers.get("host"),
+                        request.headers.get("origin"))
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Refused: not a loopback client"},
+            )
         return await call_next(request)
 
     # ── Health endpoint — exempt from auth ──────────────────────────

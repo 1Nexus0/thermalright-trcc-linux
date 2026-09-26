@@ -66,6 +66,12 @@ KNOWN_FIELD_ASYMMETRY: dict[tuple[str, str], tuple[frozenset[str], str]] = {
         "the Result; the editor never needs to choose one, while a script or a "
         "REST client may want an idempotent id"
     )),
+    ("GenerateDebugReport", "api"): (frozenset({"output_path"}), (
+        "scoped: TRACED 2026-09-26.  The API writes nothing where a client "
+        "says -- it wrote this report over an existing file anywhere the "
+        "process could (the trust-boundary pass).  The text comes back in the "
+        "response body; ``trcc report -o`` still writes a file, locally"
+    )),
     ("StopVideo", "api"): (frozenset({"keep_override"}), (
         "scoped: TRACED 2026-09-22.  The flag exists only to stop gui's own "
         "_cleanup_device teardown wiping the persisted background (#271).  No "

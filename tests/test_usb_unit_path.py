@@ -598,11 +598,11 @@ def test_cli_status_snapshots_each_twin(tmp_path, cli_runner) -> None:
 
 
 def test_api_lists_and_finds_each_twin(tmp_path) -> None:
-    from fastapi.testclient import TestClient
-
     from trcc.ui.api.main import build_app
 
-    with TestClient(build_app(trcc=_twin_app(tmp_path))) as client:
+    from .conftest import loopback_client
+
+    with loopback_client(build_app(trcc=_twin_app(tmp_path))) as client:
         listed = [p["key"] for p in client.get("/devices").json()["products"]]
         found = client.get("/devices/87ad:70db@1-2")
     assert listed == _TWIN_KEYS

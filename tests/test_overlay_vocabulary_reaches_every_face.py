@@ -48,6 +48,7 @@ from typer.testing import CliRunner
 from trcc.app import App
 from trcc.core.commands import AddOverlayElement, UpdateOverlayElement
 
+from .conftest import loopback_client
 from .test_api_routes import _SmokeRenderer
 
 _UI_ROOT = Path(__file__).resolve().parents[1] / "src" / "trcc" / "ui"
@@ -100,7 +101,7 @@ def api_client(fake_platform) -> Iterator[TestClient]:
     from trcc.ui.api.main import build_app
 
     trcc = App(platform=fake_platform, renderer=_SmokeRenderer())
-    with TestClient(build_app(trcc=trcc)) as client:
+    with loopback_client(build_app(trcc=trcc)) as client:
         yield client
 
 

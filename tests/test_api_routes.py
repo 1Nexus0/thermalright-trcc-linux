@@ -17,6 +17,7 @@ device fakes get fuller setup.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
@@ -30,7 +31,7 @@ from trcc.core.models import DEFAULT_AUTOSTART_TARGET, RawFrame
 from trcc.core.ports import Renderer
 from trcc.core.protocol import FBL_PROFILES
 
-from .conftest import FakePlatform
+from .conftest import FakePlatform, loopback_client
 
 # Unique resolutions from the canonical FBL profile registry.
 API_TEST_RESOLUTIONS: list[tuple[int, int]] = sorted({
@@ -121,7 +122,7 @@ def api_client(fake_platform: FakePlatform) -> Iterator[TestClient]:
 
     trcc = App(platform=fake_platform, renderer=_SmokeRenderer())
     api = build_app(trcc=trcc)
-    with TestClient(api) as client:
+    with loopback_client(api) as client:
         yield client
 
 
@@ -1080,16 +1081,21 @@ def test_system_debug_report_in_memory(api_client: TestClient) -> None:
     assert body["output_path"] == ""
 
 
-def test_system_debug_report_to_path(
+def test_system_debug_report_writes_nothing_where_a_client_says(
     api_client: TestClient, tmp_path,
 ) -> None:
-    out = tmp_path / "bundle.txt"
+    """It wrote to any server path in ``output_path`` — over an existing file
+    included, measured — so the field is gone and the text comes back instead.
+    A client that still sends it gets the report and no file."""
+    victim = tmp_path / "precious.txt"
+    victim.write_text("USER DATA\n", encoding="utf-8")
     resp = api_client.post(
         "/system/debug-report",
-        json={"output_path": str(out), "log_tail_lines": 10},
+        json={"output_path": str(victim), "log_tail_lines": 10},
     )
     assert resp.status_code == 200
-    assert out.is_file()
+    assert resp.json()["rendered_text"]
+    assert victim.read_text(encoding="utf-8") == "USER DATA\n"
 
 
 # =========================================================================
@@ -1253,29 +1259,43 @@ def test_theme_save_requires_key(api_client: TestClient) -> None:
 
 
 def test_theme_list_returns_empty_under_empty_dir(
-    api_client: TestClient, tmp_path: Path,
+    api_client: TestClient, fake_platform: FakePlatform,
 ) -> None:
     """ListThemes against an empty directory returns ok with an empty
     list — proves the route reaches Command dispatch + Result
     serialization end-to-end."""
-    resp = api_client.get("/theme/list", params={"directory": str(tmp_path)})
+    library = fake_platform.paths().user_content_dir() / "library"
+    library.mkdir(parents=True)
+    resp = api_client.get("/theme/list", params={"directory": str(library)})
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
     assert body["themes"] == []
-    assert body["directory"] == str(tmp_path)
+    assert body["directory"] == str(library.resolve())
+
+
+def test_theme_list_refuses_a_directory_outside_trcc(
+    api_client: TestClient, tmp_path: Path,
+) -> None:
+    """``?directory=`` listed any directory the process could read."""
+    resp = api_client.get("/theme/list", params={"directory": str(tmp_path)})
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == (
+        "path must name an existing file inside TRCC's data directories "
+        "(~/.trcc or ~/.trcc-user)")
 
 
 def test_theme_list_finds_themes_in_dir(
-    api_client: TestClient, tmp_path: Path,
+    api_client: TestClient, fake_platform: FakePlatform,
 ) -> None:
     """ListThemes returns each theme directory containing config.json."""
-    theme_dir = tmp_path / "MyTheme"
-    theme_dir.mkdir()
+    library = fake_platform.paths().user_content_dir() / "library"
+    theme_dir = library / "MyTheme"
+    theme_dir.mkdir(parents=True)
     (theme_dir / "trcc.json").write_text(
         '{"width": 480, "height": 480, "elements": []}',
     )
-    resp = api_client.get("/theme/list", params={"directory": str(tmp_path)})
+    resp = api_client.get("/theme/list", params={"directory": str(library)})
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
@@ -1561,7 +1581,7 @@ def test_send_image_keeps_nothing_on_disk(tmp_path: Path) -> None:
     png = renderer.encode_png(renderer.create_surface(64, 64, color=(0, 0, 255, 255)))
     trcc = App(MockPlatform([{"vid": "0402", "pid": "3922"}], tmp_path),
                renderer=renderer)
-    with TestClient(build_app(trcc=trcc)) as client:
+    with loopback_client(build_app(trcc=trcc)) as client:
         for _ in range(3):
             resp = client.post("/devices/0402:3922/display/send-image",
                                files={"image": ("frame.png", png, "image/png")})
@@ -1680,3 +1700,218 @@ def test_settings_routes_do_NOT_force_an_attach(
         "a settings route forced an attach — it works fine unattached, and "
         f"requiring hardware for it is a regression.  saw: {seen}"
     )
+
+
+# ── The trust boundary: no server paths, no browsers (2026-09-26) ─────────
+#
+# Measured before this pass: 14 of 18 routes that took a server path opened or
+# wrote any file the process could reach — debug-report overwrote one — and a
+# token-less server answered any web page in the user's browser, streaming the
+# live preview to it.
+
+_BOUNDARY = ("path must name an existing file inside TRCC's data directories "
+             "(~/.trcc or ~/.trcc-user)")
+_KEY = "0402:3922"
+_ROUTES_THAT_READ = [
+    ("POST", f"/devices/{_KEY}/display/background", "json", "path"),
+    ("POST", f"/devices/{_KEY}/display/play-video", "json", "path"),
+    ("POST", f"/devices/{_KEY}/display/load-video", "json", "path"),
+    ("POST", f"/devices/{_KEY}/display/export-video", "json", "path"),
+    ("POST", f"/devices/{_KEY}/display/media-player", "json", "uri"),
+    ("POST", f"/devices/{_KEY}/display/upload-mask", "json", "source"),
+    ("POST", f"/devices/{_KEY}/display/render-dc", "json", "dc_path"),
+    ("GET", "/display/video-duration", "params", "path"),
+]
+
+
+@pytest.fixture
+def panel_api(tmp_path: Path) -> Iterator[tuple[TestClient, App]]:
+    """A real 320x320 panel behind the API, with one theme and one image."""
+    from trcc.adapters.render.qt import QtRenderer
+    from trcc.ui.api.main import build_app
+
+    from .mock_platform import MockPlatform
+
+    renderer = QtRenderer()
+    app = App(MockPlatform([{"vid": "0402", "pid": "3922"}], tmp_path / "root"),
+              renderer=renderer)
+    paths = app.platform.paths()
+    theme = paths.user_data_dir() / "theme320320" / "demo"
+    theme.mkdir(parents=True)
+    (theme / "trcc.json").write_text(json.dumps({
+        "name": "demo", "width": 320, "height": 320, "elements": [{
+            "type": "clock", "x": 10, "y": 10, "color": "#ffffff", "size": 24,
+            "bold": False, "italic": False, "source": "time"}],
+    }), encoding="utf-8")
+    image = renderer.encode_png(renderer.create_surface(32, 32, color=(0, 0, 255, 255)))
+    (theme / "00.png").write_bytes(image)
+    (paths.user_content_dir() / "inside.png").write_bytes(image)
+    with loopback_client(build_app(trcc=app)) as client:
+        assert client.post(f"/devices/{_KEY}/connect").status_code == 200
+        yield client, app
+
+
+def _read(client: TestClient, verb: str, url: str, where: str, field: str,
+          path: str) -> Any:
+    body = {field: path, "width": 320, "height": 320}
+    return client.request(verb, url, **{where: body})
+
+
+@pytest.mark.parametrize("verb,url,where,field", _ROUTES_THAT_READ)
+def test_a_route_refuses_a_path_outside_trcc(
+    panel_api: tuple[TestClient, App], tmp_path: Path,
+    verb: str, url: str, where: str, field: str,
+) -> None:
+    client, _ = panel_api
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    resp = _read(client, verb, url, where, field, str(outside))
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == _BOUNDARY
+
+
+@pytest.mark.parametrize("verb,url,where,field", _ROUTES_THAT_READ)
+def test_a_route_accepts_a_path_inside_trcc(
+    panel_api: tuple[TestClient, App],
+    verb: str, url: str, where: str, field: str,
+) -> None:
+    """Past the boundary; whatever the Command then says about a PNG it
+    expected to be a video is its own answer, not the boundary's.  FastAPI's
+    own "Not Found" is excluded by name: a route that does not exist is not
+    past anything, and this assertion passed on one until it said so."""
+    client, app = panel_api
+    inside = app.platform.paths().user_content_dir() / "inside.png"
+
+    resp = _read(client, verb, url, where, field, str(inside))
+
+    assert resp.json().get("detail") not in (_BOUNDARY, "Not Found")
+
+
+def test_a_web_url_is_not_a_path(panel_api: tuple[TestClient, App]) -> None:
+    client, app = panel_api
+    resp = client.post(f"/devices/{_KEY}/display/media-player",
+                       json={"uri": "https://example.com/stream.m3u8"})
+    assert resp.status_code == 200
+    assert app.settings.for_device(_KEY).media_player_uri == (
+        "https://example.com/stream.m3u8")
+
+
+@pytest.fixture
+def private_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The system temp dir, made private to this test so a leak is countable."""
+    import tempfile
+    private = tmp_path / "systmp"
+    private.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(private))
+    return private
+
+
+def test_the_exports_come_back_as_bytes_and_leave_nothing(
+    panel_api: tuple[TestClient, App], private_tmp: Path,
+) -> None:
+    client, app = panel_api
+    body = {"key": _KEY, "theme_name": "demo"}
+
+    overlay = client.post("/theme/export-overlay", json=body)
+    dc = client.post("/theme/demo/export-dc", json={"key": _KEY})
+    archive = client.get(f"/theme/{_KEY}/demo/download")
+    config = client.get(f"/theme/{_KEY}/config-download")
+    (app.platform.paths().user_content_dir() / "demo.dc").write_bytes(dc.content)
+    png = client.post(f"/devices/{_KEY}/display/render-dc", json={
+        "dc_path": str(app.platform.paths().user_content_dir() / "demo.dc"),
+        "width": 320, "height": 320})
+
+    assert [r.status_code for r in (overlay, dc, archive, config, png)] == [200] * 5
+    assert json.loads(overlay.content)["elements"][0]["type"] == "clock"
+    assert overlay.headers["content-disposition"] == (
+        'attachment; filename="demo-overlay.json"')
+    assert dc.headers["content-disposition"] == (
+        'attachment; filename="config1.dc"')
+    reimported = client.post(
+        "/theme/import-upload", params={"key": _KEY, "name": "roundtrip"},
+        files={"archive": ("demo.tr", archive.content, "application/octet-stream")})
+    assert reimported.status_code == 200, reimported.text
+    assert json.loads(config.content)
+    assert png.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert list(private_tmp.iterdir()) == []
+
+
+def test_a_malformed_range_leaves_no_temp_file(
+    panel_api: tuple[TestClient, App], private_tmp: Path,
+) -> None:
+    """``FileResponse`` skipped its cleanup task on a bad ``Range`` header:
+    3 of 3 requests leaked their tempfile.  Bytes in a plain Response do not."""
+    client, _ = panel_api
+    for bad in ("bytes=abc", "bytes=99999999-"):
+        client.get(f"/theme/{_KEY}/config-download", headers={"range": bad})
+        client.get(f"/theme/{_KEY}/demo/download", headers={"range": bad})
+    assert list(private_tmp.iterdir()) == []
+
+
+@pytest.mark.parametrize("headers", [
+    {"host": "evil.example"},
+    {"origin": "https://evil.example"},
+    {"origin": "null"},
+])
+def test_a_tokenless_server_refuses_a_browser(
+    panel_api: tuple[TestClient, App], headers: dict[str, str],
+) -> None:
+    client, _ = panel_api
+    resp = client.get("/devices", headers=headers)
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Refused: not a loopback client"
+
+
+def test_a_tokenless_server_answers_its_own_origin(
+    panel_api: tuple[TestClient, App],
+) -> None:
+    client, _ = panel_api
+    resp = client.get("/devices", headers={"origin": "http://localhost:8080"})
+    assert resp.status_code == 200
+
+
+@pytest.mark.parametrize("path", [
+    f"/devices/{_KEY}/display/preview/stream", "/events"])
+def test_a_websocket_refuses_a_foreign_origin(
+    panel_api: tuple[TestClient, App], path: str,
+) -> None:
+    from starlette.websockets import WebSocketDisconnect
+
+    client, _ = panel_api
+    # Refused at the handshake, so the body never runs: reaching it means the
+    # socket was admitted, and ``raises`` fails at once instead of waiting on
+    # a stream that would never end.
+    with pytest.raises(WebSocketDisconnect) as refused:
+        with client.websocket_connect(
+                path, headers={"origin": "https://evil.example"}):
+            pass
+    assert refused.value.code == 1008
+
+
+def test_with_a_token_the_token_governs(
+    panel_api: tuple[TestClient, App],
+) -> None:
+    """A LAN bind needs a token, and then any Host is fine — the token is the
+    credential a page cannot forge."""
+    from trcc.ui.api.main import configure_auth
+
+    client, _ = panel_api
+    configure_auth("secret-token")
+    try:
+        resp = client.get("/devices", headers={
+            "host": "192.168.1.20:8080", "X-API-Token": "secret-token"})
+    finally:
+        configure_auth(None)
+    assert resp.status_code == 200
+
+
+def test_keepalive_cannot_run_until_interrupted_over_http(
+    panel_api: tuple[TestClient, App],
+) -> None:
+    """``count=0`` loops until Ctrl-C, which no HTTP request can send — the
+    default body held a server worker forever."""
+    client, _ = panel_api
+    resp = client.post(f"/devices/{_KEY}/display/keepalive", json={"count": 0})
+    assert resp.status_code == 422

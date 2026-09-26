@@ -18,6 +18,7 @@ from trcc.app import App
 from trcc.core.commands import ConnectDevice
 from trcc.core.models import Theme
 
+from .conftest import loopback_client
 from .mock_platform import MockPlatform
 
 _SPEC = {"type": "lcd", "vid": "87ad", "pid": "70db",
@@ -34,7 +35,7 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     trcc = App(MockPlatform([_SPEC], tmp_path), renderer=QtRenderer())
     trcc.attach(0x87AD, 0x70DB)
     assert trcc.dispatch(ConnectDevice(key=_KEY)).ok
-    with TestClient(build_app(trcc=trcc)) as c:
+    with loopback_client(build_app(trcc=trcc)) as c:
         yield c
 
 

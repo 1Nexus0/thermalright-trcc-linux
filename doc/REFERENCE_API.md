@@ -4,7 +4,7 @@
 
 A REST interface to the same command bus every other UI uses. Each endpoint builds a Command, dispatches it, and returns the Result as JSON — so anything here is also reachable from the CLI, the GUI, or your own client. The Commands themselves are documented in [`REFERENCE_COMMANDS.md`](REFERENCE_COMMANDS.md).
 
-**137 endpoints.**
+**135 endpoints.**
 
 ## Running it
 
@@ -65,7 +65,7 @@ Interactive docs are served at `/docs` while the API is running.
 | `POST /devices/{key}/display/play-video` | `VideoResult` | Start a video playback override on the device. |
 | `GET /devices/{key}/display/preview` | — | Return the device's current rendered frame as a PNG image. |
 | `WS /devices/{key}/display/preview/stream` | — | Stream JPEG-encoded preview frames over a WebSocket at ~5 fps. |
-| `POST /devices/{key}/display/render-dc` | `RenderDcResult` | Render a legacy DC config to an image with no device and no theme load. |
+| `POST /devices/{key}/display/render-dc` | — | Render a legacy DC config to a PNG with no device and no theme load. |
 | `POST /devices/{key}/display/reset` | `SendResult` | Reset the display — stop any active video, then send a solid red frame. |
 | `POST /devices/{key}/display/restore-theme` | `ThemeResponse` | Restore the device's display state (persisted theme + background). |
 | `POST /devices/{key}/display/screencast/start` | `ScreencastResult` | Begin a screen-capture session for *key*. |
@@ -95,9 +95,7 @@ Interactive docs are served at `/docs` while the API is running.
 | `POST /theme/cloud/download` | `CloudThemeLoadResult` | Cache a cloud theme locally WITHOUT applying it to a device. |
 | `POST /theme/cloud/{key}` | `CloudThemeLoadResult` | Download a cloud theme + apply it to *key*. |
 | `POST /theme/config/import-upload` | `ImportConfigResponse` | Restore a device's settings from an uploaded JSON snapshot. |
-| `POST /theme/export` | `ThemeExportResult` | — |
-| `POST /theme/export-overlay` | `ThemeExportResult` | Copy a theme's overlay config file out to *output_path*. |
-| `POST /theme/import` | `ThemeImportResult` | Import a theme archive from a server-side path. |
+| `POST /theme/export-overlay` | — | Download a theme's overlay config — ``config1.dc`` or ``trcc.json``. |
 | `POST /theme/import-upload` | `ThemeImportResult` | Import a theme archive uploaded via multipart form-data. |
 | `POST /theme/init` | `EnsureDataDownloadResult` | Prefetch theme/web/mask archives for a resolution (idempotent). |
 | `GET /theme/list` | `ThemesListResult` | List themes for a device resolution. |
@@ -105,7 +103,7 @@ Interactive docs are served at `/docs` while the API is running.
 | `GET /theme/web` | `list` | Cloud-theme preview gallery for a resolution (e.g. ``320x320``). |
 | `GET /theme/{key}/config-download` | — | Stream a device's settings snapshot as a JSON download. |
 | `GET /theme/{key}/{theme_name}/download` | — | Stream a theme archive as a multipart download. |
-| `POST /theme/{name}/export-dc` | `ThemeDcExportResult` | Write a theme out as legacy ``config1.dc``. |
+| `POST /theme/{name}/export-dc` | — | Download a theme as legacy ``config1.dc``. |
 
 ## LED
 
@@ -144,7 +142,7 @@ Interactive docs are served at `/docs` while the API is running.
 | `GET /system/check-update` | `UpdateCheckResult` | Ask GitHub whether a newer version of trcc-linux is published. |
 | `GET /system/dashboard` | `SensorDashboardResult` | The sensor-dashboard layout — the grid the GUI's System Info screen edits. |
 | `POST /system/dashboard` | `SensorDashboardResult` | Replace the sensor-dashboard layout wholesale. |
-| `POST /system/debug-report` | `DebugReportPayload` | Generate a debug report bundle. |
+| `POST /system/debug-report` | `DebugReportPayload` | Generate a debug report; the rendered text comes back in the body. |
 | `GET /system/disk-sensors` | `DiskSensorsResult` | Drive thermal sensors — the list ``disk_temp`` comes from. |
 | `POST /system/disk-sensors/active` | `DiskDeviceResult` | Pin which drive supplies ``disk_temp``.  Empty key = hottest. |
 | `GET /system/disks` | `DisksListResult` | List mounted partitions — NOT the drive list `disk_temp` comes from. |

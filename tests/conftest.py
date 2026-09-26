@@ -664,6 +664,28 @@ def assert_stub_matches(real: Callable[..., Any], stub: Callable[..., Any]) -> N
         )
 
 
+def loopback_client(api: Any) -> Any:
+    """A FastAPI ``TestClient`` that arrives the way ``trcc api`` is reached.
+
+    ``TestClient`` sends ``Host: testserver``, and a token-less server refuses
+    any Host that is not loopback (``ui/api/_shared.is_loopback_client``) — the
+    refusal that stops a DNS-rebinding page.  So the suite reaches the API as
+    a loopback client, like every real local caller.
+
+    ``base_url`` covers HTTP only: Starlette's WebSocket handshake hardcodes
+    ``Host: testserver`` whatever the base URL says (measured), so the
+    handshake gets its Host set explicitly.
+    """
+    from fastapi.testclient import TestClient
+
+    class _Loopback(TestClient):
+        def websocket_connect(self, url: str, *args: Any, **kwargs: Any) -> Any:
+            kwargs["headers"] = {"host": "127.0.0.1", **(kwargs.get("headers") or {})}
+            return super().websocket_connect(url, *args, **kwargs)
+
+    return _Loopback(api, base_url="http://127.0.0.1")
+
+
 @pytest.fixture(autouse=True)
 def _stub_data_install(monkeypatch: pytest.MonkeyPatch) -> None:
     """No test downloads theme archives over the network.

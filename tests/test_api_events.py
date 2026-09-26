@@ -20,7 +20,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi.testclient import TestClient
 
 from trcc.app import App
 from trcc.core.events import (
@@ -32,6 +31,8 @@ from trcc.core.events import (
 )
 from trcc.ipc import EVENT_TYPES, decode_event, encode_event
 
+from .conftest import loopback_client
+
 
 @pytest.fixture
 def app(fake_platform) -> App:
@@ -41,7 +42,7 @@ def app(fake_platform) -> App:
 @pytest.fixture
 def client(app: App):
     from trcc.ui.api.main import build_app
-    return TestClient(build_app(app))
+    return loopback_client(build_app(app))
 
 
 def _drain(ws, count: int) -> list[dict]:
