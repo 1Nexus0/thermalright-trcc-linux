@@ -62,7 +62,7 @@ needs_ffmpeg = pytest.mark.skipif(
 def app(fake_platform) -> App:
     """An App whose exports run inline, so a test never waits on a thread."""
     a = App(fake_platform)
-    a.video_export_runner = SyncVideoExportRunner(a.events)
+    a.video_export_runner = SyncVideoExportRunner(a.events, a.themes)
     return a
 
 
@@ -238,8 +238,19 @@ def test_failure_is_published_not_raised(
     assert finished[0].message
 
 
+@pytest.fixture
+def private_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The system temp dir, private to the test, so a leftover is countable."""
+    import tempfile
+    private = tmp_path / "systmp"
+    private.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(private))
+    return private
+
+
 @needs_ffmpeg
-def test_real_encode_round_trips(app: App, events: list, clip: Path) -> None:
+def test_real_encode_round_trips(app: App, events: list, clip: Path,
+                                 private_tmp: Path) -> None:
     """Encode a real clip and read it back with the project's own decoder.
 
     Gating the round trip rather than the write half: the encoder and the
@@ -259,8 +270,13 @@ def test_real_encode_round_trips(app: App, events: list, clip: Path) -> None:
     assert finished[0].ok is True, finished[0].message
     assert finished[0].token == result.token
 
+    # Kept in the user's background library, not left in /tmp where every UI
+    # had to decide what to do with it -- and the temp directory is gone.
     out = Path(finished[0].path)
-    assert out.name == "Theme.zt"
+    assert out.parent == app.platform.paths().user_background_dir(
+        result.target_w, result.target_h)
+    assert out.suffix == ".zt"
+    assert list(private_tmp.iterdir()) == []
     assert out.read_bytes()[0] == ZT_MAGIC
 
     decoder = ZtDecoder(out, (result.target_w, result.target_h))
@@ -344,7 +360,7 @@ def test_thread_runner_returns_before_the_encode_finishes(
     """Submitting must not block — that is the entire point of the port."""
     import time
 
-    runner = ThreadVideoExportRunner(app.events)
+    runner = ThreadVideoExportRunner(app.events, app.themes)
     seen: list = []
     app.events.subscribe(VideoExportFinished, seen.append)
     request = VideoExportRequest(
@@ -366,7 +382,7 @@ def test_thread_runner_returns_before_the_encode_finishes(
 
 def test_thread_runner_ignores_a_submission_after_shutdown(app: App) -> None:
     """Teardown races a UI closing mid-export; dropping it beats a crash."""
-    runner = ThreadVideoExportRunner(app.events)
+    runner = ThreadVideoExportRunner(app.events, app.themes)
     runner.shutdown()
     seen: list = []
     app.events.subscribe(VideoExportFinished, seen.append)
@@ -379,7 +395,7 @@ def test_thread_runner_ignores_a_submission_after_shutdown(app: App) -> None:
 
 def test_shutdown_is_safe_when_nothing_was_ever_submitted(app: App) -> None:
     """Most runs never export; the worker must not exist until one does."""
-    runner = ThreadVideoExportRunner(app.events)
+    runner = ThreadVideoExportRunner(app.events, app.themes)
     runner.shutdown()          # no worker was ever spawned
     runner.shutdown()          # and twice is fine
 
@@ -477,3 +493,35 @@ def test_an_unknown_fit_is_refused_before_queueing(
     assert "diagonal" in result.message
     assert result.token == ""
     assert events == []
+
+
+@needs_ffmpeg
+def test_the_same_clip_is_kept_once(app: App, events: list, clip: Path) -> None:
+    """Content-addressed: two identical exports are one library file."""
+    for _ in range(2):
+        assert app.dispatch(
+            ExportVideoClip(key=KEY, path=clip, start_ms=0, end_ms=1000)).ok
+    paths = [e.path for e in events if isinstance(e, VideoExportFinished)]
+    assert len(paths) == 2 and paths[0] == paths[1]
+    assert len(list(Path(paths[0]).parent.iterdir())) == 1
+
+
+def test_an_unexpected_failure_leaves_no_temp_directory(
+    app: App, events: list, fake_clip: Path, private_tmp: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a worded ``VideoExportError`` cleaned up; anything else -- a raise
+    from the progress callback, the frame reader -- left the directory."""
+    from trcc.services.video_export import VideoExporter
+
+    def boom(*a: object, **k: object) -> None:
+        raise RuntimeError("frame reader fell over")
+
+    monkeypatch.setattr(VideoExporter, "_run_ffmpeg", boom)
+
+    assert app.dispatch(
+        ExportVideoClip(key=KEY, path=fake_clip, start_ms=0, end_ms=1000)).ok
+
+    finished = [e for e in events if isinstance(e, VideoExportFinished)]
+    assert [f.ok for f in finished] == [False]
+    assert list(private_tmp.iterdir()) == []

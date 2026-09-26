@@ -2144,6 +2144,12 @@ class ExportVideoClip(Command[VideoExportResult]):
     as ``LoadCloudTheme`` versus ``DownloadCloudTheme``: fetch-and-apply
     is not the same capability as fetch.
 
+    **The finished clip lands in the user's background library**
+    (``ContentStore.store_background``): stable across reboots, identical
+    clips kept once, and ``VideoExportFinished.path`` names it.  It was left
+    in the exporter's ``/tmp`` directory, and each UI decided for itself what
+    to do with it -- only gui copied it somewhere safe (#271).
+
     **Returns as soon as the clip is QUEUED.**  ffmpeg runs for minutes
     and the IPC dispatch timeout is 30 s, so waiting here would make the
     Command impossible in daemon mode.  Watch the bus instead: every

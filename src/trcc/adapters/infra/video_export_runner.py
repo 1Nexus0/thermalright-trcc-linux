@@ -11,10 +11,12 @@ never names a thread.  Mirrors ``data_install_runner.py`` and
 from __future__ import annotations
 
 import logging
+import shutil
+from pathlib import Path
 
 from ...core.events import EventBus, VideoExportFinished, VideoExportProgress
 from ...core.models import VideoExportRequest
-from ...core.ports import VideoExportRunner
+from ...core.ports import ContentStore, VideoExportRunner
 from ._worker import QueueWorker
 
 log = logging.getLogger(__name__)
@@ -48,8 +50,35 @@ class _ProgressPublisher:
         return f"<progress publisher for {self._token}>"
 
 
+def _keep_in_library(
+    library: ContentStore, produced: Path, request: VideoExportRequest,
+) -> Path:
+    """Move a finished encode into the user's background library.
+
+    The clip stayed in the exporter's ``/tmp`` directory, and every UI decided
+    for itself what to do with it: gui copied it somewhere that survives a
+    reboot (#271), qtgui and the API handed the temp path on, and nothing ever
+    removed the directory.  Stored here, the path is stable for every UI, an
+    identical clip is kept once, and the temp directory goes -- the same move
+    ``SingleFileTheme.adopt`` makes for ``LoadVideo``.
+    """
+    from ...services.video_export import VideoExportError
+    try:
+        ref = library.store_background(produced.read_bytes(), produced.suffix,
+                                       request.target_w, request.target_h)
+    finally:
+        shutil.rmtree(produced.parent, ignore_errors=True)
+    kept = library.resolve_ref(ref)
+    if kept is None:
+        raise VideoExportError(f"Stored the clip as {ref}, but it did not "
+                               "resolve in the background library")
+    log.info("_keep_in_library: %s kept as %s", produced.name, kept)
+    return kept
+
+
 def _export_and_publish(
-    events: EventBus, token: str, request: VideoExportRequest,
+    events: EventBus, library: ContentStore, token: str,
+    request: VideoExportRequest,
 ) -> bool:
     """Encode one clip and announce the outcome.  Never raises.
 
@@ -68,9 +97,9 @@ def _export_and_publish(
     # should not pay for that probe.
     from ...services.video_export import VideoExporter, VideoExportError
     try:
-        path = VideoExporter().export_zt(
+        path = _keep_in_library(library, VideoExporter().export_zt(
             request, _ProgressPublisher(events, token),
-        )
+        ), request)
     except VideoExportError as e:
         # Actionable by contract — the exporter words these for a user.
         log.warning("_export_and_publish: token=%s failed — %s", token, e)
@@ -100,12 +129,14 @@ class ThreadVideoExportRunner(VideoExportRunner):
     def __init__(
         self,
         events: EventBus,
+        library: ContentStore,
         *,
         join_timeout: float = 2.0,
     ) -> None:
         log.info("ThreadVideoExportRunner.__init__: join_timeout=%.1fs",
                  join_timeout)
         self._events = events
+        self._library = library
         self._worker: QueueWorker[_Job] = QueueWorker(
             "trcc-video-export", self._export,
             stall_hint="mid-encode", join_timeout=join_timeout,
@@ -118,7 +149,7 @@ class ThreadVideoExportRunner(VideoExportRunner):
     def _export(self, job: _Job) -> None:
         """Unpack one queued job for the worker — the seam it calls back on."""
         log.debug("_export: token=%s source=%s", job[0], job[1].source)
-        _export_and_publish(self._events, *job)
+        _export_and_publish(self._events, self._library, *job)
 
     def shutdown(self) -> None:
         log.info("shutdown: stopping video-export worker")
@@ -128,13 +159,14 @@ class ThreadVideoExportRunner(VideoExportRunner):
 class SyncVideoExportRunner(VideoExportRunner):
     """Encodes inline on the caller's thread — deterministic tests."""
 
-    def __init__(self, events: EventBus) -> None:
+    def __init__(self, events: EventBus, library: ContentStore) -> None:
         log.info("SyncVideoExportRunner.__init__")
         self._events = events
+        self._library = library
 
     def submit(self, token: str, request: VideoExportRequest) -> None:
         log.info("submit: token=%s source=%s (inline)", token, request.source)
-        _export_and_publish(self._events, token, request)
+        _export_and_publish(self._events, self._library, token, request)
 
     def shutdown(self) -> None:
         log.info("shutdown: nothing to stop (inline runner)")

@@ -40,9 +40,13 @@ def _jpeg(w: int = 320, h: int = 320) -> bytes:
     return bytes(ba)
 
 
-def test_cut_video_is_kept_under_user_content_and_survives_close(
+def test_a_cut_video_becomes_the_background_as_delivered_and_survives_close(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The export now arrives already in the user's background library, which
+    survives a reboot (#271).  gui used to copy it out of /tmp into a place of
+    its own choosing -- a decision no other UI made; it now persists exactly
+    the path it is handed, and makes no copy."""
     from trcc.ui.gui.trcc_app import TRCCApp
 
     # No ffmpeg in the loop: any .zt "decodes" to three black frames.
@@ -51,32 +55,26 @@ def test_cut_video_is_kept_under_user_content_and_survives_close(
         playback = Playback(frames=[_jpeg(w, h)] * 3, fps=15)
         self._playbacks[device_key] = playback
         return playback
-    monkeypatch.setattr(MediaService, "load_video", fake_load)
 
-    staged = tmp_path / "trcc-videoexport-staging" / "Theme.zt"
-    staged.parent.mkdir()
-    staged.write_bytes(b"ZT\x00staged-by-the-export")
+    monkeypatch.setattr(MediaService, "load_video", fake_load)
 
     app = App(MockPlatform([_SPEC], tmp_path), renderer=QtRenderer())
     try:
         assert app.dispatch(ConnectDevice(key=_KEY)).ok
+        library = app.platform.paths().user_background_dir(320, 320)
+        library.mkdir(parents=True)
+        delivered = library / "0123456789abcdef.zt"
+        delivered.write_bytes(b"ZT\x00kept-by-the-export")
         window = TRCCApp(app=app, platform=app.platform)
         window.replay_initial_devices()
 
-        window._on_video_cut_done(str(staged))
+        window._on_video_cut_done(str(delivered))
 
-        kept = (
-            Path(app.platform.paths().user_content_dir())
-            / "backgrounds" / "0402_3922.zt"
-        )
-        assert kept.read_bytes() == staged.read_bytes(), (
-            "the cut must be copied out of the export's staging dir")
-        assert app.settings.for_device(_KEY).background_path == str(kept), (
-            "the override must point at the kept copy, not the staging file")
-
+        assert app.settings.for_device(_KEY).background_path == str(delivered)
+        assert not (Path(app.platform.paths().user_content_dir())
+                    / "backgrounds").exists(), "gui made its own copy again"
         window.close()          # closeEvent -> every handler's cleanup()
-
-        assert app.settings.for_device(_KEY).background_path == str(kept), (
+        assert app.settings.for_device(_KEY).background_path == str(delivered), (
             "closing the GUI must not wipe the persisted background")
         assert app.media.playback(_KEY) is None, (
             "closing the GUI must still unload playback")

@@ -132,7 +132,9 @@ class VideoExporter:
             self._write_zt(output_path, jpegs, progress)
             progress(100, "Done")
             return output_path
-        except VideoExportError:
+        except BaseException:
+            # Every failure, not only the worded ones: a raise from the
+            # progress callback or the frame reader left the directory behind.
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise
 

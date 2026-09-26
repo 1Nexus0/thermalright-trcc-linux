@@ -210,7 +210,8 @@ class App:
             from .adapters.infra.video_export_runner import (
                 ThreadVideoExportRunner,
             )
-            video_export_runner = ThreadVideoExportRunner(self.events)
+            video_export_runner = ThreadVideoExportRunner(self.events,
+                                                          self.themes)
         self.video_export_runner: VideoExportRunner = video_export_runner
         # Per-device slideshow cursor — tick-driven, no background thread.
         self.slideshow = SlideshowService()

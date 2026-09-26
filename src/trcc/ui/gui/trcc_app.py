@@ -13,7 +13,6 @@ currently-selected device; the rest keep ticking in the background.
 from __future__ import annotations
 
 import logging
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -2308,19 +2307,11 @@ class TRCCApp(QMainWindow):
         self._hide_cutters()
         h = self._active_lcd()
         if zt_path and h:
-            # The export stages its Theme.zt under /tmp, which does not
-            # survive a reboot, and ``SetBackground`` persists whatever path
-            # it is handed.  Keep the file where the image cutter keeps its
-            # PNG so the override still resolves next boot (#271).
-            target = self._user_background_target(h, ".zt")
-            try:
-                shutil.copy2(zt_path, target)
-            except OSError as e:
-                log.warning("_on_video_cut_done: could not keep %s as %s: %s",
-                            zt_path, target, e)
-                self.uc_preview.set_status("Error: could not save video")
-                return
-            log.info("_on_video_cut_done: kept %s as %s", zt_path, target)
+            # The export arrives already in the user's background library,
+            # which survives a reboot (#271) -- core keeps it there for every
+            # UI.  This handler copied it out of /tmp itself, a decision no
+            # other UI made, until the runner started storing it.
+            target = Path(zt_path)
             # ``SetBackground`` persists the .zt as the device's
             # background override (``DeviceSettings.background_path``)
             # THEN delegates to ``PlayVideo`` for the decode/animate
