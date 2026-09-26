@@ -26,6 +26,7 @@ empty, but the app keeps running).
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import shutil
@@ -203,17 +204,30 @@ class HttpDataInstaller(DataInstaller):
                         archive_tmp, type(e).__name__, e)
             return False
 
+        # Extract beside the target and swap it in whole.  Straight into
+        # ``target_dir``, a failed or interrupted extract left files behind,
+        # and ``_is_populated`` then called the half-install ready forever.
+        staging = target_dir.with_name(f"{target_dir.name}.partial")
+        shutil.rmtree(staging, ignore_errors=True)   # a run that died mid-way
         try:
-            ok = self._extractor.extract(archive_tmp, target_dir)
+            ok = self._extractor.extract(archive_tmp, staging)
+            if ok:
+                _unwrap_nested_dir(staging)
+                if target_dir.is_dir():
+                    target_dir.rmdir()   # empty: _is_populated said so above
+                staging.rename(target_dir)
+                log.info("install: %s ready at %s", archive_name, target_dir)
+            else:
+                log.warning("install: %s extract failed — nothing kept",
+                            archive_name)
+        except OSError as e:
+            log.warning("install: cannot place %s at %s: %s: %s",
+                        archive_name, target_dir, type(e).__name__, e)
+            ok = False
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 archive_tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-
-        if ok:
-            _unwrap_nested_dir(target_dir)
-            log.info("install: %s ready at %s", archive_name, target_dir)
+            shutil.rmtree(staging, ignore_errors=True)
         return ok
 
 

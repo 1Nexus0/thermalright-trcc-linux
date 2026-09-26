@@ -145,7 +145,6 @@ class CzhordeCatalog(CloudCatalog):
             raise ValueError(f"Invalid cloud theme id: {theme_id!r}")
         res_dir = resolution.replace("x", "")
         cache = self._cache_dir / res_dir
-        cache.mkdir(parents=True, exist_ok=True)
         target = cache / f"{theme_id}{suffix}"
         if target.is_file() and target.stat().st_size > 0:
             log.debug("CzhordeCatalog: cache hit %s", target)
@@ -153,6 +152,9 @@ class CzhordeCatalog(CloudCatalog):
         log.info("CzhordeCatalog: fetching %s%s @ %s (cache miss)",
                  theme_id, suffix, resolution)
         data = self._fetch_with_fallback(theme_id, suffix, resolution)
+        # Only once there is something to keep: created before the fetch, a
+        # failed download left an empty directory per requested resolution.
+        cache.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         log.info("CzhordeCatalog: cached %d bytes to %s", len(data), target)
         return target

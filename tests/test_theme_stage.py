@@ -174,6 +174,24 @@ def test_installing_an_unchanged_payload_is_skipped(
     assert len(copies) == 1, "unchanged payload was re-copied"
 
 
+def test_a_same_size_payload_with_new_bytes_is_re_copied(tmp_path: Path) -> None:
+    """The guard compared SIZES, so a different image or clip of the same byte
+    count kept the old one.  The test below changes the length too, which is
+    why it stayed green."""
+    svc = FileContentStore(_Paths(tmp_path))
+    src = tmp_path / "clip.png"
+    src.write_bytes(b"BEFORE")
+
+    with svc.single_file_theme(src, "image") as unit:
+        dest = unit.install(src, ThemeDir.BG)
+
+    src.write_bytes(b"AFTER!")
+    with svc.single_file_theme(src, "image") as unit:
+        unit.install(src, ThemeDir.BG)
+
+    assert dest.read_bytes() == b"AFTER!"
+
+
 def test_a_changed_payload_is_re_copied(tmp_path: Path) -> None:
     """The other half — the skip must not make a real edit invisible."""
     svc = FileContentStore(_Paths(tmp_path))

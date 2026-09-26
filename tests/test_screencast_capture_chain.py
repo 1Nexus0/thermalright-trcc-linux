@@ -608,3 +608,61 @@ def test_both_qt_producers_agree_with_the_shared_primitive() -> None:
     assert qimage_to_raw_rgb24(img).data == by_hand
     assert _pixmap_to_raw_frame(
         QPixmap.fromImage(img), PADDED_W, PADDED_H).data == by_hand
+
+
+# ── nothing left behind (class A audit, 2026-09-26) ────────────────────────
+
+def _scrot_like(monkeypatch: pytest.MonkeyPatch, module: str) -> None:
+    """Only ``scrot`` on PATH, behaving as scrot does: it will not overwrite an
+    existing file and writes ``<name>_000.png`` beside it instead (confirmed
+    against the installed scrot)."""
+    def fake_which(name: str) -> str | None:
+        return "/usr/bin/scrot" if name == "scrot" else None
+
+    def fake_run(cmd: list[str], **kw: Any) -> Any:
+        out = Path(cmd[-1])
+        if out.exists():
+            out = out.with_name(f"{out.stem}_000{out.suffix}")
+        _png(out, REGION[2], REGION[3], INK)
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    monkeypatch.setattr(f"{module}.shutil.which", fake_which)
+    monkeypatch.setattr(f"{module}.subprocess.run", fake_run)
+
+
+@pytest.fixture
+def private_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    import tempfile
+    private = tmp_path / "systmp"
+    private.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(private))
+    return private
+
+
+def test_a_screencast_grab_leaves_nothing_in_tmp(
+    cap: ToolCapture, monkeypatch: pytest.MonkeyPatch, private_tmp: Path,
+) -> None:
+    """A pre-created mkstemp file made scrot write ``_000.png`` beside it: one
+    PNG left in /tmp — tmpfs, RAM — on every screencast tick."""
+    _scrot_like(monkeypatch, "trcc.adapters.screencast.qt")
+
+    frames = [cap.grab_region(*REGION) for _ in range(3)]
+
+    assert all(_uniform(f, INK) for f in frames)
+    assert list(private_tmp.iterdir()) == []
+
+
+def test_the_picker_grab_leaves_nothing_in_tmp(
+    monkeypatch: pytest.MonkeyPatch, private_tmp: Path,
+) -> None:
+    """The region picker's own full-screen fallback had the same mkstemp."""
+    from trcc.ui import screen_overlay
+
+    _scrot_like(monkeypatch, "trcc.ui.screen_overlay")
+    monkeypatch.setattr(screen_overlay.QApplication, "primaryScreen",
+                        staticmethod(lambda: None))
+
+    pix = screen_overlay.grab_full_screen()
+
+    assert not pix.isNull()
+    assert list(private_tmp.iterdir()) == []

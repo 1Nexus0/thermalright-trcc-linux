@@ -62,3 +62,55 @@ def test_every_asset_browser_can_re_list(qtbot, tmp_path: Path) -> None:
     assert subclasses, "no asset browsers found — has the base moved?"
     for cls in subclasses:
         assert "refresh" in dir(cls), f"{cls.__name__} cannot re-list"
+
+
+# ── create-from-image names the theme after the picture (2026-09-26) ─────
+
+def test_re_cropping_a_picture_replaces_its_theme(
+    qtbot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Staged under a random tempfile name, every crop became a NEW theme
+    called ``trcc-crop-<random>``.  Named after the source, a re-crop of the
+    same picture replaces its own theme."""
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QDialog
+
+    from trcc.ui.qtgui import image_crop
+    from trcc.ui.qtgui.panels import local_theme_browser as browser_mod
+
+    class _AcceptingCrop:
+        def __init__(self, parent: object) -> None:
+            pass
+
+        def load_image(self, source: str, **kw: object) -> None:
+            pass
+
+        def exec(self) -> QDialog.DialogCode:
+            return QDialog.DialogCode.Accepted
+
+        def cropped(self) -> QImage:
+            image = QImage(32, 32, QImage.Format.Format_RGB32)
+            image.fill(0x0000FF)
+            return image
+
+    source = tmp_path / "holiday.png"
+    source.write_bytes(b"picked by the user")
+    app = App(MockPlatform(_SPECS, tmp_path / "root"))
+    try:
+        panel = LocalThemeBrowser(app, BusBridge(app.events))
+        qtbot.addWidget(panel)
+        monkeypatch.setattr(panel, "_device_key", lambda: "0402:3922")
+        monkeypatch.setattr(panel, "_target_resolution", lambda key: (320, 320))
+        monkeypatch.setattr(browser_mod.QFileDialog, "getOpenFileName",
+                            staticmethod(lambda *a, **k: (str(source), "")))
+        monkeypatch.setattr(image_crop, "ImageCropDialog", _AcceptingCrop)
+
+        panel._on_create_from_image()
+        panel._on_create_from_image()
+
+        themes = sorted(p.name for p in
+                        (app.platform.paths().user_content_dir()
+                         / "single-image").iterdir())
+        assert themes == ["holiday"]
+    finally:
+        app.close()

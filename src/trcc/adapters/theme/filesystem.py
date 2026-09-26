@@ -30,6 +30,7 @@ Rendering (turning a Theme into frame bytes) is DisplayService's job.
 from __future__ import annotations
 
 import builtins
+import filecmp
 import hashlib
 import json
 import logging
@@ -94,11 +95,13 @@ class FileSingleFileTheme(SingleFileTheme):
     def install(self, source: Path, filename: str) -> Path:
         """Copy *source* in as *filename*, skipping an unchanged re-run.
 
-        The size guard is what makes re-loading the same file cheap; both
-        callers had their own copy of it.
+        The guard is what makes re-loading the same file cheap; both callers
+        had their own copy of it.  It compared SIZES only, so a different
+        image or clip of the same byte count kept the old one — ``filecmp``
+        checks size first and reads the bytes only when the sizes match.
         """
         dest = self.path / filename
-        if dest.is_file() and dest.stat().st_size == source.stat().st_size:
+        if dest.is_file() and filecmp.cmp(source, dest, shallow=False):
             log.info("SingleFileTheme.install: %s unchanged — skipped", dest)
             return dest
         shutil.copy2(source, dest)

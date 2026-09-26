@@ -270,3 +270,15 @@ def test_czhorde_catalog_implements_the_core_cloud_catalog_port(tmp_path) -> Non
 
     catalog = CzhordeCatalog(http=FakeHttp(), cache_dir=tmp_path)
     assert isinstance(catalog, CloudCatalog)
+
+
+def test_a_failed_download_leaves_no_directory(tmp_path: Path) -> None:
+    """The cache directory was created before the fetch, so every failed
+    download — and the API takes any width/height — left an empty one."""
+    catalog = CzhordeCatalog(http=FakeHttp(), cache_dir=tmp_path,
+                             resolution="1001x7")
+
+    with pytest.raises(HttpFetchError):
+        catalog.download_theme("a001")
+
+    assert list(tmp_path.iterdir()) == []

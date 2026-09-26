@@ -305,16 +305,17 @@ class LocalThemeBrowser(AssetBrowserPanel):
             )
             return
 
-        # Stage the cropped image to disk + dispatch LoadImage.  We
-        # write to a tempfile rather than user_content_dir directly
-        # because LoadImage stages copies into its own staging area.
+        # Stage the crop + dispatch LoadImage, which copies it into a theme
+        # NAMED after the staged file.  A random tempfile name made every crop
+        # a new theme called ``trcc-crop-<random>``; the source's own name
+        # makes a re-crop of the same picture replace its theme.
         import tempfile
-        with tempfile.NamedTemporaryFile(
-            suffix=".png", delete=False, prefix="trcc-crop-",
-        ) as tmp:
-            tmp_path = Path(tmp.name)
-        try:
-            if not cropped.save(str(tmp_path), b"PNG"):
+        with tempfile.TemporaryDirectory(prefix="trcc-crop-") as scratch:
+            tmp_path = Path(scratch) / f"{Path(source).stem}.png"
+            # No explicit format: Qt reads it from the .png suffix.  PySide6
+            # 6.11 raises ValueError on b"PNG" (what this passed), while its
+            # stubs reject "PNG" -- the suffix satisfies both.
+            if not cropped.save(str(tmp_path)):
                 self._status.setText(
                     "Failed to write cropped image to a temporary file.",
                 )
@@ -323,11 +324,6 @@ class LocalThemeBrowser(AssetBrowserPanel):
             self._status.setText(result.message)
             if result.ok:
                 self.refresh()
-        finally:
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
 
     def _on_create_from_video(self) -> None:
         log.info("_on_create_from_video")

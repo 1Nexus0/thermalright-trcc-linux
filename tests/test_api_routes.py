@@ -506,6 +506,21 @@ def test_boot_animation_rejects_path_traversal(
     assert resp.status_code == 400
 
 
+def test_boot_animation_answers_400_on_a_fresh_install(
+    api_client: TestClient, fake_platform: FakePlatform,
+) -> None:
+    """No ~/.trcc-user yet: ``resolve(strict=True)`` raised straight through
+    as a 500 — the test above creates the directory first, which hid it."""
+    assert not fake_platform.paths().user_content_dir().exists()
+    resp = api_client.post(
+        "/devices/0402:3922/display/boot-animation",
+        json={"frames_dir": "myanim", "delay_ds": 5},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == (
+        "frames_dir not found under the user content directory: 'myanim'")
+
+
 def test_boot_animation_valid_subdir_passes_path_barrier(
     api_client: TestClient, fake_platform: FakePlatform,
 ) -> None:

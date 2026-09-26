@@ -24,7 +24,6 @@ what the user is picking.
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import subprocess
 import tempfile
@@ -105,15 +104,10 @@ def grab_full_screen() -> QPixmap:
         if not pix.isNull() and pix.width() > 1:
             return pix
 
-    fd, tmp_path = tempfile.mkstemp(suffix=".png")
-    os.close(fd)
-    try:
-        return _try_external_capture(tmp_path)
-    finally:
-        try:
-            Path(tmp_path).unlink()
-        except OSError:
-            pass
+    # A fresh directory and a not-yet-existing name: scrot will not overwrite a
+    # pre-created file, and wrote ``<name>_000.png`` beside it, left behind.
+    with tempfile.TemporaryDirectory(prefix="trcc-grab-") as scratch:
+        return _try_external_capture(str(Path(scratch) / "grab.png"))
 
 
 class BaseScreenOverlay(QWidget):

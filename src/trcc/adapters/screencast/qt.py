@@ -32,7 +32,6 @@ QPixmap where this port raises.  Not consolidated here.
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import subprocess
 import tempfile
@@ -232,10 +231,13 @@ class ToolCapture(ScreenCapture):
     ) -> RawFrame:
         _check_region(width, height)
         log.debug("ToolCapture: grab region (%d,%d) %dx%d", x, y, width, height)
-        fd, tmp_path = tempfile.mkstemp(suffix=".png")
-        os.close(fd)
         pix: QPixmap | None = None
-        try:
+        # A directory, and a name inside it that does not exist yet: scrot
+        # refuses to overwrite, so a pre-created mkstemp file made it write
+        # ``<name>_000.png`` beside it instead — one PNG left in /tmp (tmpfs,
+        # RAM) per screencast tick.  The directory takes whatever a tool writes.
+        with tempfile.TemporaryDirectory(prefix="trcc-grab-") as scratch:
+            tmp_path = str(Path(scratch) / "grab.png")
             pix = self._run(tuple(t for t in self._tools if t.region),
                             x, y, width, height, tmp_path)
             if pix is None:
@@ -246,11 +248,6 @@ class ToolCapture(ScreenCapture):
                              "(%d,%d) %dx%d", shot.width(), shot.height(),
                              x, y, width, height)
                     pix = shot.copy(QRect(x, y, width, height))
-        finally:
-            try:
-                Path(tmp_path).unlink()
-            except OSError:
-                pass
         if pix is None or pix.isNull():
             names = ", ".join(tool.name for tool in self._tools) or "no tool"
             log.error("ToolCapture: all capture paths failed for (%d,%d) "
@@ -290,11 +287,13 @@ class ToolCapture(ScreenCapture):
                             result.stderr[:200].decode("utf-8", "replace"))
                 continue
             # ``spectacle`` returns before its file is flushed (measured on
-            # Plasma, PR #271); ``mkstemp`` pre-created it empty, so "exists"
-            # says nothing -- wait for bytes.  A tool that never writes falls
-            # through to the null-pixmap warning below.
+            # Plasma, PR #271) -- wait for bytes.  The file is not pre-created
+            # (scrot would refuse it), so "not there yet" is part of waiting.
+            # A tool that never writes falls through to the null-pixmap
+            # warning below.
+            out = Path(tmp_path)
             for _ in range(_OUTPUT_WAIT_POLLS):
-                if Path(tmp_path).stat().st_size > 0:
+                if out.is_file() and out.stat().st_size > 0:
                     break
                 time.sleep(_OUTPUT_WAIT_INTERVAL_S)
             pix = QPixmap(tmp_path)

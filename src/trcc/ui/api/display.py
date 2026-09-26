@@ -652,11 +652,15 @@ def upload_boot_animation(key: str, body: BootAnimationRequest,
         log.warning("frames dir: GetPaths returned no user_content_dir — "
                     "refusing (an empty path resolves to the process cwd)")
         raise HTTPException(500, "user content directory unavailable")
-    allowed_root = Path(user_content).resolve(strict=True)
+    # Not strict: on a fresh install ~/.trcc-user does not exist yet, and
+    # strict resolution raised straight through as a 500.  A missing root
+    # simply has no subdirectories, so the lookup below answers 400.
+    allowed_root = Path(user_content).resolve()
     requested_name = Path(body.frames_dir).name
     if not requested_name:
         raise HTTPException(400, "frames_dir required")
-    subdirs = {p.name: p for p in allowed_root.iterdir() if p.is_dir()}
+    subdirs = ({p.name: p for p in allowed_root.iterdir() if p.is_dir()}
+               if allowed_root.is_dir() else {})
     frames_path = subdirs.get(requested_name)
     if frames_path is None:
         raise HTTPException(

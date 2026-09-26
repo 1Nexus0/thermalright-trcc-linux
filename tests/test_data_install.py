@@ -211,3 +211,77 @@ def test_every_reachable_resolution_has_both_shipped_catalogs() -> None:
         "a panel can resolve to a size with no shipped theme catalog, so it "
         f"would have no themes at all: {missing}"
     )
+
+
+# =========================================================================
+# A failed extract keeps nothing, so the next run tries again
+# =========================================================================
+
+
+class _Fetches:
+    def fetch(self, url: str, timeout_s: float = 30.0) -> bytes:
+        return b"ARCHIVE"
+
+
+class _DiesHalfway:
+    """Writes one file, then fails — a full disk, or a killed 7z."""
+
+    def __init__(self, *, raises: bool) -> None:
+        self.raises = raises
+        self.calls = 0
+
+    def extract(self, archive: Path, target: Path) -> bool:
+        self.calls += 1
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "Theme1").mkdir()
+        if self.raises:
+            raise OSError("No space left on device")
+        return False
+
+
+def test_a_failed_extract_is_not_mistaken_for_an_install(tmp_path: Path) -> None:
+    """Extracted straight into the target, the half-written files made
+    ``_is_populated`` call it installed, so it was never fetched again."""
+    from trcc.adapters.repo.data_install import HttpDataInstaller
+
+    for raises in (False, True):
+        target = tmp_path / f"theme320320-{raises}"
+        extractor = _DiesHalfway(raises=raises)
+        installer = HttpDataInstaller(http=_Fetches(), extractor=extractor)
+
+        first = installer.install("theme320320.7z", target)
+        second = installer.install("theme320320.7z", target)
+
+        assert (first, second) == (False, False)
+        assert extractor.calls == 2, "the second run must try again"
+        assert not target.exists()
+        assert list(tmp_path.glob("*.partial")) == []
+
+
+class _Wraps:
+    """A good archive that wraps its content in one folder, as some do."""
+
+    def extract(self, archive: Path, target: Path) -> bool:
+        theme = target / "theme320320" / "Theme1"
+        theme.mkdir(parents=True)
+        (theme / "00.png").write_bytes(b"\x89PNG")
+        return True
+
+
+def test_a_good_extract_lands_unwrapped_with_nothing_beside_it(
+    tmp_path: Path,
+) -> None:
+    """The success half of the staged install: extracted aside, unwrapped
+    there, then swapped in -- including over an empty target directory."""
+    from trcc.adapters.repo.data_install import HttpDataInstaller
+
+    target = tmp_path / "theme320320"
+    target.mkdir()                     # empty: what a failed first run leaves
+
+    ok = HttpDataInstaller(http=_Fetches(), extractor=_Wraps()).install(
+        "theme320320.7z", target)
+
+    assert ok is True
+    assert sorted(p.name for p in target.iterdir()) == ["Theme1"]
+    assert (target / "Theme1" / "00.png").read_bytes() == b"\x89PNG"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["theme320320"]
