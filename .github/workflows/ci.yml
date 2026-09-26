@@ -14,7 +14,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
   id-token: write
 
 jobs:
@@ -297,89 +296,91 @@ jobs:
           git push
 
   security-scans:
-    name: Security scans (pip-audit, bandit, safety) — non-blocking
+    name: Security scans (pip-audit, bandit) — non-blocking
     runs-on: ubuntu-latest
     needs: tests
+    outputs:
+      found: ${{ steps.scan.outputs.found }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Set up Python 3.11
+      - name: Set up Python 3.12
         uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install security tools
+        run: pip install pip-audit bandit
+
+      # The tools' exit codes are the verdict.  `pip-audit .` resolves TRCC's
+      # own dependency set (a bare `pip-audit` audits THIS job's env — the
+      # scanners — which is what it did until 2026-09-26).  It also exits 1,
+      # writing no JSON, when it cannot resolve; bandit exits 0 on a file it
+      # cannot parse and lists it under `.errors`.  Both count as findings:
+      # a scan that did not run must not read as clean.
+      - name: Scan
+        id: scan
         run: |
-          python -m pip install --upgrade pip
-          pip install pip-audit bandit safety
+          found=false
+          pip-audit . -f json -o pip_audit.json || found=true
+          bandit -r src -lll -q -f json -o bandit.json || found=true
+          jq -e '.errors == []' bandit.json > /dev/null || found=true
+          {
+            echo "### pip-audit — TRCC's resolved dependencies"
+            jq -r '[.dependencies[] | .name as $n | .version as $v | .vulns[]
+                    | "- \($n) \($v): \(.id), fixed in \(.fix_versions | join(", ") | if . == "" then "no release yet" else . end)"]
+                   | unique | if . == [] then "- none" else .[] end' pip_audit.json \
+              || echo "- **the audit did not run** — read the step log"
+            echo "### bandit — HIGH severity"
+            jq -r '[(.results[] | "- \(.test_id) \(.filename):\(.line_number) \(.issue_text)"),
+                    (.errors[] | "- could not scan \(.filename): \(.reason)")]
+                   | if . == [] then "- none" else .[] end' bandit.json \
+              || echo "- **bandit did not run** — read the step log"
+          } > findings.md
+          cat findings.md >> "$GITHUB_STEP_SUMMARY"
+          echo "found=$found" >> "$GITHUB_OUTPUT"
 
-      - name: Run pip-audit (JSON output)
-        run: |
-          python -m pip_audit --format json > pip_audit_results.json || true
-
-      - name: Run bandit (JSON output)
-        run: |
-          bandit -r src -f json -o bandit_report.json || true
-
-      - name: Run safety check (JSON output)
-        run: |
-          safety check --full-report --json -o safety_report.json || true
-
-      - name: Produce findings summary file
-        id: summary
-        run: python .github/scripts/security_summary.py
-
-      - name: Upload security reports and summary
+      - name: Upload security reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: security-reports
           path: |
-            bandit_report.json
-            pip_audit_results.json
-            safety_report.json
-            security_findings.json
+            pip_audit.json
+            bandit.json
+            findings.md
 
   security-triage:
-    name: Security triage (create GitHub issue when findings)
+    name: Security triage (open or update one issue)
     runs-on: ubuntu-latest
     needs: security-scans
-    if: needs.security-scans.result == 'success'
+    # Never on a PR: a fork's token cannot write issues, and an unmerged
+    # branch must not open one.  Its findings are in the run summary.
+    if: needs.security-scans.outputs.found == 'true' && github.event_name != 'pull_request'
+    permissions:
+      issues: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          sparse-checkout: .github/scripts
-
       - name: Download security reports
         uses: actions/download-artifact@v8
         with:
           name: security-reports
-          path: security_reports
 
-      - name: Inspect findings & decide
-        id: inspect
-        run: python .github/scripts/security_inspect.py
-
-      - name: Create issue for security findings
-        if: steps.inspect.outputs.found == 'true'
+      # One open issue at a time, kept current by editing it — a comment per
+      # push to main would bury it.  The `automated` label is this job's alone.
+      - name: Open or update the security issue
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh issue create \
-            --title '[SECURITY] High/Critical findings in CI scans' \
-            --label 'security,automated' \
-            --body "The automated security scans detected **high/critical** findings.
-
-          Summary:
-          \`\`\`json
-          ${{ steps.inspect.outputs.summary }}
-          \`\`\`
-
-          Full scan reports are attached to the workflow run as artifacts (security-reports).
-
-          Please triage and assign as appropriate. If this issue is a false positive, add the reason and close."
+          echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> findings.md
+          open=$(gh issue list --label security --label automated --state open --json number -q '.[0].number')
+          if [ -n "$open" ]; then
+            gh issue edit "$open" --body-file findings.md
+          else
+            gh issue create --title '[SECURITY] Findings in CI scans' \
+              --label security --label automated --body-file findings.md
+          fi
 
   build-artifacts:
     name: Build artifacts (wheel + sdist)
