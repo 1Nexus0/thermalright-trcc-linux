@@ -102,6 +102,10 @@ class SetLedColors(Command[LedColorsResult]):
             )
 
         if ok:
+            # Held until an LED settings change: the sensor observer and the
+            # animation loop replaced these colours within a tick (measured).
+            app.held.add(self.key)
+            log.info("SetLedColors: %s held", self.key)
             app.events.publish(LedColorsChanged(
                 key=self.key, color_count=len(self.colors),
             ))

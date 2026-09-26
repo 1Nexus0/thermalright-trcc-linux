@@ -393,6 +393,9 @@ def _publish_led_settings_changed(app: App, key: str) -> None:
     immediately, instead of waiting for the next sensor tick).
     """
     log.debug("_publish_led_settings_changed: key=%s", key)
+    # A deliberate LED change ends a SetLedColors hold — released BEFORE the
+    # publish, so the observer's re-render below is not skipped as held.
+    app.held.discard(key)
     app.events.publish(LedColorsChanged(key=key, color_count=0))
     app.events.publish(LedSettingsChanged(key=key))
 

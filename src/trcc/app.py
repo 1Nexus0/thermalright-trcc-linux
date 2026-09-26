@@ -139,6 +139,11 @@ class App:
         # Currently-loaded Theme per device — set by LoadTheme, read by
         # RenderAndSend ticker, cleared on DisconnectDevice.
         self.active_themes: dict[str, Theme] = {}
+        # Panels a one-shot push holds (SendImage / SendColor / SendFrame /
+        # SetLedColors): nothing implicit may paint over them until the next
+        # theme load or LED settings change.  In memory only — a restart, like
+        # a reconnect, gives the panel back to its saved theme (#306).
+        self.held: set[str] = set()
         # Per-device LED runtime counters — populated lazily by RenderLed,
         # cleared by DisconnectDevice.  Not persisted — these are tick
         # phase counters, not user prefs.
@@ -811,6 +816,7 @@ class App:
         if device is not None:
             device.disconnect()
         self.active_themes.pop(key, None)
+        self.held.discard(key)
         self.led_runtime.pop(key, None)
         self.media.unload(key)
         self.backgrounds.clear(key)
@@ -1210,6 +1216,7 @@ class _DeviceRenderObserver:
                 if d.is_connected
                 and (d.is_led or k in self._app.active_themes)
                 and k not in animating
+                and k not in self._app.held
             ]
         for key in keys:
             device = self._app.devices.get(key)

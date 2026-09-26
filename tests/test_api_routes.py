@@ -1915,3 +1915,20 @@ def test_keepalive_cannot_run_until_interrupted_over_http(
     client, _ = panel_api
     resp = client.post(f"/devices/{_KEY}/display/keepalive", json={"count": 0})
     assert resp.status_code == 422
+
+
+def test_a_tick_poller_leaves_a_pushed_image_on_the_panel(
+    panel_api: tuple[TestClient, App],
+) -> None:
+    """``/tick`` self-primes with a restore on every poll, which reloaded the
+    saved theme over ``/send-image`` one poll later (#306's second hole)."""
+    client, app = panel_api
+    image = (app.platform.paths().user_content_dir() / "inside.png").read_bytes()
+    assert client.post(f"/devices/{_KEY}/display/send-image",
+                       files={"image": ("x.png", image, "image/png")}).json()["ok"]
+
+    tick = client.post(f"/devices/{_KEY}/display/tick")
+
+    assert tick.status_code == 200
+    assert tick.json()["message"] == "held by a pushed frame"
+    assert _KEY not in app.active_themes

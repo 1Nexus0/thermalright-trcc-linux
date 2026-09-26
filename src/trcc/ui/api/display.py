@@ -892,8 +892,9 @@ def tick(key: str, request: Request) -> RenderResult:
 
     Self-primes and advances video the way the CLI ``display play`` loop does,
     so a headless poller Just Works (#239): (1) ``RestoreDeviceState`` is
-    idempotent — a no-op once a theme is active — so the first tick can't fail
-    "No active theme"; (2) ``TickDisplay`` advances a play-video override's
+    idempotent — a no-op once a theme is active, and while a push holds the
+    panel (a poll reloaded the theme over ``/send-image``) — so the first tick
+    can't fail "No active theme"; (2) ``TickDisplay`` advances a play-video override's
     cursor before rendering, so successive ticks animate it.
 
     The restore stays HERE rather than inside ``TickDisplay``: a stateless

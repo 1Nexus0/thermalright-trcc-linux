@@ -167,6 +167,7 @@ class LoadTheme(Command[ThemeResult]):
         # (animated→static switches silently kept showing the old animation
         # until a second click finally cleared it).
         app.active_themes[self.key] = theme
+        app.held.discard(self.key)   # a theme load ends a push's hold (#306)
         # Single source of truth for "stop the previous video + clear the
         # cloud-background override + invalidate the scene cache": ``StopVideo``
         # (publishes VideoStopped, clears background_path, unloads playback).
@@ -1739,6 +1740,14 @@ class RestoreDeviceState(Command[ThemeResult]):
             return ThemeResult(ok=True, key=self.key, theme_name=existing.name,
                                theme_path=str(existing.path),
                                message="Display state already active")
+        # A push holds the panel until a THEME LOAD, whoever asks: ``/tick``
+        # self-primes with this on every poll and reloaded the theme over a
+        # push one poll later (#306).  One rule in core, no per-UI flag.
+        if self.key in app.held:
+            log.info("RestoreDeviceState: %s is held by a pushed frame — no-op",
+                     self.key)
+            return ThemeResult(ok=True, key=self.key,
+                               message="Held by a pushed frame")
 
         # 2. Persisted theme (reset_overrides=False preserves overlay/mask edits).
         app.dispatch(RestoreLastTheme(key=self.key))

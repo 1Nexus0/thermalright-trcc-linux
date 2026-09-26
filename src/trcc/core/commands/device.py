@@ -491,6 +491,31 @@ class DisconnectDevice(Command[DisconnectResult]):
         app.events.publish(DeviceDisconnected(key=self.key))
         return DisconnectResult(ok=True, key=self.key, message="Disconnected")
 
+def _take_over_panel(app: App, key: str) -> None:
+    """Hand *key*'s panel to a one-shot push until the next theme load.
+
+    A frame sent once lasted one sensor tick: the active theme re-rendered
+    over it (#306), and so did video, a slideshow rotation and a ``/tick``
+    poll.  So the theme is dropped and any video stopped — both IN MEMORY; the
+    saved theme and background stay — and the key goes into ``App.held``,
+    which every implicit producer checks.  ``LoadTheme`` and detach release it.
+
+    Before the frame is BUILT: ``StopVideo`` wipes the scene cache the build
+    parks its preview in.  Theme before video: ``StopVideo`` publishes
+    ``VideoStopped``, which the render observer turns into a theme render — a
+    wasted frame flashed ahead of the push.  Already held is a no-op, so a
+    script streaming frames pays for the takeover once, not per frame.
+    """
+    if key in app.held:
+        log.debug("_take_over_panel: %s already held", key)
+        return
+    paused = app.active_themes.pop(key, None)
+    app.dispatch(StopVideo(key=key, keep_override=True))
+    app.held.add(key)
+    log.info("_take_over_panel: %s held (theme paused: %s)", key,
+             paused.name if paused is not None else "none active")
+
+
 @dataclass(frozen=True, slots=True)
 class SendFrame(Command[SendResult]):
     """Push already-built frame bytes to the device.
@@ -514,6 +539,7 @@ class SendFrame(Command[SendResult]):
         except (DeviceNotFoundError, DeviceNotConnectedError) as e:
             return SendResult(ok=False, key=self.key, connected=False,
                               message=str(e))
+        _take_over_panel(app, self.key)
         try:
             ok = app.send(self.key, self.data)
         except TransportError as e:
@@ -561,6 +587,7 @@ class SendColor(Command[SendResult]):
             return SendResult(ok=False, key=self.key, bytes_sent=0,
                               connected=False, message=str(e))
 
+        _take_over_panel(app, self.key)
         try:
             frame = app.display.build_solid_color_frame(
                 info=device.info,
@@ -578,7 +605,10 @@ class SendColor(Command[SendResult]):
 
         bytes_sent = len(frame) if ok else 0
         if ok:
-            app.events.publish(FrameSent(key=self.key, bytes_sent=bytes_sent))
+            app.events.publish(FrameSent(
+                key=self.key, bytes_sent=bytes_sent,
+                surface=app.display.rendered_surface(self.key),
+            ))
         return SendResult(
             ok=ok, key=self.key, bytes_sent=bytes_sent, connected=True,
             message=(f"Sent {bytes_sent} bytes "
@@ -652,14 +682,14 @@ class SendImage(Command[SendResult]):
     no-persist variant: nothing written to disk, no settings mutation.
     Dispatched by CLI ``display send-image`` and API ``/send-image``.
 
-    **The push takes the panel over until the next theme load.**  Sending
-    once was not enough: the active theme re-rendered on the next sensor
-    tick (~2 s) and painted over the pushed frame (#306).  So the device's
-    active theme is dropped and any video stopped — both IN MEMORY; the
-    saved theme and background stay, and a restart, ``LoadTheme`` or
-    ``RestoreDeviceState`` brings them back.  Keepalive resends the pushed
-    frame, and :class:`BuildPreview` shows it.  A screencast is refused
-    rather than stopped: stopping one clears its saved region.
+    **The push takes the panel over until the next theme load**
+    (:func:`_take_over_panel`, shared with ``SendColor`` / ``SendFrame``) —
+    sending once lasted one sensor tick (#306).  A theme load, a restart or a
+    reconnect gives the panel back; ``RestoreDeviceState`` does not.  Keepalive
+    resends the pushed frame and :class:`BuildPreview` shows it.  A
+    screencast is refused rather than stopped: stopping one clears its saved
+    region.  (Only here: ``SleepDevice`` goes through ``SendColor``, and
+    ``App.close`` must still blank a panel whose screencast region is saved.)
 
     Acceptable extensions: PNG / JPG / JPEG / BMP / WEBP.  Honors
     per-device brightness + orientation + device-side rotation via
@@ -696,14 +726,7 @@ class SendImage(Command[SendResult]):
                 message=f"A screencast owns {self.key} — stop it first",
             )
 
-        # Take the panel over BEFORE building: StopVideo wipes the scene cache
-        # the build remembers its preview in.  And theme before video:
-        # StopVideo publishes VideoStopped, which the render observer turns
-        # into a theme render — one wasted frame flashed ahead of this push.
-        paused = app.active_themes.pop(self.key, None)
-        app.dispatch(StopVideo(key=self.key, keep_override=True))
-        log.info("SendImage: %s taken over (theme paused: %s)", self.key,
-                 paused.name if paused is not None else "none active")
+        _take_over_panel(app, self.key)
 
         try:
             frame = app.display.build_image_frame(
@@ -757,9 +780,13 @@ class RenderAndSend(Command[RenderResult]):
 
         theme = app.active_themes.get(self.key)
         if theme is None:
+            # Held is not a failure: every render timer asks each tick, and
+            # ok=False logged a WARNING per tick while a push held the panel.
+            held = self.key in app.held
             return RenderResult(
-                ok=False, key=self.key, connected=True,
-                message="No active theme — dispatch LoadTheme first",
+                ok=held, key=self.key, connected=True,
+                message=("held by a pushed frame" if held
+                         else "No active theme — dispatch LoadTheme first"),
             )
 
         # Personalize raw readings here so the renderer receives the

@@ -323,9 +323,9 @@ def test_send_color_command_drives_real_app_dispatch(
     # FrameSent event published
     assert len(frame_sent_events) == 1
     assert frame_sent_events[0].key == "0402:3922"
-    # SendColor bypasses the scene cache (solid fill), so it carries no
-    # surface — the GUI falls back to a re-render for it.
-    assert frame_sent_events[0].surface is None
+    # SendColor holds the panel (#306), so there is no theme left to
+    # re-render for the preview: the event carries the colour's own surface.
+    assert frame_sent_events[0].surface is not None
 
 
 def test_sleep_device_blanks_lcd_with_black_frame(tmp_home: Path) -> None:

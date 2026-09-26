@@ -604,6 +604,9 @@ class DisplayService:
         # Surface is opaque RGB; alpha not needed for solid fill.
         surface = self._r.create_surface(
             target_w, target_h, color=(*color, 255))
+        # SendColor holds the panel like an image push, so the preview is this
+        # colour — without it /preview showed the dropped theme's last frame.
+        self._remember_preview(info.key, surface)
         surface = self._apply_post_processing(surface, s, resolved)
         surface = self._orient_for_wire(surface, s, resolved, info)
         return self._encode_for_wire(surface, resolved)

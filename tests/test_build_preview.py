@@ -7,6 +7,7 @@ bytes or a sampled grid depending on what the caller asked for.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -14,8 +15,26 @@ import pytest
 
 from trcc.adapters.render.qt import QtRenderer
 from trcc.app import App
-from trcc.core.commands import BuildPreview, ConnectDevice, LoadImage, SendImage
+from trcc.core.commands import (
+    AdvanceSlideshow,
+    BuildPreview,
+    ConfigureSlideshow,
+    ConnectDevice,
+    LoadImage,
+    RenderAndSend,
+    RestoreDeviceState,
+    SendColor,
+    SendFrame,
+    SendImage,
+    SetLedBrightness,
+    SetLedColors,
+    SetLedMode,
+    SetSlideshow,
+    SleepDevice,
+    TickDisplay,
+)
 from trcc.core.events import SensorsUpdated
+from trcc.core.led_models import LEDMode
 from trcc.core.models import Theme
 from trcc.services.display import DisplayService
 from trcc.services.media import Playback
@@ -307,3 +326,149 @@ def test_a_push_stops_a_video_and_keeps_the_saved_background(
     assert len(sent) == 1
     assert app.media.playback(_KEY) is None
     assert app.settings.for_device(_KEY).background_path == saved
+
+
+# ── Every one-shot push holds, and every implicit producer respects it ───
+#
+# Measured before: SendColor, SleepDevice, SendFrame and SetLedColors were all
+# painted over within one tick, and a SendImage push survived the sensor tick
+# but not a ``/tick`` poll or a slideshow rotation.
+
+def _colour_frame(app: App) -> bytes:
+    device = app.get(_KEY)
+    return app.display.build_solid_color_frame(
+        info=device.info, color=(0, 255, 0), profile=device.profile)
+
+
+@pytest.mark.parametrize("push", ["colour", "frame", "sleep"])
+def test_every_one_shot_push_survives_the_next_sensor_tick(
+    app: App, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, push: str,
+) -> None:
+    assert app.dispatch(LoadImage(key=_KEY, path=_png(tmp_path, "r.png", _RED))).ok
+    command = {"colour": SendColor(key=_KEY, r=0, g=0, b=255),
+               "frame": SendFrame(key=_KEY, data=_colour_frame(app)),
+               "sleep": SleepDevice(key=_KEY)}[push]
+    assert app.dispatch(command).ok
+    sent = _wire(app, monkeypatch)
+
+    app.events.publish(SensorsUpdated(readings={}))
+
+    assert sent == []
+    assert _KEY in app.held
+
+
+def test_a_tick_poller_does_not_reload_the_theme_over_a_push(
+    app: App, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``/tick`` self-primes with a restore on every request, so a push lasted
+    one poll — and while held, the render it then asked for answered 400."""
+    _push(app, tmp_path)
+    sent = _wire(app, monkeypatch)
+
+    restore = app.dispatch(RestoreDeviceState(key=_KEY))
+    tick = app.dispatch(TickDisplay(key=_KEY))
+
+    assert sent == []
+    assert _KEY not in app.active_themes
+    assert (restore.ok, restore.message) == (True, "Held by a pushed frame")
+    assert (tick.ok, tick.message) == (True, "held by a pushed frame")
+
+
+def test_a_restore_respects_the_hold_and_a_theme_load_releases_it(
+    app: App, tmp_path: Path,
+) -> None:
+    """One rule for every UI — no flag a caller picks: restore never
+    overrides a push; loading a theme does."""
+    _push(app, tmp_path)
+
+    restored = app.dispatch(RestoreDeviceState(key=_KEY))
+    held_after_restore = _KEY in app.held
+    assert app.dispatch(LoadImage(key=_KEY, path=_png(tmp_path, "g.png", (0, 255, 0)))).ok
+
+    assert (restored.ok, restored.message) == (True, "Held by a pushed frame")
+    assert held_after_restore
+    assert _KEY in app.active_themes
+    assert _KEY not in app.held
+
+
+def test_a_slideshow_does_not_rotate_over_a_push(
+    app: App, tmp_path: Path,
+) -> None:
+    _push(app, tmp_path)
+    assert app.dispatch(ConfigureSlideshow(
+        key=_KEY, themes=("a", "b"), interval_s=1.0)).ok
+    assert app.dispatch(SetSlideshow(key=_KEY, enabled=True)).ok
+
+    result = app.dispatch(AdvanceSlideshow(key=_KEY))
+
+    assert (result.due, result.theme_name) == (False, None)
+    assert result.message == "Held by a pushed frame"
+
+
+def test_a_held_panel_does_not_warn_on_every_render(
+    app: App, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Every render timer asks each tick; ok=False logged a WARNING per tick."""
+    _push(app, tmp_path)
+    caplog.set_level(logging.WARNING)
+
+    results = [app.dispatch(RenderAndSend(key=_KEY)) for _ in range(3)]
+
+    assert all(r.ok for r in results)
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+
+def test_the_preview_shows_a_pushed_colour(app: App, tmp_path: Path) -> None:
+    assert app.dispatch(LoadImage(key=_KEY, path=_png(tmp_path, "r.png", _RED))).ok
+    assert app.dispatch(SendColor(key=_KEY, r=0, g=0, b=255)).ok
+
+    r = app.dispatch(BuildPreview(key=_KEY, sample_cols=8))
+
+    assert {px for row in r.pixels for px in row} == {_BLUE}
+
+
+def test_detach_releases_the_hold(app: App, tmp_path: Path) -> None:
+    _push(app, tmp_path)
+
+    app.detach(_KEY)
+
+    assert _KEY not in app.held
+
+
+_LED = {"type": "led", "vid": "0416", "pid": "8001", "pm": 208}
+_LED_KEY = "0416:8001"
+
+
+@pytest.fixture
+def led_app(tmp_path: Path) -> App:
+    app = App(MockPlatform([_LED], tmp_path), renderer=QtRenderer())
+    app.attach(0x0416, 0x8001)
+    assert app.dispatch(ConnectDevice(key=_LED_KEY)).ok
+    assert app.dispatch(SetLedMode(key=_LED_KEY, mode=LEDMode.RAINBOW)).ok
+    return app
+
+
+def test_led_colours_hold_against_the_sensor_tick_and_the_animation(
+    led_app: App, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert led_app.dispatch(SetLedColors(
+        key=_LED_KEY, colors=[(0, 0, 255)] * 4)).ok
+    sent: list[Any] = []
+    real = led_app.send
+    monkeypatch.setattr(led_app, "send", lambda key, payload, **kw: (
+        sent.append(payload), real(key, payload, **kw))[1])
+
+    led_app.events.publish(SensorsUpdated(readings={}))
+    led_app.led_animation_loop.tick()
+
+    assert sent == []
+
+
+def test_an_led_settings_change_releases_the_hold(led_app: App) -> None:
+    assert led_app.dispatch(SetLedColors(
+        key=_LED_KEY, colors=[(0, 0, 255)] * 4)).ok
+
+    assert led_app.dispatch(SetLedBrightness(key=_LED_KEY, percent=50)).ok
+
+    assert _LED_KEY not in led_app.held
+    assert _LED_KEY in led_app.led_animation_loop.animating_keys()

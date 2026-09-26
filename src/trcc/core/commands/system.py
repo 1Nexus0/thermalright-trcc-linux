@@ -1029,6 +1029,14 @@ class AdvanceSlideshow(Command[SlideshowAdvanceResult]):
                 ok=True, key=self.key, due=False, running=False,
                 message="No slideshow configured",
             )
+        if self.key in app.held:
+            # Not due, so neither timer loads a theme over the push -- and the
+            # cursor stays put rather than skipping a slide it never showed.
+            log.debug("AdvanceSlideshow: %s held by a pushed frame", self.key)
+            return SlideshowAdvanceResult(
+                ok=True, key=self.key, due=False, running=True,
+                message="Held by a pushed frame",
+            )
         name = app.slideshow.advance(self.key, SlideshowConfig(
             enabled=True,
             interval_s=float(s.slideshow_interval_s),
